@@ -5,7 +5,8 @@
  * installs the session-bound CSRF token here after `/api/bootstrap`; plugin code only
  * ever sees `pluginApi(<id>)`.
  */
-import type { Snapshot } from "./types";
+import { idAbove, stream } from "./stream";
+import type { Event, Snapshot } from "./types";
 
 /** The standard JSON error envelope. */
 export type ApiErrorBody = {
@@ -105,8 +106,8 @@ function safeParse(text: string): unknown {
 export const api = {
   get: <T>(path: string, signal?: AbortSignal) =>
     request<T>(path, signal ? { signal } : {}),
-  snapshot: <T>(path: string, signal?: AbortSignal) =>
-    request<Snapshot<T>>(path, signal ? { signal } : {}),
+  snapshot: <T>(path: string, opts: { events?: string; signal?: AbortSignal } = {}) =>
+    bufferedSnapshot<T>(path, opts),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, body === undefined ? { method: "POST" } : { method: "POST", body }),
   put: <T>(path: string, body?: unknown) =>
@@ -114,18 +115,50 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
+/**
+ * A snapshot plus whatever the stream delivered while the request was in flight.
+ *
+ * `pending` holds only events strictly above `asOfEventId`, in stream order — exactly the
+ * deltas the snapshot does not already reflect. `useSnapshot` applies these for you; a
+ * direct caller applies them itself.
+ */
+export type BufferedSnapshot<T> = Snapshot<T> & { pending: Event[] };
+
 export type PluginApi = {
   get<T>(path: string, signal?: AbortSignal): Promise<T>;
   /**
    * Loads an initial state snapshot. `events` names the pattern whose stream messages are
    * buffered across the request, so nothing committed between the read and the install is
-   * lost. It never opens a second connection.
+   * lost. It rides the already-open shared stream; it never opens a second connection.
    */
-  snapshot<T>(path: string, opts?: { events?: string; signal?: AbortSignal }): Promise<Snapshot<T>>;
+  snapshot<T>(
+    path: string,
+    opts?: { events?: string; signal?: AbortSignal },
+  ): Promise<BufferedSnapshot<T>>;
   post<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
   del<T>(path: string): Promise<T>;
 };
+
+/**
+ * Runs a snapshot request with a pattern-filtered buffer open across it, then returns the
+ * snapshot together with the events it does not already reflect.
+ */
+async function bufferedSnapshot<T>(
+  path: string,
+  opts: RequestOptions & { events?: string },
+): Promise<BufferedSnapshot<T>> {
+  const buffer = opts.events ? stream.openBuffer(opts.events) : null;
+  try {
+    const snap = await request<Snapshot<T>>(path, opts);
+    const pending = buffer
+      ? buffer.drain().filter((e) => idAbove(e.id, snap.asOfEventId))
+      : [];
+    return { ...snap, pending };
+  } finally {
+    buffer?.close();
+  }
+}
 
 /**
  * A plugin-scoped client. It prefixes `/api/plugins/<id>`, sends same-origin credentials,
@@ -139,9 +172,7 @@ export function pluginApi(pluginId: string): PluginApi {
     get: <T,>(path: string, signal?: AbortSignal) =>
       request<T>(at(path), signal ? { pluginId, signal } : { pluginId }),
     snapshot: <T,>(path: string, opts: { events?: string; signal?: AbortSignal } = {}) =>
-      // The event-boundary buffering lands with the shared stream in milestone 2; the
-      // envelope and its asOfEventId are already the real contract.
-      request<Snapshot<T>>(at(path), opts.signal ? { pluginId, signal: opts.signal } : { pluginId }),
+      bufferedSnapshot<T>(at(path), { ...opts, pluginId }),
     post: <T,>(path: string, body?: unknown) =>
       request<T>(at(path), body === undefined
         ? { method: "POST", pluginId }

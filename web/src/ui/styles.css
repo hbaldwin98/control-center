@@ -393,3 +393,49 @@ kbd {
   margin: 0 0 18px;
   color: var(--text-muted);
 }
+
+/* ---- tables ---- */
+
+.cc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 10px 6px 0;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.cc-table td {
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.cc-table tr:last-child td {
+  border-bottom: none;
+}
+
+.cc-num {
+  text-align: right;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.cc-truncate {
+  display: inline-block;
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--text-muted);
+}

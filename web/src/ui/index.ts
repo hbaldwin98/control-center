@@ -1,5 +1,5 @@
 /**
- * `@cc/ui` — the shared design system and transport helpers.
+ * `@cc/ui` — the shared design system, transport, and live-data hooks.
  *
  * This is the ONLY module plugin UI may import, besides its own directory. It deliberately
  * imports nothing from `shell/` or `core/`, so the dependency arrow never reverses.
@@ -21,7 +21,21 @@ export {
   pluginApi,
   setCsrfToken,
 } from "./api";
-export type { ApiErrorBody, PluginApi } from "./api";
+export type { ApiErrorBody, BufferedSnapshot, PluginApi } from "./api";
+
+export { idAbove, stream } from "./stream";
+export type { StreamBuffer } from "./stream";
+
+export { isValidPattern, matchesPattern } from "./pattern";
+
+export { useEvents, useSnapshot, useStreamEpoch } from "./hooks";
+export type {
+  ApplyEvent,
+  SnapshotState,
+  UseEventsOptions,
+  UseSnapshotOptions,
+  UseSnapshotResult,
+} from "./hooks";
 
 export {
   Badge,

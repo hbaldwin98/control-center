@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/hbaldwin98/control-center/internal/config"
+	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/internal/core/web"
 )
@@ -57,6 +58,30 @@ func run() error {
 	defer store.Close()
 	slog.Info("storage ready", "db", store.Path())
 
+	blobs, err := storage.NewBlobStore(store, storage.BlobOptions{
+		Dir:            cfg.Data.BlobDir,
+		MaxObjectBytes: cfg.Blobs.MaxObjectBytes,
+		MaxScopeBytes:  cfg.Blobs.MaxScopeBytes,
+	})
+	if err != nil {
+		return err
+	}
+	// A crash can leave staged temp files and unreferenced objects. Collect them before
+	// serving, so a restart exposes either the old blob or the new one, never a partial.
+	if removed, err := blobs.Recover(ctx); err != nil {
+		return err
+	} else if removed > 0 {
+		slog.Info("blob recovery removed incomplete files", "count", removed)
+	}
+
+	bus, err := events.New(store, store, events.Options{})
+	if err != nil {
+		return err
+	}
+	bus.Start(ctx)
+	defer bus.Stop()
+	go bus.RunRetentionDaily(ctx)
+
 	if _, err := os.Stat(*staticDir); err != nil {
 		slog.Warn("no frontend build found; serving placeholder", "dir", *staticDir)
 		*staticDir = ""
@@ -65,6 +90,8 @@ func run() error {
 	srv, err := web.New(ctx, store, web.Deps{
 		DB:        store,
 		Config:    cfg,
+		Events:    bus,
+		Blobs:     blobs,
 		StaticDir: *staticDir,
 	})
 	if err != nil {

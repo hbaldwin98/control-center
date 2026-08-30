@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hbaldwin98/control-center/internal/config"
+	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
 
@@ -30,6 +31,16 @@ const maxAuthBody = 8 << 10
 type Deps struct {
 	DB     storage.DB
 	Config config.Config
+
+	// Events is the log the SSE stream tails and the Events screen reads.
+	Events *events.Log
+
+	// Blobs serves stored objects through an authenticated application route.
+	Blobs *storage.BlobStore
+
+	// Plugins reports the registered plugins the shell reconciles against. pluginhost
+	// supplies it at milestone 6.
+	Plugins func() []PluginDescriptor
 
 	// StaticDir holds the built frontend. When it is missing, the server serves a small
 	// built-in placeholder so the API is still usable.
@@ -93,6 +104,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/reauth", s.authenticated(s.handleReauth))
 
 	s.mux.HandleFunc("GET /api/bootstrap", s.authenticated(s.handleShellBootstrap))
+	s.mux.HandleFunc("GET /api/stream", s.authenticated(s.handleStream))
+
+	s.mux.HandleFunc("GET /api/events", s.authenticated(s.handleEventsQuery))
+	s.mux.HandleFunc("GET /api/events/subscribers", s.authenticated(s.handleSubscribers))
+	s.mux.HandleFunc("POST /api/events/subscribers/{name}/{action}", s.authenticated(s.handleSubscriberAction))
+
+	s.mux.HandleFunc("GET /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
+	s.mux.HandleFunc("HEAD /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
 
 	s.mux.HandleFunc("/", s.serveStatic)
 }
