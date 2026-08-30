@@ -1,0 +1,36 @@
+# Control Center configuration.
+#
+# Secrets never live here. API keys, OAuth credentials, and notification channel secrets
+# are credential entries, encrypted at rest with a key from the environment or the OS
+# keyring. Copy this file to config/config.yaml and edit.
+
+server:
+  # A loopback address may serve plain HTTP. Any other address requires TLS.
+  addr: "127.0.0.1:8080"
+
+  # PEM paths. Set both or neither.
+  tlsCert: ""
+  tlsKey: ""
+
+  # Extra acceptable Origin values for mutations, beyond the one implied by addr. Only
+  # needed when the server is reached under a name that differs from addr.
+  origins: []
+
+data:
+  dir: "data"
+  # Default to <dir>/control-center.db and <dir>/blobs.
+  db: ""
+  blobDir: ""
+  busyTimeout: 5s
+  readPool: 8
+
+session:
+  absolute: 12h
+  idle: 12h
+  # How long a password reauthentication stays valid for credential changes.
+  reauthWindow: 5m
+
+blobs:
+  # Limits must be finite.
+  maxObjectBytes: 67108864   # 64 MiB
+  maxScopeBytes: 2147483648  # 2 GiB
