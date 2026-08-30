@@ -2,11 +2,11 @@
 
 **Layer 4** · `internal/core/pluginhost` · imports all core modules · used by `web`, `cmd`
 
-**Responsibility.** Register plugins, run their lifecycle, and construct the scoped `Host`
-each one receives.
+**Responsibility.** Register plugins, own validated non-secret plugin config, reconcile
+persisted policy state, run lifecycle, and construct each scoped `Host`.
 
-It holds no policy of its own. Enabled state and budgets live in
-[`policy`](policy.md); this module calls it.
+Enabled state and budgets live in [`policy`](policy.md). Pluginhost serializes lifecycle
+changes and converges runtime resources to that persisted state.
 
 ---
 
@@ -17,9 +17,6 @@ package pluginhost
 
 type Registry interface {
     RegisterAll(ps ...host.Plugin) error
-
-    // Start migrates, initialises, mounts routes, schedules jobs, and
-    // attaches subscriptions for every registered plugin.
     Start(ctx context.Context) error
     Stop(ctx context.Context) error
 
@@ -34,30 +31,72 @@ type Descriptor struct {
     Manifest host.Manifest
     State    policy.State
     Jobs     []string
-    Routes   string  // mount path
+    Routes   []RouteDescriptor
     Health   Health
+}
+
+type RouteDescriptor struct {
+    Pattern string
+}
+
+type ConfigAdmin interface {
+    GetConfig(ctx context.Context, pluginID string) (json.RawMessage, error)
+    UpdateConfig(ctx context.Context, pluginID string, value json.RawMessage) error
 }
 ```
 
-`Enable` and `Disable` delegate to `policy.Admin` and then reconcile: mount or unmount
-routes, attach or detach subscriptions. The authoritative state is always `policy`'s.
+`Health` distinguishes policy's desired state from the reconciled runtime state and
+reports the last migration, init, route, scheduler, or subscription error. A partially
+reconciled plugin is degraded, not silently reported as enabled.
+
+---
+
+## Registration
+
+Registration is declarative and has no plugin side effects. It validates all plugins
+before migrating or initializing any of them:
+
+- plugin IDs match `[a-z][a-z0-9_]{0,62}`, are globally unique, and are not `core`
+- job names and plugin-local durable subscription names are valid and unique per plugin;
+  the host prefixes durable names with `plugin:<id>:` before registering them globally
+- event patterns are valid segment globs, for example `bidrl.**`, and durable
+  subscriptions have a name
+- declared HTTP method/path pairs are relative to the plugin mount, canonical, and unique
+- config schemas use the supported JSON Schema subset and validate their defaults
+- route, job, and subscription declarations do not collide
+
+Declarations must be readable before `Init`; handlers are not invoked during
+registration. Any collision or invalid declaration rejects `RegisterAll` as a whole.
+
+Exactly one core file imports plugin packages:
+
+```go
+func registerPlugins(r pluginhost.Registry) error {
+    return r.RegisterAll(hello.New(), bidrl.New())
+}
+```
 
 ---
 
 ## Constructing the facade
 
-This is the load-bearing part of the module. A plugin never receives an unscoped service,
-so it cannot forge an identity or bypass the gate.
-
 ```go
 func (r *registry) facadeFor(m host.Manifest) host.Host {
+    scopedEvents := events.Scoped(r.bus, m.ID)
+    scopedStore := storage.Prefixed(r.db, m.ID)
+    scopedBlobs := storage.Namespaced(r.blobs, m.ID)
+    gatedBlobStore := storage.WithMutationAdmission(scopedBlobs,
+        func(ctx context.Context, tx storage.Tx) error {
+            return r.policy.CheckWorkTx(ctx, tx, m.ID)
+        })
+
     return &scopedHost{
         pluginID: m.ID,
-        ai:       ai.Scoped(r.ai, m.ID),        // stamps plugin ID onto every ctx
+        ai:       ai.Scoped(r.ai, m.ID),
         jobs:     jobs.Scoped(r.jobs, m.ID),
-        events:   events.Scoped(r.bus, m.ID),   // forces Source = m.ID
-        store:    storage.Prefixed(r.db, m.ID), // restricted to "<id>_" tables
-        blobs:    storage.Namespaced(r.blobs, m.ID),
+        events:   gatedEvents{inner: scopedEvents, db: r.db, gate: r.policy, pluginID: m.ID},
+        store:    gatedStore{inner: scopedStore, gate: r.policy, pluginID: m.ID},
+        blobs:    gatedBlobStore,
         config:   r.config.For(m.ID),
         log:      r.log.With("plugin", m.ID),
         clock:    r.clock,
@@ -65,65 +104,112 @@ func (r *registry) facadeFor(m host.Manifest) host.Host {
 }
 ```
 
-Every scoped wrapper does the same two things: stamp the identity, and consult
-`policy.Gate` where relevant. That is the whole enforcement story.
-
-When a plugin later moves out of process, `scopedHost` becomes an RPC client holding a
-plugin token. The plugin's own code does not change.
-
----
-
-## Lifecycle
-
-```
-RegisterAll  →  Migrate  →  Init(host)  →  read declarations  ┬→ routes mounted
-                                                              ├→ jobs scheduled
-                                                              └→ subscriptions attached
-                                                                 → running
-
-Disable  →  policy.Disable  →  scheduler skips  →  running jobs cancelled
-         →  subscriptions detached  →  routes 503  →  AI gate rejects
-
-Enable   →  the reverse, minus any replay of missed cron ticks
-```
-
-`Migrate` runs before `Init`, on every start, idempotently.
+The L4 `gatedEvents` wrapper owns the database handle: standalone `Publish` opens one
+transaction, calls `CheckWorkTx`, and delegates to `PublishTx`; caller-supplied
+`PublishTx` performs the same check in that transaction. `gatedStore` similarly joins the
+check to SQL mutations. Storage's policy-agnostic `WithMutationAdmission` hook invokes
+the supplied callback inside blob `Put`/`Delete` metadata transactions and discards a
+staged file on rejection. This preserves the layer rule: L0 storage and L1 events do not
+import L2 policy. Scoped wrappers stamp identity; L4 wrappers/callbacks enforce
+admission. This is host-capability revocation, not a security sandbox. A plugin remains
+ordinary in-process Go code and can retain goroutines, finish work admitted before
+disable, or use direct networking.
 
 ---
 
-## The enforcement matrix
+## Startup and reconciliation
 
-What "disabled" means, boundary by boundary. Each row is enforced by the host, never by
-plugin code.
+On startup, pluginhost registers declarations, creates missing policy rows without
+overwriting persisted enabled state or budgets, runs every plugin's idempotent migrations,
+reconciles config, loads persisted policy state, and reconciles each plugin:
+
+```
+enabled  → Init(host) → mount plugin routes → schedule jobs → invoke subscriptions
+disabled → no Init    → mount host 503       → no schedules  → discard/ack durable events
+```
+
+Disabled plugins still migrate so their stored data remains readable and future enable
+does not put schema work on the request path. They do not receive `Init` or any new
+execution entrypoint. The route is owned by the host and always returns `503` without
+calling plugin code, using the standard envelope with `code: "plugin_disabled"`.
+
+Durable subscriptions for a disabled plugin remain attached in discard/ack mode: the
+host advances their cursors without invoking handlers. This intentionally chooses "off
+means ignore incoming work" over replaying a potentially large or costly backlog on
+enable. Live subscriptions are detached because they have no cursor to preserve.
+
+Startup continues when one plugin cannot reconcile. That plugin remains behind the host
+503/discard boundary and reports degraded health; unrelated plugins can start. Migration
+failure is also degraded and prevents that plugin's `Init`.
+
+Config reconciliation validates manifest defaults first. A missing row is inserted from
+those defaults. An existing row is validated against the current manifest schema before
+`Init`; pluginhost never resets or coerces it silently. Invalid persisted config leaves
+the plugin behind the host 503/discard boundary with degraded health even if policy's
+desired state is enabled. The administrator can submit a valid replacement through
+`ConfigAdmin`, after which normal reconciliation resumes.
+
+---
+
+## Enable and disable
+
+Lifecycle reconciliation is serialized per plugin, idempotent, and restart-safe. Policy
+state is the durable desired state; each step records runtime health and can be retried.
+`Enable` and `Disable` return an error if convergence is incomplete, but they do not roll
+back persisted policy state. Startup and the background reconciler resume unfinished
+work.
+
+Disable persists policy revocation first. Admission checks then reject new jobs, AI
+dispatches, subscription handlers, plugin HTTP requests, plugin event publication, and
+plugin storage/blob mutations. Reconciliation cancels
+admitted job, AI, subscription, and request contexts; replaces the route with the host
+503; changes durable subscriptions to discard/ack; detaches live subscriptions; and
+removes cron schedules. It then calls `Shutdown` with a bounded context for a plugin that
+was initialized. A timeout leaves health degraded; Go cannot force the plugin's
+goroutines to exit. Repeating any step has the same result.
+
+Config watches belong to one enabled runtime generation. Disable cancels their callback
+contexts and detaches them before `Shutdown`; updates while disabled are persisted but do
+not invoke plugin code. The next successful `Init` reads the latest snapshot and may
+register new watches.
+
+Enable runs `Init` once for that enabled runtime generation, swaps in validated routes,
+activates job schedules without cron catch-up, and replaces discard/ack subscriptions
+with handlers at their current cursors. A crash between steps is safe because the next
+reconciliation derives work from persisted policy state and current runtime state.
+
+---
+
+## Enforcement matrix
 
 | Boundary | Behaviour when disabled | Enforced in |
 |---|---|---|
-| Cron scheduler | Tick skipped. Not queued, not backlogged. | `jobs` |
-| `Jobs().Enqueue` | Rejected, `ErrPluginDisabled`. | `jobs` |
-| Running jobs | Context cancelled; recorded `cancelled`, reason `plugin_disabled`. | `jobs` |
-| `AI().Chat` / `ChatStream` / `Embed` | Rejected before any provider call. | `ai` |
-| Event subscriptions | Handlers not invoked. Durable cursors still advance, so re-enabling does not replay a backlog. | `pluginhost` |
-| HTTP routes | `503`, body naming the plugin. | `pluginhost` |
-| `Store()` / `Blobs()` | Still readable. Disabling stops activity, it does not hide data. | — |
+| Cron scheduler | Tick skipped; no queue or later catch-up. | `jobs` |
+| `Jobs().Enqueue` and worker claim | Rejected; claim rechecks policy. | `jobs` |
+| Admitted jobs | Context cancelled; cooperative handler is fenced and recorded cancelled. | `jobs` |
+| New `AI().Chat`, `ChatStream`, `Embed` | Rejected before reservation or provider dispatch. | `ai` |
+| Admitted AI calls | Context cancelled; paid provider work may finish and is accounted. | `ai` |
+| New subscription deliveries | Handler not invoked; durable cursor advances in discard/ack mode. | `pluginhost` |
+| Admitted subscription handlers | Context cancelled; handler may continue cooperatively. | `pluginhost` |
+| New HTTP requests | Host-owned `503`; plugin handler not invoked. | `pluginhost` |
+| Admitted HTTP requests | Request context cancelled; handler may continue cooperatively. | `pluginhost` |
+| `Events().Publish` | New publication rejected; an admitted transaction may commit. | `events`, `pluginhost` |
+| `Store()` / `Blobs()` mutations | New mutation rejected; an admitted transaction may commit. | `storage`, `pluginhost` |
+| `Store()` / `Blobs()` reads | Host UI may read retained data. | `storage`, `web` |
+| `Config()` / `Log()` / `Clock()` | Reads and diagnostic logging remain available. | `pluginhost` |
 
-The `hello` plugin's acceptance test exercises every row.
+The host does not claim to kill arbitrary goroutines, block direct networking, or prevent
+all writes through handles already held by plugin code. Strong isolation would require a
+separate process and an RPC capability boundary.
 
 ---
 
-## Registration
+## Tables
 
-Exactly one file in the core app imports plugin packages:
-
-```go
-// cmd/controlcenter/plugins.go
-package main
-
-func registerPlugins(r pluginhost.Registry) error {
-    return r.RegisterAll(
-        hello.New(),
-        bidrl.New(),
-    )
-}
+```
+core_plugin_config(plugin_id, value_json, version, updated_at, updated_by)
 ```
 
-Everything else about the plugin contract is in [`docs/plugin-api.md`](../plugin-api.md).
+`ConfigAdmin.UpdateConfig` derives the actor from authenticated context, validates the
+manifest schema, commits the document, then notifies only the plugin's active enabled
+runtime generation. It never accepts secret-valued schema fields.

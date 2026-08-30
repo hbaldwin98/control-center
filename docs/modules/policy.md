@@ -2,47 +2,45 @@
 
 **Layer 2** · `internal/core/policy` · imports `storage`, `events` · used by `ai`, `jobs`, `pluginhost`
 
-**Responsibility.** Own plugin enabled state, budgets, and spend counters, and answer the
-single question *may this plugin act right now?*
-
----
-
-## Why this is its own module
-
-`ai` and `jobs` both need to ask permission. `pluginhost` needs to grant and revoke it.
-If the answer lived in `pluginhost`, the graph would cycle: `pluginhost → ai → pluginhost`.
-
-Extracting it to L2 removes the cycle and puts every enforcement decision in one file that
-can be read end to end. It is also the only place that needs testing to trust the kill
-switch.
+**Responsibility.** Own plugin enabled state, budgets, and atomic spend reservations, and
+answer whether a plugin may start work or a paid call.
 
 ---
 
 ## Interface
 
-Two faces: a hot path for capability modules, and an admin path for `pluginhost` and the UI.
-
 ```go
 package policy
 
-// Gate is the hot path. Called on every unit of work and every paid call.
+// All money is integer micro-USD. Negative values are invalid at every boundary.
+type MicroUSD int64
+
 type Gate interface {
-    // CheckWork asks whether the plugin may start or continue work.
     CheckWork(ctx context.Context, pluginID string) error
+    CheckWorkTx(ctx context.Context, tx storage.Tx, pluginID string) error
 
-    // CheckSpend asks whether the plugin may make a paid call.
-    // Checked before the provider request, not after.
-    CheckSpend(ctx context.Context, pluginID string, estimateUSD float64) error
+    // ReserveSpendTx admits one paid call inside the transaction that creates its
+    // pending call record.
+    ReserveSpendTx(ctx context.Context, tx storage.Tx, pluginID string, maximum MicroUSD) (Reservation, error)
 
-    // Spend records actual cost and applies OnExceed if a window is now over.
-    Spend(ctx context.Context, pluginID string, usd float64) error
+    // SettleSpendTx replaces the reservation with actual committed cost inside the
+    // caller's transaction. actual must be non-negative.
+    SettleSpendTx(ctx context.Context, tx storage.Tx, reservationID string, actual MicroUSD) error
 
-    // Watch fires when a plugin's enabled state changes, so jobs can cancel
-    // running work without polling.
+    // ReleaseSpendTx removes a reservation when the caller knows no charge occurred.
+    ReleaseSpendTx(ctx context.Context, tx storage.Tx, reservationID string) error
+
+    // Watch runs after an enabled-state commit. It is a cancellation signal, not a join.
     Watch(fn func(pluginID string, enabled bool)) func()
 }
 
-// Admin is the control path.
+type Reservation struct {
+    ID        string
+    PluginID  string
+    Maximum   MicroUSD
+    AdmittedAt time.Time
+}
+
 type Admin interface {
     Register(ctx context.Context, pluginID string, automated bool) error
     Enable(ctx context.Context, pluginID, actor, reason string) error
@@ -60,60 +58,107 @@ var (
 
 ```go
 type State struct {
-    PluginID      string
-    Enabled       bool
-    Automated     bool
-    DisabledAt    *time.Time
-    DisabledBy    string
+    PluginID       string
+    Enabled        bool
+    Automated      bool
+    DisabledAt     *time.Time
+    DisabledBy     string
     DisabledReason string
-    Budget        Budget
-    SpentThisHour float64
-    SpentToday    float64
-    SpentThisMonth float64
+    Budget         Budget
+    ReservedHour   MicroUSD
+    CommittedHour  MicroUSD
+    ReservedDay    MicroUSD
+    CommittedDay   MicroUSD
+    ReservedMonth  MicroUSD
+    CommittedMonth MicroUSD
 }
 
 type Budget struct {
-    HourlyUSD  float64 // 0 = unlimited
-    DailyUSD   float64
-    MonthlyUSD float64
-    OnExceed   ExceedAction
+    Hourly  MicroUSD // 0 = unlimited
+    Daily   MicroUSD // 0 = unlimited
+    Monthly MicroUSD // 0 = unlimited
+    OnExceed ExceedAction
 }
 
 type ExceedAction string
 const (
-    // ExceedReject fails the AI call; the plugin keeps running and can
-    // degrade gracefully. Default.
-    ExceedReject ExceedAction = "reject"
-
-    // ExceedDisable disables the plugin outright, as if the switch were flipped.
+    ExceedReject  ExceedAction = "reject"
     ExceedDisable ExceedAction = "disable"
 )
 ```
 
 ---
 
-## Rules
+## Reservation Contract
 
-- **A plugin with `Automated: true` cannot be enabled without a non-zero daily budget.**
-  `Enable` returns an error. This is the guardrail against a buggy scheduled job running
-  all night.
-- **Disable is synchronous from the caller's view.** `Disable` returns once state is
-  written and watchers have been notified. Cancellation of in-flight work happens in
-  `jobs`, driven by `Watch`.
-- **Disabling stops activity; it does not hide data.** Plugin tables and blobs stay
-  readable.
+The AI module computes a conservative maximum from the resolved provider, prices, input,
+and output limits before making a provider request. The caller opens one SQLite write
+transaction, inserts the pending call row, and invokes `ReserveSpendTx` to check enabled
+state and every configured window and persist the reservation. Admission succeeds only
+when this invariant remains true for each finite limit:
+
+```
+reserved + committed <= limit
+```
+
+Reservations pin the UTC hour, UTC day, and UTC calendar month containing admission.
+Settlement deletes the reservation and increments committed cost in those same periods;
+release deletes it without changing committed cost. A zero limit is unlimited and a
+negative budget, maximum, or actual cost is rejected. Lowering a finite budget below
+current reserved plus committed spend is also rejected.
+
+Provider adapters must ensure that `actual` cannot exceed the reserved maximum. If that
+invariant is nevertheless violated, settlement records the truthful actual charge,
+atomically disables the plugin, emits `core.plugin.accounting_invariant_failed` and the
+disabled event, and reports the AI route unhealthy. It emits `budget_exceeded` as well
+only for each finite window the truthful charge actually crossed. Accounting must never
+be rolled back merely because the cap was crossed.
+Known uncharged failures release immediately. After restart, reservations for calls whose
+outcome is unknowable are settled permanently at their reserved maximum rather than
+silently undercounted.
+
+The AI module performs these writes in one `storage.DB.Tx` callback:
+
+1. Finalize `core_ai_calls` and all associated `core_ai_attempts` rows with integer
+   micro-USD costs.
+2. Call `SettleSpendTx` for the reservation and actual cost.
+3. Call `events.PublishTx` for `core.ai.usage`.
+
+Any error rolls back all three writes. This transaction-aware method is the only normal
+settlement path.
 
 ---
 
-## Events emitted
+## Enabled State
 
-| Event | When |
-|---|---|
-| `core.plugin.enabled` | after `Enable` succeeds |
-| `core.plugin.disabled` | after `Disable` succeeds, or on `ExceedDisable` |
-| `core.plugin.budget_exceeded` | a window limit is crossed |
+- `Register` validates the plugin ID and creates an unknown plugin disabled with reason
+  `awaiting_configuration`; existing enabled state and budgets are never overwritten.
+  Re-registration is idempotent. Changing `Automated` from false to true disables the
+  plugin unless it already has a finite nonzero daily budget.
+- An automated plugin cannot be enabled with an unlimited (`0`) daily budget. This keeps
+  unattended work under a finite daily cap.
+- `SetBudget` rejects an unlimited daily budget for an enabled automated plugin. The user
+  must disable it first; changing a budget never silently bypasses the invariant.
+- `Enable`, `Disable`, and an `ExceedDisable` transition write state and their required
+  events in one transaction. Watchers run only after commit.
+- Repeating an already-satisfied enable or disable is a no-op and does not emit a duplicate
+  transition event.
+- `Disable` closes new work and spend admission before it returns, then cancels registered
+  contexts through `Watch`. It does not wait for arbitrary plugin code.
+- A paid call whose reservation committed before disable is already in flight. It may
+  finish and settle its charge. A competing reservation that commits after disable is
+  rejected by the serialized state check.
+- Disabling stops activity; it does not hide plugin tables or blobs.
 
-`core.plugin.budget_exceeded` has a default notification rule.
+Unknown plugin IDs are denied by every gate. When a reservation would exceed a window,
+policy records
+`core.plugin.budget_exceeded` once for that plugin, window, and period. `ExceedReject`
+rejects the call. `ExceedDisable` also disables the plugin in the same transaction and
+emits `core.plugin.disabled`. Policy commits that decision and its events before
+`ReserveSpendTx` returns `ErrBudgetExceeded`; it does not roll back the event transaction by
+returning the domain error from the transaction callback. `ReserveSpendTx` therefore
+distinguishes technical failure from domain rejection: the caller commits a generated
+budget/disable event, then returns `ErrBudgetExceeded` after the outer transaction.
 
 ---
 
@@ -121,18 +166,13 @@ const (
 
 ```
 core_plugin_state(plugin_id, enabled, automated, disabled_at, disabled_by, disabled_reason)
-core_plugin_budget(plugin_id, hourly_usd, daily_usd, monthly_usd, on_exceed)
-core_plugin_spend(plugin_id, window, period_start, cost_usd)
+core_plugin_budget(plugin_id, hourly_microusd, daily_microusd, monthly_microusd, on_exceed)
+core_plugin_spend(plugin_id, window, period_start, committed_microusd)
+core_plugin_spend_reservations(id, plugin_id, maximum_microusd, admitted_at,
+                               hour_start, day_start, month_start)
+core_plugin_budget_events(plugin_id, window, period_start, event_id)
 ```
 
-`core_plugin_spend` is a rollup. It is reconstructible from `core_ai_usage`, and is kept
-separate so the hot path is one indexed read rather than an aggregate.
-
----
-
-## Notes
-
-- `CheckSpend` takes an estimate rather than an exact cost because the cost is not known
-  until the response arrives. The estimate need only be right enough to stop a runaway;
-  `Spend` reconciles with the real figure.
-- Windows are wall-clock in local time: hour, day, and calendar month.
+The unique budget-event row prevents repeated rejected calls from flooding alerts. Spend
+rollups and reservations are authoritative policy state; `core_ai_calls` and
+`core_ai_attempts` remain the call-level audit record.

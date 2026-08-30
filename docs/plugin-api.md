@@ -16,12 +16,23 @@ plugins/bidrl/
   plugin.go         manifest + wiring
   migrations.go
   jobs.go
-  ui/               React components, mounted by the shell
+
+web/src/plugins/bidrl/
+  index.tsx         canonical frontend module: nav, routes, icons, components
 ```
 
-Your `go.mod` depends on `github.com/hbaldwin98/control-center/host`. Core internals live
-under `internal/`, so importing them is a build error rather than a review comment. That
-is deliberate: it keeps the option of running plugins out of process open.
+Your `go.mod` depends on `github.com/hbaldwin98/control-center/host`. CI runs an
+architectural dependency test over each plugin's complete `go list -deps` output and
+rejects imports from `internal/core`, another plugin, or the application module outside
+`host`; `go.work` and Go's `internal` rule are not sufficient by themselves. This keeps
+out-of-process plugins as a compatible direction, but that move will require protocols,
+adapters, supervision, and capability proxies; it is not just a transport or build swap.
+
+The public module contains `host` plus `host/ai`, `host/events`, `host/jobs`,
+`host/policy`, and `host/storage`. Those packages contain only the interfaces, DTOs,
+options, and sentinel errors shown here; they do not import `internal/core`. Core modules
+adapt their internal implementations to these public contracts. Plugin code never imports
+an `internal/` package.
 
 ---
 
@@ -33,18 +44,23 @@ package host
 type Plugin interface {
     Manifest() Manifest
 
+    // Declarations are pure and are read during registration, before Migrate or Init.
+    Jobs() []jobs.Def
+    Subscriptions() []Subscription
+    Routes() []Route
+
     // Migrate runs before Init, on every start, idempotently.
     Migrate(m Migrator) error
 
     // Init receives a Host already scoped to this plugin.
     Init(ctx context.Context, h Host) error
 
-    // Declarations, read once after Init returns.
-    Jobs() []jobs.Def
-    Subscriptions() []Subscription
-    Routes() http.Handler   // mounted at /api/plugins/<id>/
-
     Shutdown(ctx context.Context) error
+}
+
+type Route struct {
+    Pattern string       // Go 1.22 relative pattern, for example "POST /scans"
+    Handler http.Handler
 }
 ```
 
@@ -52,40 +68,66 @@ type Plugin interface {
 
 ```go
 type Manifest struct {
-    ID          string   // stable, lowercase; also the table and blob prefix
+    ID          string   // stable `[a-z][a-z0-9_]{0,62}`; `core` is reserved
     Name        string
     Version     string
     Description string
 
-    // Automated marks plugins that act without the user initiating —
-    // cron jobs, or event handlers that spend money. The UI surfaces the
-    // kill switch prominently for these, and the plugin cannot be enabled
-    // until a daily budget is set.
+    // Automated is true only when work can start without an explicit user action,
+    // such as cron or an event handler. Such plugins require a daily budget.
     Automated bool
 
-    UI UIManifest
+    Config ConfigSpec
 }
 
-type UIManifest struct {
-    Entry string      // frontend module path, e.g. "plugins/bidrl"
-    Icon  string
-    Nav   []NavItem
+type ConfigSpec struct {
+    Schema   json.RawMessage // supported JSON Schema 2020-12 subset
+    Defaults json.RawMessage
 }
 ```
 
 Set `Automated: true` honestly. It is the flag that forces you to give the plugin a budget
 before it can run unattended, which is the guardrail against a bug spending all night.
+The manifest owns identity and runtime metadata only. The `PluginModule` at
+`web/src/plugins/<id>` owns routes, navigation, and icons. At build/startup the shell
+checks frontend IDs against backend descriptors and rejects missing IDs, duplicates, and
+route or navigation collisions.
+
+Declarations must not depend on `Init`; the host needs them to validate registration and
+advance disabled plugins' durable cursors without executing plugin code. Route patterns
+are mounted below `/api/plugins/<id>/`, may not escape that prefix, and are validated for
+method/path collisions before any plugin migrates. Handlers receive the plugin-relative
+path beginning with `/`; authentication, admission, panic recovery, request-size limits,
+common security headers, and mutation CSRF checks run before the handler.
 
 ### Subscriptions
 
 ```go
 type Subscription struct {
-    Pattern string          // "bidrl.*", "core.job.dead", "**"
-    Durable bool            // cursor-tracked, replayed on restart
-    Name    string          // required when Durable
-    Handler events.Handler
+    Pattern string          // "bidrl.**", "core.job.dead", "**.failed"
+    Handler events.Handler  // live, lossy delivery
+    Durable *DurableSubscription
+}
+
+type DurableSubscription struct {
+    Name    string           // stable and unique within this plugin
+    Handler events.TxHandler // receives the transaction that advances the cursor
 }
 ```
+
+Set `Handler` for live delivery or `Durable` for durable delivery, never both.
+
+Event types and patterns are dot-separated segments. `*` matches exactly one segment;
+`**` matches zero or more. Therefore `bidrl.*` matches `bidrl.alert` but not
+`bidrl.lot.analyzed`; use `bidrl.**` for every BIDRL event and `**.failed` for any event
+whose last segment is `failed`. Durable subscriptions invoke one handler at a time in
+event-ID order and provide at-least-once delivery. Handler writes and the cursor commit in
+the supplied transaction; retries can still repeat external side effects, so handlers
+must be idempotent. A disabled plugin receives no handler calls; its durable cursor is
+advanced in discard/ack mode to prevent a backlog on re-enable.
+Plugin durable names are registered globally as `plugin:<id>:<name>`. A new declaration
+starts `FromNow` and uses the standard retry policy; an existing name always resumes its
+persisted cursor. V1 does not expose cursor resets or custom retry policy to plugin code.
 
 ---
 
@@ -97,7 +139,7 @@ This is the entire surface available to you.
 type Host interface {
     PluginID() string
 
-    AI() ai.AI               // the only way to spend money
+    AI() ai.AI               // the only host-managed paid provider path
     Jobs() jobs.Jobs         // enqueue, cancel, inspect
     Events() Events          // publish; Source is forced to your plugin ID
     Store() storage.DB       // SQL, restricted to your table prefix
@@ -108,11 +150,32 @@ type Host interface {
 }
 ```
 
+`ConfigSpec.Schema` uses a closed JSON Schema 2020-12 subset: objects, arrays, strings,
+numbers, integers, booleans, `enum`, bounds, patterns, required properties, descriptions,
+and defaults. Remote references, custom code, and secret-valued fields are forbidden.
+The host validates defaults and every update, stores one JSON document per plugin, and
+renders the supported controls in Settings. Secrets are credential references, never
+config values.
+
+```go
+type Config interface {
+    Decode(dst any) error
+    Watch(fn func(context.Context, json.RawMessage)) func()
+}
+```
+
+Plugins read their current snapshot and may watch later updates; only the authenticated
+web administration API writes config. Updates are atomic. A callback failure is logged
+but does not roll back a committed value, and callbacks never run under the config lock.
+Watch callbacks and their contexts belong to the current enabled runtime generation;
+disable cancels and detaches them. Updates while disabled are visible to the next `Init`
+but invoke no plugin code.
+
 ### What is deliberately missing
 
 | Missing | Why | Do this instead |
 |---|---|---|
-| Credentials, API keys, provider names | You must never hold a provider token; the spend gate lives inside `AI()`. | Ask for a logical model: `"cheap-vision"`. |
+| Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
 | Anything belonging to another plugin | Plugins compose through events, not imports. | Subscribe to their events. |
@@ -122,13 +185,29 @@ restricted. If your plugin needs Playwright, it owns that dependency. One consum
 enough information to design a shared API against; when a second plugin wants a browser,
 it becomes a capability.
 
+The plugin switch is a **host-capability kill switch**. Once disabled, the host rejects
+new managed jobs, AI dispatches, event-handler invocations, and requests to the plugin's
+HTTP routes, plus new event publications and storage/blob mutations through the facade.
+Reads and diagnostic logging remain available. The host cancels contexts it already
+admitted, but an admitted transaction may commit. In-process trusted code can ignore
+cancellation or use direct networking. Hard termination and network containment require
+out-of-process isolation.
+
+The host authenticates every request under `/api/plugins/<id>/`, checks plugin admission,
+and enforces `Origin` plus synchronizer-token CSRF checks before invoking a mutating route.
+Handlers return domain data or the common JSON error envelope
+`{"error":{"code":"...","message":"..."}}`; the frontend `@cc/ui` client handles
+the prefix, credentials, CSRF header, envelope, and disabled-plugin `503` response.
+The host-owned disabled response uses HTTP `503` and code `plugin_disabled`; clients
+classify the code rather than treating every `503` as a disabled plugin.
+
 ---
 
 ## 4. Using AI
 
 ```go
 resp, err := h.AI().Chat(ctx, ai.ChatRequest{
-    Model:  "cheap-vision",          // logical name; you never learn the provider
+    Model:  "cheap-vision",          // logical name; you do not select the provider
     Schema: lotAnalysisSchema,       // structured output
     Messages: []ai.Message{{
         Role: ai.RoleUser,
@@ -138,7 +217,43 @@ resp, err := h.AI().Chat(ctx, ai.ChatRequest{
             {Blob: label,  MIME: "image/jpeg", Resolution: ai.ResolutionHigh},
         },
     }},
+    Grounding: &ai.GroundingOptions{
+        MaxQueries:     4,
+        Freshness:      30 * 24 * time.Hour,
+        AllowedDomains: []string{"example-market.test"},
+    },
 })
+```
+
+Grounded responses carry inspectable evidence rather than a boolean assertion:
+
+```go
+type GroundingOptions struct {
+    MaxQueries     int           // required and bounded by the logical route
+    Freshness      time.Duration // zero means no freshness constraint
+    AllowedDomains []string      // empty means unrestricted
+}
+
+type Citation struct {
+    Start, End int // byte offsets in Text
+    Source     int // index into Sources
+}
+
+type Source struct {
+    URL         string
+    Title       string
+    PublishedAt *time.Time
+}
+
+type ChatResponse struct {
+    Text      string
+    Parsed    json.RawMessage
+    ToolCalls []ToolCall
+    Citations []Citation
+    Sources   []Source
+    Usage     Usage
+    Finish    FinishReason
+}
 ```
 
 Points that matter in practice:
@@ -148,6 +263,11 @@ Points that matter in practice:
   photo with the unreadable label.
 - **Cost is recorded for you.** Never track your own spend; the host attributes every call
   to your plugin and, when inside a job, to that job.
+- **Admission reserves budget before dispatch.** The host computes a conservative maximum
+  from the request and pricing table, then atomically persists a reservation in integer
+  micro-USD. Concurrent calls cannot reserve the same remaining capacity. Completion
+  settles actual cost and releases the remainder; a pre-dispatch failure releases all of
+  it. A paid call admitted before disable may finish and is still recorded and settled.
 - **Two errors you must handle:** `policy.ErrPluginDisabled` and `policy.ErrBudgetExceeded`.
   Both mean stop cleanly, not retry.
 
@@ -160,6 +280,7 @@ func (p *Plugin) Jobs() []jobs.Def {
     return []jobs.Def{{
         Name:        "scan",
         Schedule:    "0 3 * * *",      // empty means enqueue-only
+        TimeZone:    "UTC",            // required when Schedule is set
         Timeout:     2 * time.Hour,
         MaxAttempts: 2,
         Concurrency: 1,
@@ -177,8 +298,12 @@ func (p *Plugin) scan(jc jobs.Context) error {
         if err := jc.Err(); err != nil {
             return err              // cancelled: stop promptly
         }
-        jc.Progress(float64(i)/float64(len(lots)), lot.Title)
-        jc.Logf("analyzing lot %s", lot.ID)
+        if err := jc.Progress(float64(i)/float64(len(lots)), lot.Title); err != nil {
+            return err
+        }
+        if err := jc.Logf("analyzing lot %s", lot.ID); err != nil {
+            return err
+        }
         ...
     }
     return nil
@@ -186,9 +311,10 @@ func (p *Plugin) scan(jc jobs.Context) error {
 ```
 
 **`jobs.Context` is a `context.Context`.** It is cancelled on stop, on timeout, and when
-your plugin is disabled. Check it in loops. A handler that ignores cancellation is killed
-at its timeout — and cannot spend anything meanwhile, because `AI()` checks the gate
-independently.
+your plugin is disabled. Check it in loops and pass it to every host call. Go cannot kill
+a handler or child goroutine that ignores cancellation. The host still rejects new
+capability admissions after disable, but an AI call admitted before disable may finish
+and will remain in usage accounting.
 
 Use `WithIdempotencyKey` when enqueuing something that must not double-run:
 
@@ -209,6 +335,31 @@ h.Events().Publish(ctx, "deal_found", lot.ID, DealFound{
 // becomes: bidrl.deal_found
 ```
 
+The complete event-facing API is:
+
+```go
+type Events interface {
+    Publish(ctx context.Context, eventType, subject string, payload any) error
+    PublishTx(ctx context.Context, tx storage.Tx, eventType, subject string, payload any) error
+}
+```
+
+`Publish` inserts the event durably before returning and dispatches only after commit. If
+plugin state and its event must be atomic, insert through the transaction-aware overload:
+
+```go
+err := h.Store().Tx(ctx, func(tx storage.Tx) error {
+    if _, err := tx.Exec(ctx, `UPDATE bidrl_lots SET watched = 1 WHERE id = ?`, lot.ID); err != nil {
+        return err
+    }
+    return h.Events().PublishTx(ctx, tx, "lot.watched", lot.ID, LotWatched{LotID: lot.ID})
+})
+```
+
+`PublishTx` writes to the event table/outbox in the same transaction. Rollback removes
+both changes; commit makes both visible. Never update state and publish in separate
+transactions when consumers depend on them being consistent.
+
 **To notify the user, publish an event — do not look for a notify API.** The user writes a
 rule against your event type. For the case where you genuinely want to reach them without
 any configuration, publish `<plugin>.alert`, which has a default rule:
@@ -220,8 +371,9 @@ h.Events().Publish(ctx, "alert", auctionID, Alert{
 })
 ```
 
-Naming convention is **`<noun>.<past-tense-verb>`** — `lot.analyzed`, `deal_found`,
-`scan.completed`. Consistency is what makes rules writable later.
+Each lowercase ASCII segment must match `[a-z][a-z0-9_]*`; the host prefixes the plugin
+ID. Use stable descriptive hierarchy such as `lot.analyzed` or `scan.completed`, or a
+single segment such as `deal_found`. There is no required noun/verb shape.
 
 ---
 
@@ -242,8 +394,11 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 }
 ```
 
-Every table must start with your plugin ID and an underscore. Migrations that create
-tables outside your prefix are rejected. Blob keys are namespaced the same way.
+Every table must start with your plugin ID and an underscore. SQLite-authorizer checks
+apply to migration and runtime SQL and reject reads or writes outside that prefix,
+cross-namespace triggers/views, attached databases, temporary objects, and unsafe
+pragmas. Blob keys are namespaced the same way. This is a mistake guardrail for trusted
+code, not a sandbox.
 
 ---
 
@@ -263,6 +418,8 @@ It exercises every host capability and nothing else:
 | Subscriptions | a durable subscription to its own event |
 | Store | one table recording ticks |
 | Blobs | writes and reads one small blob |
+| Config | reads one declared setting and observes an update |
+| Log / Clock | writes an attributed log and uses the injected time source |
 | UI | one page listing its history |
 
 ### Acceptance test
@@ -271,10 +428,15 @@ Disabling `hello` while its job is mid-flight must:
 
 1. cancel the running job, recorded as `cancelled` / `plugin_disabled`
 2. skip the next cron tick, with no backlog on re-enable
-3. reject a straggler `AI().Chat` with `ErrPluginDisabled`, with no provider call made
-4. produce no further `core_ai_usage` rows
+3. reject an `AI().Chat` first attempted after disable with `ErrPluginDisabled`, with no
+   provider call or usage row
+4. allow an AI call admitted before disable to finish, while recording its usage and
+   settling its reservation
 5. return `503` from `/api/plugins/hello/*`
 6. leave `hello_ticks` readable
+7. reject new event publications, SQL/blob mutations, and subscription handler entry;
+   leave reads and diagnostic logging available
+8. cancel the handler context without claiming to terminate a goroutine that ignores it
 
 Every row of the enforcement matrix, tested by something that is not your real plugin.
 

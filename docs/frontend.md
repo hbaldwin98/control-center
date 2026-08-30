@@ -20,7 +20,8 @@ web/src/
 ```
 
 This mirrors the backend deliberately: one registration file, plugins isolated behind a
-declared entry point.
+declared entry point. `web/src/plugins/<id>` is the canonical source of plugin UI metadata
+and code; backend manifests contain no routes, navigation, icons, or frontend entry paths.
 
 ---
 
@@ -53,32 +54,105 @@ import hello from "./plugins/hello";
 export const plugins = [hello, bidrl];
 ```
 
+The build rejects duplicate frontend IDs and route or navigation collisions. Plugin route
+and navigation paths must stay below `/<plugin-id>`.
+At startup, before rendering plugin UI, the shell compares every `PluginModule.id` with
+the authenticated backend descriptors and fails closed on unknown, missing, or duplicate
+IDs. The frontend module owns its navigation, routes, and icons.
+
 ### The rule that keeps this modular
 
 > Plugin components may import from `@cc/ui` and their own directory. **Never** from
 > `shell/` or `core/`.
 
-For v1 these are compiled into the main bundle. The import surface is identical to what a
-dynamically loaded ESM module would use, so switching to dynamic loading later is a build
-change rather than a rewrite — but only if the rule above has been held.
+For v1 these are compiled into the main bundle. The narrow import surface keeps dynamic or
+out-of-process plugins as a compatible direction, but that move still needs loading
+protocols, adapters, version negotiation, and isolation. It is not merely a build or
+transport change.
+
+### Plugin HTTP client
+
+`@cc/ui` exports a plugin-scoped client so components never assemble host API URLs or
+security headers themselves:
+
+```tsx
+import { pluginApi } from "@cc/ui";
+
+const api = pluginApi("bidrl");
+const { data: auction } = await api.snapshot<Auction>(`/auctions/${id}`, {
+  events: "bidrl.**",
+});
+await api.post(`/scans`, { auctionId: id });
+```
+
+The helper prefixes `/api/plugins/<id>`, sends same-origin credentials, adds the current
+session-bound CSRF token to mutations, and parses the standard JSON error envelope. It
+turns error code `plugin_disabled` into a typed `PluginDisabledError`; an unrelated `503`
+remains a service error. Plugin components use REST for initial snapshots and mutations,
+so they can load data and start work such as scans without importing shell internals.
+`snapshot<T>` returns `Snapshot<T>` and coordinates its event boundary with the shared
+stream; plain `get<T>` is for non-state responses that need no live handoff.
 
 ---
 
 ## Live data
 
-One SSE stream at `/api/stream`, multiplexed by event pattern. The client subscribes to
-patterns; the server filters and fans out.
+One authenticated SSE stream at `/api/stream` sends every authorized committed event. The
+shell opens it once and multiplexes dot-segment patterns locally; plugins do not create
+connections or send server-side subscription patterns.
 
 ```tsx
 const deals = useEvents("bidrl.deal_found");
-const cost  = useEvents("core.ai.usage", { filter: e => e.plugin === "bidrl" });
+const cost  = useEvents<AIUsage>("core.ai.usage", {
+  filter: e => e.payload.plugin === "bidrl",
+});
 ```
 
-Everything live in the UI rides this one connection — job progress, cost tickers, plugin
-state changes, notifications. There is no second realtime mechanism and no polling.
+The wire and hook envelope is:
+
+```ts
+type Event<T = unknown> = {
+  id: string; // decimal int64; compare as BigInt, never Number
+  type: string;
+  source: string;
+  subject: string;
+  payload: T;
+  createdAt: string;
+};
+
+type Snapshot<T> = {
+  data: T;
+  asOfEventId: string;
+};
+```
+
+Everything live in the UI rides this one connection — job progress/log invalidations,
+cost tickers, plugin state changes, and notification invalidations. REST provides initial
+snapshots and mutations; SSE applies later changes. There is no second realtime mechanism
+and no polling.
 
 `useEvents` is provided by `@cc/ui`, so a plugin gets live data without knowing how the
 transport works.
+
+The shell first loads `/api/bootstrap`, a `Snapshot` containing the initial core state,
+then opens the one shared stream after that boundary. SSE tails `core_events` directly
+rather than a lossy live-subscription queue. Each message
+has the persisted event ID. On a slow-client queue overflow the server closes the stream;
+the reconnect replays from the last delivered ID instead of silently dropping an event.
+The browser sends standard `Last-Event-ID` on automatic reconnect, and `/api/stream`
+accepts `?after=<id>` for a newly constructed client. The shell suppresses duplicate IDs.
+Heartbeats keep intermediaries and stale-connection detection working. If the requested
+ID predates retention, the server emits a reset signal with the oldest retained ID.
+
+Every state snapshot response is `{ data, asOfEventId }`, with decimal-string IDs. The
+server reads the data and current event-log tail from one SQLite read transaction. For a
+snapshot loaded after bootstrap, `api.snapshot` starts a pattern-filtered local buffer on
+the already-open shared stream before sending the REST request, installs the snapshot,
+then applies buffered events strictly above `asOfEventId`. It never opens another stream.
+If reset occurs, the shell pauses delivery, reloads bootstrap and each mounted snapshot
+through its registered loader, and opens one stream after the new bootstrap boundary.
+Job progress/log and notification lifecycle events are invalidations; clients refetch the
+affected resource rather than reconstructing it from partial event payloads.
 
 ---
 
@@ -91,10 +165,14 @@ transport works.
 | Jobs | queue, history, per-job progress and logs, cancel |
 | Events | live event log, filterable by pattern |
 | Costs | spend by plugin → job → logical model, over time |
-| Settings | credentials (with re-auth), model routing, notification rules, channels |
+| Settings | credentials (with re-auth), read-only effective model routes, notification rules, channels |
 
-The Plugins screen is where the kill switch lives. Disabled plugins are greyed with the
-reason and timestamp, never hidden.
+The Plugins screen is where the host-capability kill switch lives. Disabled plugins are
+greyed with the reason and timestamp, never hidden. Disable rejects new host-managed jobs,
+AI dispatches, event handlers, plugin HTTP requests, event publications, and storage/blob
+mutations and cancels admitted contexts. Reads and logs remain available. It does not
+claim to terminate trusted in-process code that ignores cancellation or uses direct
+networking. An already-admitted paid call may finish and remains accounted.
 
 For `Automated: true` plugins, the toggle is disabled until a daily budget is set, with the
 reason shown inline — the UI half of the guardrail enforced in
@@ -104,6 +182,18 @@ reason shown inline — the UI half of the guardrail enforced in
 
 ## Auth
 
-Single user. Session cookie, `SameSite=Lax`, CSRF token on mutating requests. The app is
-bound to a private network interface and is not exposed publicly, so there is no account
-system, no OIDC, and no password reset flow.
+There is one administrator principal, with no user-management or password-reset flow.
+First-run bootstrap is accepted only on loopback and requires a one-time token to set the
+admin password. Non-loopback access requires TLS; the password hash is Argon2id.
+
+The server uses a `__Host-` `HttpOnly`, `Secure`, `SameSite=Lax` session cookie. Sessions
+use `Path=/`, omit `Domain`, have 12-hour absolute and idle policies, rotate on
+authentication, and are invalidated on logout. Every mutation requires a synchronizer
+CSRF token bound to that session plus an allowed `Origin`. Credential changes require
+password reauthentication within five minutes.
+
+Credentials administration is a lower-layer interface consumed by the web API. List and
+status responses never contain secret material. Settings supports API-key create/replace
+and OAuth with server-generated state, PKCE S256, and a callback bound to the initiating
+session; it never reads an existing key back. Notification channel secrets are credential
+entries referenced by channel configuration.
