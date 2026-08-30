@@ -13,6 +13,7 @@ import (
 
 	"github.com/hbaldwin98/control-center/internal/config"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
@@ -42,8 +43,11 @@ type Deps struct {
 	// Policy owns the kill switch, budgets, and spend counters.
 	Policy *policy.Store
 
+	// Jobs is the durable queue. The Jobs screen lists, inspects, and cancels.
+	Jobs *jobs.Queue
+
 	// Plugins reports the registered plugins the shell reconciles against. pluginhost
-	// supplies it at milestone 6; until then descriptors are derived from policy.
+	// supplies it at milestone 6; until then the registry is empty.
 	Plugins func(context.Context) []PluginDescriptor
 
 	// StaticDir holds the built frontend. When it is missing, the server serves a small
@@ -118,6 +122,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/admin/plugins/{id}/enable", s.authenticated(s.handlePluginEnable))
 	s.mux.HandleFunc("POST /api/admin/plugins/{id}/disable", s.authenticated(s.handlePluginDisable))
 	s.mux.HandleFunc("PUT /api/admin/plugins/{id}/budget", s.authenticated(s.handlePluginBudget))
+
+	s.mux.HandleFunc("GET /api/jobs", s.authenticated(s.handleJobList))
+	s.mux.HandleFunc("GET /api/jobs/{id}", s.authenticated(s.handleJobGet))
+	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.authenticated(s.handleJobCancel))
 
 	s.mux.HandleFunc("GET /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
 	s.mux.HandleFunc("HEAD /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))

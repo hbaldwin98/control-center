@@ -13,6 +13,7 @@ import (
 
 	"github.com/hbaldwin98/control-center/internal/config"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/internal/core/web"
@@ -95,6 +96,13 @@ func run() error {
 		slog.Info("settled orphaned spend reservations at their reserved maximum", "count", n)
 	}
 
+	jq, err := jobs.New(store, store, bus, pol, jobs.Options{})
+	if err != nil {
+		return err
+	}
+	jq.Start(ctx)
+	defer jq.Stop()
+
 	if _, err := os.Stat(*staticDir); err != nil {
 		slog.Warn("no frontend build found; serving placeholder", "dir", *staticDir)
 		*staticDir = ""
@@ -106,6 +114,7 @@ func run() error {
 		Events:    bus,
 		Blobs:     blobs,
 		Policy:    pol,
+		Jobs:      jq,
 		StaticDir: *staticDir,
 	})
 	if err != nil {

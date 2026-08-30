@@ -9,7 +9,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 1 | Skeleton | ✅ | `cmd`, config, SQLite, migrations, TLS-aware HTTP server, first-run bootstrap, session auth, CSRF, React shell boot. |
 | 2 | `storage` + `events` | ✅ | Transactional event insertion works; durable delivery is serial and at-least-once; SSE replay and reset work. |
 | 3 | `policy` | ✅ | Disable admission/cancellation works; persisted integer micro-USD reservations settle and release atomically. |
-| 4 | `jobs` | ⬜ | Enqueue, retries, cancellation, progress, and job UI work; disabled plugins cannot admit jobs. |
+| 4 | `jobs` | ✅ | Enqueue, retries, cancellation, progress, and job UI work; disabled plugins cannot admit jobs. |
 | 5 | `credentials` + `ai` | ⬜ | Key replacement and OAuth work without exposing secrets; one provider records usage and settles reservations. |
 | 6 | `pluginhost` + `host` | ⬜ | Registry, facade, lifecycle, enforcement matrix all pass. |
 | 7 | `hello` | ⬜ | The validating plugin passes its acceptance test. |
@@ -76,6 +76,18 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | Accounting-invariant violation handling | ✅ | Truthful charge is recorded; plugin disabled; AI route reads `accountingFailed`. |
 | Orphaned reservations at startup | ✅ | Settled at reserved maximum so a crash cannot silently undercount. |
 | Plugins screen: kill switch, budgets, health | ✅ | `/api/admin/plugins`; disabled plugins stay listed. |
+
+## Milestone 4 — `jobs` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| Enqueue with policy check in the insert transaction | ✅ | Idempotency key is unique among nonterminal rows. |
+| Claim, leases, fencing, heartbeat | ✅ | Expired leases are stolen with a new generation. |
+| Retries, permanent failure, timeout, panic recovery | ✅ | `failed` is permanent; `dead` is retry exhaustion. |
+| Cooperative cancel and plugin-disable | ✅ | Pending jobs cancel immediately; running jobs are fenced. |
+| Cron without catch-up | ✅ | Disabled ticks are dropped; DST slot is local wall time. |
+| Progress and batched logs | ✅ | Events are UI invalidations; REST is the snapshot. |
+| Jobs screen and dashboard running list | ✅ | `/api/jobs`; cancel from the UI. |
 
 ## Deferred by design (not v1)
 
