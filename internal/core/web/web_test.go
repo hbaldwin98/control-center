@@ -135,6 +135,16 @@ func (h *harness) status() authStatus {
 	return st
 }
 
+func (h *harness) bootstrapAdmin() {
+	h.t.Helper()
+	token := h.issueToken()
+	rec := h.do(http.MethodPost, "/api/auth/bootstrap",
+		map[string]string{"token": token, "password": testPassword})
+	if rec.Code != http.StatusOK {
+		h.t.Fatalf("bootstrap: %d %s", rec.Code, rec.Body)
+	}
+}
+
 const testPassword = "correct horse battery staple"
 
 func TestFirstRunBootstrapAndLogin(t *testing.T) {

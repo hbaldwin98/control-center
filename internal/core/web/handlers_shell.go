@@ -61,7 +61,7 @@ func (s *Server) handleShellBootstrap(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: sess.ExpiresAt,
 			ReauthAt:  sess.ReauthAt,
 		},
-		Plugins:          s.pluginDescriptors(),
+		Plugins:          s.pluginDescriptors(r.Context()),
 		OldestRetainedID: formatID(oldest),
 	}, formatID(tail))
 }
@@ -82,13 +82,16 @@ func (s *Server) eventBoundary(ctx context.Context) (tail, oldest int64, err err
 	return tail, oldest, err
 }
 
-// pluginDescriptors reports the registered plugins. pluginhost supplies the source at
-// milestone 6; until then the registry is empty and the shell reconciles against nothing.
-func (s *Server) pluginDescriptors() []PluginDescriptor {
+// pluginDescriptors reports the registered plugins the shell reconciles against.
+// pluginhost supplies them at milestone 6; until then the registry is empty so the
+// shell reconciles against nothing. Policy state is a different list: the Plugins
+// screen reads it from /api/admin/plugins, not from bootstrap. Mixing the two would
+// fail the shell closed as soon as a plugin was registered without a frontend module.
+func (s *Server) pluginDescriptors(ctx context.Context) []PluginDescriptor {
 	if s.deps.Plugins == nil {
 		return []PluginDescriptor{}
 	}
-	out := s.deps.Plugins()
+	out := s.deps.Plugins(ctx)
 	if out == nil {
 		return []PluginDescriptor{}
 	}

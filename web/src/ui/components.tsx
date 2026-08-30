@@ -25,9 +25,9 @@ export function Page({ children }: { children: ReactNode }) {
   return <div className="cc-page">{children}</div>;
 }
 
-export function Card({ title, children }: { title?: string; children: ReactNode }) {
+export function Card({ title, muted, children }: { title?: string; muted?: boolean; children: ReactNode }) {
   return (
-    <section className="cc-card">
+    <section className={muted ? "cc-card cc-card--muted" : "cc-card"}>
       {title ? <h2 className="cc-card__title">{title}</h2> : null}
       {children}
     </section>

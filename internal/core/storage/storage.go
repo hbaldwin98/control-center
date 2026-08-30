@@ -27,6 +27,11 @@ type Tx interface {
 	Query(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 	QueryRow(ctx context.Context, q string, args ...any) *sql.Row
 	Exec(ctx context.Context, q string, args ...any) (sql.Result, error)
+
+	// AfterCommit registers fn to run after this transaction commits. Callbacks run in
+	// registration order, after the write lock is released, so they may open a new
+	// transaction. A rollback discards them. They must not use the Tx handle.
+	AfterCommit(fn func())
 }
 
 // Migrator applies a namespace's migrations idempotently and in order.

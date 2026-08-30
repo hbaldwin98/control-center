@@ -205,6 +205,89 @@ func TestTxHonoursCancellationWhileWaiting(t *testing.T) {
 	}
 }
 
+func TestAfterCommitRunsAfterCommitAndNotOnRollback(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if err := s.Apply("demo", []Migration{
+		{Version: 1, Name: "t", Up: `CREATE TABLE demo_a(x INTEGER) STRICT;`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var committed, rolledBack bool
+	if err := s.Tx(ctx, func(tx Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO demo_a(x) VALUES (1)`); err != nil {
+			return err
+		}
+		tx.AfterCommit(func() { committed = true })
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !committed {
+		t.Fatal("AfterCommit did not run after a successful commit")
+	}
+
+	sentinel := errors.New("nope")
+	if err := s.Tx(ctx, func(tx Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO demo_a(x) VALUES (2)`); err != nil {
+			return err
+		}
+		tx.AfterCommit(func() { rolledBack = true })
+		return sentinel
+	}); !errors.Is(err, sentinel) {
+		t.Fatalf("got %v, want the sentinel", err)
+	}
+	if rolledBack {
+		t.Fatal("AfterCommit ran for a rolled-back transaction")
+	}
+
+	var n int
+	if err := s.QueryRow(ctx, `SELECT count(*) FROM demo_a`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("rows = %d, want the committed insert only", n)
+	}
+}
+
+func TestAfterCommitMayOpenANewTransaction(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if err := s.Apply("demo", []Migration{
+		{Version: 1, Name: "t", Up: `CREATE TABLE demo_a(x INTEGER) STRICT;`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// AfterCommit runs after the write lock is released. A watcher that opens a new
+	// transaction must not deadlock on the same goroutine.
+	if err := s.Tx(ctx, func(tx Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO demo_a(x) VALUES (1)`); err != nil {
+			return err
+		}
+		tx.AfterCommit(func() {
+			if err := s.Tx(ctx, func(tx Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO demo_a(x) VALUES (2)`)
+				return err
+			}); err != nil {
+				t.Errorf("nested AfterCommit Tx: %v", err)
+			}
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var n int
+	if err := s.QueryRow(ctx, `SELECT count(*) FROM demo_a`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("rows = %d, want both the original and the AfterCommit insert", n)
+	}
+}
+
 func TestConcurrentWritersSerialize(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()

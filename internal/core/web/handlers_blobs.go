@@ -74,7 +74,7 @@ func (s *Server) blobScopeAllowed(r *http.Request, scope string) bool {
 	if sessionFrom(r.Context()) == nil {
 		return false
 	}
-	for _, p := range s.pluginDescriptors() {
+	for _, p := range s.pluginDescriptors(r.Context()) {
 		if p.ID == scope {
 			return true
 		}

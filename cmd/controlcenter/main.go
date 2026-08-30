@@ -13,6 +13,7 @@ import (
 
 	"github.com/hbaldwin98/control-center/internal/config"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/internal/core/web"
 )
@@ -82,6 +83,18 @@ func run() error {
 	defer bus.Stop()
 	go bus.RunRetentionDaily(ctx)
 
+	pol, err := policy.New(store, store, bus, nil)
+	if err != nil {
+		return err
+	}
+	// A crash can leave spend reservations whose outcome is unknowable. Count them at
+	// the most they could have cost rather than silently undercounting.
+	if n, err := pol.SettleOrphanedReservations(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Info("settled orphaned spend reservations at their reserved maximum", "count", n)
+	}
+
 	if _, err := os.Stat(*staticDir); err != nil {
 		slog.Warn("no frontend build found; serving placeholder", "dir", *staticDir)
 		*staticDir = ""
@@ -92,6 +105,7 @@ func run() error {
 		Config:    cfg,
 		Events:    bus,
 		Blobs:     blobs,
+		Policy:    pol,
 		StaticDir: *staticDir,
 	})
 	if err != nil {

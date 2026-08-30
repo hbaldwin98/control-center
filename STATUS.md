@@ -8,7 +8,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 |---|---|---|---|
 | 1 | Skeleton | ✅ | `cmd`, config, SQLite, migrations, TLS-aware HTTP server, first-run bootstrap, session auth, CSRF, React shell boot. |
 | 2 | `storage` + `events` | ✅ | Transactional event insertion works; durable delivery is serial and at-least-once; SSE replay and reset work. |
-| 3 | `policy` | 🔨 | Disable admission/cancellation works; persisted integer micro-USD reservations settle and release atomically. |
+| 3 | `policy` | ✅ | Disable admission/cancellation works; persisted integer micro-USD reservations settle and release atomically. |
 | 4 | `jobs` | ⬜ | Enqueue, retries, cancellation, progress, and job UI work; disabled plugins cannot admit jobs. |
 | 5 | `credentials` + `ai` | ⬜ | Key replacement and OAuth work without exposing secrets; one provider records usage and settles reservations. |
 | 6 | `pluginhost` + `host` | ⬜ | Registry, facade, lifecycle, enforcement matrix all pass. |
@@ -64,17 +64,18 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | frontend: reset handling — reload bootstrap and mounted snapshots | ✅ | Delivery pauses, bootstrap reloads, the stream reopens, every snapshot reloads. |
 | frontend: Events screen | ✅ | Pattern filter, live log, durable subscriber health with retry/skip. |
 
-## Milestone 3 — `policy` 🔨
+## Milestone 3 — `policy` ✅
 
 | Feature | State | Notes |
 |---|---|---|
-| Plugin enabled state, registration, automated-plugin daily-budget invariant | ⬜ | |
-| `CheckWork` / `CheckWorkTx` admission | ⬜ | |
-| Atomic micro-USD reserve / settle / release | ⬜ | |
-| Budget windows (hour, day, month) and `on_exceed` reject or disable | ⬜ | |
-| `Watch` cancellation of admitted contexts | ⬜ | |
-| Accounting-invariant violation handling | ⬜ | |
-| Plugins screen: kill switch, budgets, health | ⬜ | |
+| Plugin enabled state, registration, automated-plugin daily-budget invariant | ✅ | `internal/core/policy` |
+| `CheckWork` / `CheckWorkTx` admission | ✅ | Unknown IDs denied as disabled. |
+| Atomic micro-USD reserve / settle / release | ✅ | Reservations pin UTC hour/day/month; concurrent holds cannot share capacity. |
+| Budget windows (hour, day, month) and `on_exceed` reject or disable | ✅ | Domain rejection commits its events; one `budget_exceeded` per plugin/window/period. |
+| `Watch` cancellation of admitted contexts | ✅ | `AfterCommit` fires watchers after a caller-owned disable (kill switch, `ExceedDisable`, accounting invariant). |
+| Accounting-invariant violation handling | ✅ | Truthful charge is recorded; plugin disabled; AI route reads `accountingFailed`. |
+| Orphaned reservations at startup | ✅ | Settled at reserved maximum so a crash cannot silently undercount. |
+| Plugins screen: kill switch, budgets, health | ✅ | `/api/admin/plugins`; disabled plugins stay listed. |
 
 ## Deferred by design (not v1)
 

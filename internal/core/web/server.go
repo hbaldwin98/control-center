@@ -13,6 +13,7 @@ import (
 
 	"github.com/hbaldwin98/control-center/internal/config"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
 
@@ -38,9 +39,12 @@ type Deps struct {
 	// Blobs serves stored objects through an authenticated application route.
 	Blobs *storage.BlobStore
 
+	// Policy owns the kill switch, budgets, and spend counters.
+	Policy *policy.Store
+
 	// Plugins reports the registered plugins the shell reconciles against. pluginhost
-	// supplies it at milestone 6.
-	Plugins func() []PluginDescriptor
+	// supplies it at milestone 6; until then descriptors are derived from policy.
+	Plugins func(context.Context) []PluginDescriptor
 
 	// StaticDir holds the built frontend. When it is missing, the server serves a small
 	// built-in placeholder so the API is still usable.
@@ -109,6 +113,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/events", s.authenticated(s.handleEventsQuery))
 	s.mux.HandleFunc("GET /api/events/subscribers", s.authenticated(s.handleSubscribers))
 	s.mux.HandleFunc("POST /api/events/subscribers/{name}/{action}", s.authenticated(s.handleSubscriberAction))
+
+	s.mux.HandleFunc("GET /api/admin/plugins", s.authenticated(s.handlePluginList))
+	s.mux.HandleFunc("POST /api/admin/plugins/{id}/enable", s.authenticated(s.handlePluginEnable))
+	s.mux.HandleFunc("POST /api/admin/plugins/{id}/disable", s.authenticated(s.handlePluginDisable))
+	s.mux.HandleFunc("PUT /api/admin/plugins/{id}/budget", s.authenticated(s.handlePluginBudget))
 
 	s.mux.HandleFunc("GET /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
 	s.mux.HandleFunc("HEAD /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))

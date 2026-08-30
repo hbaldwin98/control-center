@@ -170,29 +170,34 @@ func (s *Store) Exec(ctx context.Context, q string, args ...any) (sql.Result, er
 // context cancellation, and panics roll it back.
 //
 // A transaction callback may not call Tx or Exec again: the writer is already held.
+// AfterCommit callbacks run after the commit and after the write lock is released, so
+// they may open a new transaction without deadlocking.
 func (s *Store) Tx(ctx context.Context, fn func(Tx) error) (err error) {
 	if err := s.acquire(ctx); err != nil {
 		return err
 	}
-	defer s.release()
 
 	tx, err := s.writer.BeginTx(ctx, nil)
 	if err != nil {
+		s.release()
 		return fmt.Errorf("storage: begin: %w", err)
 	}
 
+	handle := &sqlTx{tx: tx}
 	committed := false
 	defer func() {
 		if p := recover(); p != nil {
 			_ = tx.Rollback()
+			s.release()
 			panic(p)
 		}
 		if !committed {
 			_ = tx.Rollback()
+			s.release()
 		}
 	}()
 
-	if err := fn(&sqlTx{tx: tx}); err != nil {
+	if err := fn(handle); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -202,6 +207,10 @@ func (s *Store) Tx(ctx context.Context, fn func(Tx) error) (err error) {
 		return fmt.Errorf("storage: commit: %w", err)
 	}
 	committed = true
+	s.release()
+	for _, fn := range handle.after {
+		fn()
+	}
 	return nil
 }
 
@@ -237,7 +246,10 @@ func (s *Store) release() {
 	<-s.writeSem
 }
 
-type sqlTx struct{ tx *sql.Tx }
+type sqlTx struct {
+	tx    *sql.Tx
+	after []func()
+}
 
 func (t *sqlTx) Query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
 	return t.tx.QueryContext(ctx, q, args...)
@@ -249,6 +261,12 @@ func (t *sqlTx) QueryRow(ctx context.Context, q string, args ...any) *sql.Row {
 
 func (t *sqlTx) Exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	return t.tx.ExecContext(ctx, q, args...)
+}
+
+func (t *sqlTx) AfterCommit(fn func()) {
+	if fn != nil {
+		t.after = append(t.after, fn)
+	}
 }
 
 // goroutineID parses the current goroutine's ID from its stack header. Go offers no

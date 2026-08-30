@@ -25,6 +25,11 @@ type Tx interface {
     Query(ctx context.Context, q string, args ...any) (*sql.Rows, error)
     QueryRow(ctx context.Context, q string, args ...any) *sql.Row
     Exec(ctx context.Context, q string, args ...any) (sql.Result, error)
+
+    // AfterCommit runs fn after a successful commit, once the write lock is
+    // released, so the callback may open a new transaction. A rollback
+    // discards registered callbacks. They must not use the Tx handle.
+    AfterCommit(fn func())
 }
 
 type Migrator interface {
@@ -64,9 +69,12 @@ type BlobMeta struct {
 ```
 
 `DB.Tx` commits only when the callback returns `nil`; errors, cancellation, and panics
-roll it back. Module methods that must join a caller's transaction accept `storage.Tx`
-rather than opening a nested transaction. This is the boundary used to write an AI usage
-row, settle its policy reservation, and insert its event atomically.
+roll it back. `AfterCommit` is how a module that joined a caller's transaction can notify
+watchers only after that caller commits — policy uses it so `ExceedDisable` and an
+accounting-invariant disable cancel admitted contexts without deadlocking on the writer.
+Module methods that must join a caller's transaction accept `storage.Tx` rather than
+opening a nested transaction. This is the boundary used to write an AI usage row, settle
+its policy reservation, and insert its event atomically.
 
 The application uses WAL mode, a finite busy timeout, one serialized writer connection,
 and a bounded read pool. A transaction callback may not nest `DB.Tx`; cancellation while
