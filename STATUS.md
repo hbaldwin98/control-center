@@ -166,7 +166,8 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Route attempts record the price they were admitted at | ✅ | A catalog refresh cannot silently reprice an admitted call. |
 | Subscription billing reserves zero and settles zero | ✅ | A computed bound, not a missing one; the attempt row records `billing_state = subscription`. |
 | Codex adapter: SSE `/responses`, account id header, `/models` | ✅ | Refuses to dispatch without the account id from the credential's `id_token`. |
-| ChatGPT OAuth with a pinned loopback redirect, completed by paste | ✅ | State, session binding, PKCE, and single use are all still enforced server-side. |
+| ChatGPT OAuth with a pinned loopback redirect, completed by paste | ✅ | State, session binding, PKCE, and single use are all still enforced server-side. Reauthentication is spent starting the flow, not finishing it. |
+| The pinned path completes itself when this server answers there | ✅ | Only when the request's own address is the pinned one; anywhere else it is a frontend route and the state is untouched. |
 | Token import from an existing local `codex login` | ✅ | Refresh token required; the shared-rotation caveat is stated in the UI. |
 | Models screen: providers, catalogs, route editor | ✅ | Attempts pick a discovered model, prices prefill, the reservation is shown before saving. |
 

@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 )
@@ -233,14 +234,74 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, loc, http.StatusSeeOther)
 }
 
-func (s *Server) oauthCallbackURI(r *http.Request) string {
+// handlePinnedOAuthCallback completes a pinned-redirect flow the provider sent straight
+// back to us, which is possible only when this server is the thing listening at the
+// address that provider insists on — a local deployment bound to the CLI's port.
+//
+// It is deliberately not a general route. If nothing configured is pinned to the address
+// this request was sent to, the path is not ours and falls through to the frontend,
+// because a deployment reached at some other host must finish by pasting the URL back:
+// the provider redirected the browser to a port on the operator's own machine, and no
+// amount of routing here can make that arrive.
+func (s *Server) handlePinnedOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	store := s.deps.Credentials
+	var provider string
+	if store != nil {
+		provider = pinnedProviderFor(store.OAuthProviderList(), s.requestBaseURL(r)+r.URL.Path)
+	}
+	if provider == "" {
+		s.serveStatic(w, r)
+		return
+	}
+	s.authenticated(s.withActor(func(w http.ResponseWriter, r *http.Request) {
+		sess := sessionFrom(r.Context())
+		if sess == nil {
+			writeError(w, http.StatusUnauthorized, CodeUnauthorized, "authentication required")
+			return
+		}
+		_, err := store.CompleteOAuthManual(r.Context(), credentials.OAuthManualCallback{
+			Provider:  provider,
+			SessionID: sess.ID,
+			// The URL as received is exactly what the administrator would have pasted.
+			CallbackURL: s.requestBaseURL(r) + r.URL.RequestURI(),
+		})
+		loc := "/settings?oauth=ok"
+		if err != nil {
+			loc = "/settings?oauth=error"
+		}
+		http.Redirect(w, r, loc, http.StatusSeeOther)
+	}))(w, r)
+}
+
+// pinnedProviderFor names the manual provider whose redirect is this exact address.
+// Ambiguity is not resolved by guessing: completing consumes a one-time state, so
+// trying each candidate would burn the flow the administrator is in the middle of.
+func pinnedProviderFor(providers []credentials.OAuthProviderInfo, url string) string {
+	found := ""
+	for _, p := range providers {
+		if !p.Manual || !strings.EqualFold(p.RedirectURI, url) {
+			continue
+		}
+		if found != "" {
+			return ""
+		}
+		found = p.Name
+	}
+	return found
+}
+
+func (s *Server) requestBaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
+	return scheme + "://" + r.Host
+}
+
+func (s *Server) oauthCallbackURI(r *http.Request) string {
 	// Host, not Origin: the OAuth callback is a top-level GET from the provider and
 	// carries the provider's Origin, which is not the allowlisted redirect.
-	return scheme + "://" + r.Host + "/api/admin/credentials/oauth/callback"
+	return s.requestBaseURL(r) + "/api/admin/credentials/oauth/callback"
 }
 
 func (s *Server) writeCredentialResult(w http.ResponseWriter, op string, err error) {

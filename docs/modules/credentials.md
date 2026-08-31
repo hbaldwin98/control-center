@@ -204,6 +204,13 @@ only the browser that began the flow holds. The password is spent at the beginni
 is the step that will create a credential; requiring it again at the end would strand an
 administrator whose trip through the provider's login outlasted the five-minute window.
 
+A deployment the browser can reach *at* the pinned address needs none of that. `web`
+serves the pinned path and completes the flow itself, but only when the address the
+request was sent to is the one a configured manual provider is pinned to; anywhere else
+the path is an ordinary frontend route and the pending state is left alone. That is a
+local convenience, not a second mechanism: it consumes the same state the same way, and
+an ambiguous match completes nothing rather than burning a flow to find out.
+
 Nothing about the security of the flow is relaxed by that paste. The state is still 256
 bits, still bound to the initiating web session, still expires in 10 minutes, and is still
 consumed once in a transaction before the exchange. The PKCE verifier still never leaves

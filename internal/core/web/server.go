@@ -175,6 +175,9 @@ func (s *Server) routes() {
 	// trip through the provider's own login and can outlast the five-minute window.
 	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/manual", s.authenticated(s.withActor(s.handleOAuthManual)))
 	s.mux.HandleFunc("GET /api/admin/credentials/oauth/callback", s.authenticated(s.withActor(s.handleOAuthCallback)))
+	// The address a pinned provider redirects to. It completes the flow only when this
+	// server is what answers there; otherwise it is an ordinary frontend path.
+	s.mux.HandleFunc("GET /auth/callback", s.handlePinnedOAuthCallback)
 
 	// Providers and routes are configuration, not secrets: they name a credential but
 	// never carry one, so they need a session and CSRF rather than reauthentication.

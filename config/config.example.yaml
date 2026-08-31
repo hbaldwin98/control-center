@@ -15,6 +15,12 @@
 
 server:
   # A loopback address may serve plain HTTP. Any other address requires TLS.
+  #
+  # Binding loopback port 1455 is worth knowing about: it is the address the ChatGPT
+  # login is pinned to, so a control center on the same machine as the browser finishes
+  # that sign-in by itself instead of asking for the callback URL to be pasted back. It
+  # collides with `codex login` while that is mid-flow, and means nothing to a
+  # deployment the browser reaches under any other name.
   addr: "127.0.0.1:8080"
 
   # PEM paths. Set both or neither.

@@ -369,9 +369,11 @@ function OAuthProviderBlock({
           >
             <Stack>
               <Callout>
-                Your browser finishes at <code>{provider.redirectUri}</code>, which will not load —
-                that address belongs to a local command-line tool, not to this server. That failed
-                page is the point: copy the whole address out of the address bar and paste it below.
+                Your browser finishes at <code>{provider.redirectUri}</code>. If this server is what
+                answers there, you land back here signed in and there is nothing to paste. Otherwise
+                the page will not load — that address is a port on your own machine, not this
+                server — and the failed page is the point: copy the whole address out of the address
+                bar and paste it below.
               </Callout>
               {authUrl ? (
                 <Hint>
