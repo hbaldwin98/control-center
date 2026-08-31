@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/hbaldwin98/control-center/internal/config"
+	"github.com/hbaldwin98/control-center/internal/core/ai"
+	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
@@ -45,6 +47,12 @@ type Deps struct {
 
 	// Jobs is the durable queue. The Jobs screen lists, inspects, and cancels.
 	Jobs *jobs.Queue
+
+	// Credentials is secret-free administration. Runtime Token is never exposed here.
+	Credentials *credentials.Store
+
+	// AI is host-managed model routing and usage. Query returns no credentials.
+	AI *ai.Service
 
 	// Plugins reports the registered plugins the shell reconciles against. pluginhost
 	// supplies it at milestone 6; until then the registry is empty.
@@ -129,6 +137,19 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
 	s.mux.HandleFunc("HEAD /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
+
+	s.mux.HandleFunc("GET /api/admin/credentials", s.authenticated(s.handleCredentialList))
+	s.mux.HandleFunc("GET /api/admin/credentials/oauth/providers", s.authenticated(s.handleOAuthProviders))
+	s.mux.HandleFunc("GET /api/admin/credentials/{id}/references", s.authenticated(s.handleCredentialReferences))
+	s.mux.HandleFunc("POST /api/admin/credentials", s.requireReauth(s.handleCredentialCreate))
+	s.mux.HandleFunc("PUT /api/admin/credentials/{id}", s.requireReauth(s.handleCredentialReplace))
+	s.mux.HandleFunc("POST /api/admin/credentials/{id}/rotate", s.requireReauth(s.handleCredentialRotate))
+	s.mux.HandleFunc("DELETE /api/admin/credentials/{id}", s.requireReauth(s.handleCredentialDelete))
+	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/begin", s.requireReauth(s.handleOAuthBegin))
+	s.mux.HandleFunc("GET /api/admin/credentials/oauth/callback", s.authenticated(s.withActor(s.handleOAuthCallback)))
+
+	s.mux.HandleFunc("GET /api/admin/ai/routes", s.authenticated(s.handleAIRoutes))
+	s.mux.HandleFunc("GET /api/ai/calls", s.authenticated(s.handleAICalls))
 
 	s.mux.HandleFunc("/", s.serveStatic)
 }
@@ -228,6 +249,26 @@ func (s *Server) authenticated(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), sessionKey, sess)))
 	}
+}
+
+// withActor stamps the single administrator principal for credential mutations.
+func (s *Server) withActor(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		next(w, r.WithContext(credentials.WithActor(r.Context(), actorAdmin)))
+	}
+}
+
+// requireReauth is authenticated plus a fresh password reauthentication. Credential
+// changes go through here so a stolen session cookie is not enough.
+func (s *Server) requireReauth(next http.HandlerFunc) http.HandlerFunc {
+	return s.authenticated(s.withActor(func(w http.ResponseWriter, r *http.Request) {
+		sess := sessionFrom(r.Context())
+		if sess == nil || !sess.reauthFresh(s.now().UTC(), s.deps.Config.Session.ReauthWindow) {
+			writeError(w, http.StatusForbidden, CodeReauthRequired, "password reauthentication required")
+			return
+		}
+		next(w, r)
+	}))
 }
 
 func isMutation(method string) bool {

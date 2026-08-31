@@ -547,19 +547,84 @@ func TestScopedRejectsAnotherPluginsJob(t *testing.T) {
 }
 
 func TestCronParseAndMatch(t *testing.T) {
-	c, err := parseCron("0 3 * * *")
-	if err != nil {
-		t.Fatal(err)
+	mustParse := func(expr string) *cronSched {
+		t.Helper()
+		c, err := parseCron(expr)
+		if err != nil {
+			t.Fatalf("parse %q: %v", expr, err)
+		}
+		return c
 	}
-	at := time.Date(2026, 8, 30, 3, 0, 0, 0, time.UTC)
-	if !c.matches(at) {
+	at := func(hour, min int) time.Time {
+		return time.Date(2026, 8, 30, hour, min, 0, 0, time.UTC) // Sunday
+	}
+
+	c := mustParse("0 3 * * *")
+	if !c.matches(at(3, 0)) {
 		t.Fatal("should match 03:00")
 	}
-	if c.matches(at.Add(time.Minute)) {
+	if c.matches(at(3, 1)) {
 		t.Fatal("should not match 03:01")
 	}
-	if _, err := parseCron("0 3 * *"); err == nil {
-		t.Fatal("want four-field to fail")
+
+	steps := mustParse("*/15 0 * * *")
+	for _, min := range []int{0, 15, 30, 45} {
+		if !steps.matches(at(0, min)) {
+			t.Fatalf("*/15 should match minute %d", min)
+		}
+	}
+	if steps.matches(at(0, 7)) {
+		t.Fatal("*/15 should not match minute 7")
+	}
+
+	ranged := mustParse("1-5 2 * * *")
+	if !ranged.matches(at(2, 3)) || ranged.matches(at(2, 6)) {
+		t.Fatal("1-5 should include 3 and exclude 6")
+	}
+
+	listed := mustParse("1,30,59 4 * * *")
+	if !listed.matches(at(4, 30)) || listed.matches(at(4, 31)) {
+		t.Fatal("list should include 30 and exclude 31")
+	}
+
+	steppedRange := mustParse("1-10/2 5 * * *")
+	if !steppedRange.matches(at(5, 1)) || !steppedRange.matches(at(5, 9)) || steppedRange.matches(at(5, 2)) {
+		t.Fatal("1-10/2 should hit odd minutes only")
+	}
+
+	sunday7 := mustParse("0 0 * * 7")
+	if !sunday7.matches(at(0, 0)) {
+		t.Fatal("dow 7 must be Sunday")
+	}
+	monday := mustParse("0 0 * * 1")
+	if monday.matches(at(0, 0)) {
+		t.Fatal("Sunday is not Monday")
+	}
+
+	// Both DOM and DOW restricted: classic cron ORs them.
+	firstOrMonday := mustParse("0 0 1 * 1")
+	first := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)  // Tuesday
+	mon := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)   // Monday
+	other := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)  // Wednesday
+	if !firstOrMonday.matches(first) || !firstOrMonday.matches(mon) || firstOrMonday.matches(other) {
+		t.Fatal("restricted DOM and DOW must OR")
+	}
+
+	for _, bad := range []string{
+		"0 3 * *",
+		"60 * * * *",
+		"* 24 * * *",
+		"5-1 * * * *",
+		"*/0 * * * *",
+		"*/foo * * * *",
+		"1-10/0 * * * *",
+		"a * * * *",
+		"* * 0 * *",
+		"* * * 13 *",
+	} {
+		if _, err := parseCron(bad); err == nil {
+			t.Errorf("parseCron(%q) should fail", bad)
+		}
 	}
 }
 

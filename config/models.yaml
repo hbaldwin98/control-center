@@ -1,0 +1,18 @@
+# Logical model routes. Secrets live in credential entries created in Settings, not here.
+#
+# Example after creating an API key with id `fake-key`:
+#
+# routes:
+#   cheap-chat:
+#     capabilities: [chat]
+#     maxInputTokens: 128
+#     maxOutputTokens: 64
+#     attempts:
+#       - provider: fake
+#         model: echo
+#         credential: fake-key
+#         inputMicroUSDPerMillion: 1000000
+#         outputMicroUSDPerMillion: 2000000
+#
+# Startup fails if a named credential or provider is missing. Empty routes are valid.
+routes: {}

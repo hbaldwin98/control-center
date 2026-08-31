@@ -34,3 +34,7 @@ blobs:
   # Limits must be finite.
   maxObjectBytes: 67108864   # 64 MiB
   maxScopeBytes: 2147483648  # 2 GiB
+
+ai:
+  # Logical model routes. Secrets are credential ids, not values.
+  models: "config/models.yaml"

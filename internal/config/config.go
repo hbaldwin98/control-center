@@ -22,6 +22,7 @@ type Config struct {
 	Data    Data    `yaml:"data"`
 	Session Session `yaml:"session"`
 	Blobs   Blobs   `yaml:"blobs"`
+	AI      AI      `yaml:"ai"`
 }
 
 // Server describes the HTTP listener.
@@ -61,6 +62,11 @@ type Session struct {
 	ReauthWindow time.Duration `yaml:"reauthWindow"`
 }
 
+// AI is host-managed model routing. Secrets stay in credentials, not here.
+type AI struct {
+	Models string `yaml:"models"`
+}
+
 // Blobs bounds filesystem blob storage. Limits must be finite.
 type Blobs struct {
 	MaxObjectBytes int64 `yaml:"maxObjectBytes"`
@@ -85,6 +91,7 @@ func Default() Config {
 			MaxObjectBytes: 64 << 20, // 64 MiB
 			MaxScopeBytes:  2 << 30,  // 2 GiB
 		},
+		AI: AI{Models: "config/models.yaml"},
 	}
 }
 
@@ -158,6 +165,9 @@ func (c *Config) derive() {
 	}
 	if c.Session.ReauthWindow <= 0 {
 		c.Session.ReauthWindow = 5 * time.Minute
+	}
+	if c.AI.Models == "" {
+		c.AI.Models = "config/models.yaml"
 	}
 }
 

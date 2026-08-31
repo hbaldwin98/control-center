@@ -7,11 +7,15 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/hbaldwin98/control-center/internal/config"
+	"github.com/hbaldwin98/control-center/internal/core/ai"
+	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
@@ -43,6 +47,11 @@ func run() error {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
+	}
+
+	masterKey, err := credentials.ParseMasterKey(os.Getenv("CC_MASTER_KEY"))
+	if err != nil {
+		return fmt.Errorf("CC_MASTER_KEY must be 64 hex characters (32-byte AES-256 key): %w", err)
 	}
 
 	// Signals cancel the root context; every subsystem shuts down from there.
@@ -84,6 +93,16 @@ func run() error {
 	defer bus.Stop()
 	go bus.RunRetentionDaily(ctx)
 
+	creds, err := credentials.New(store, store, bus, credentials.Options{
+		Keys:                map[int][]byte{1: masterKey},
+		Active:              1,
+		AllowedRedirectURIs: oauthRedirects(cfg),
+		OAuth:               oauthProvidersFromEnv(),
+	})
+	if err != nil {
+		return err
+	}
+
 	pol, err := policy.New(store, store, bus, nil)
 	if err != nil {
 		return err
@@ -103,19 +122,34 @@ func run() error {
 	jq.Start(ctx)
 	defer jq.Stop()
 
+	routes, err := ai.LoadRoutes(cfg.AI.Models)
+	if err != nil {
+		return err
+	}
+	aisvc, err := ai.New(store, store, bus, pol, creds, ai.Options{
+		Routes:    routes,
+		Providers: []ai.Provider{ai.Fake{}},
+		Refs:      creds,
+	})
+	if err != nil {
+		return err
+	}
+
 	if _, err := os.Stat(*staticDir); err != nil {
 		slog.Warn("no frontend build found; serving placeholder", "dir", *staticDir)
 		*staticDir = ""
 	}
 
 	srv, err := web.New(ctx, store, web.Deps{
-		DB:        store,
-		Config:    cfg,
-		Events:    bus,
-		Blobs:     blobs,
-		Policy:    pol,
-		Jobs:      jq,
-		StaticDir: *staticDir,
+		DB:          store,
+		Config:      cfg,
+		Events:      bus,
+		Blobs:       blobs,
+		Policy:      pol,
+		Jobs:        jq,
+		Credentials: creds,
+		AI:          aisvc,
+		StaticDir:   *staticDir,
 	})
 	if err != nil {
 		return err
@@ -134,4 +168,44 @@ func parseLevel(s string) (slog.Level, error) {
 		return l, fmt.Errorf("invalid log level %q", s)
 	}
 	return l, nil
+}
+
+func oauthRedirects(cfg config.Config) []string {
+	scheme := "http"
+	if cfg.TLSEnabled() {
+		scheme = "https"
+	}
+	const path = "/api/admin/credentials/oauth/callback"
+	var out []string
+	add := func(hostport string) {
+		out = append(out, scheme+"://"+hostport+path)
+	}
+	host, port, err := net.SplitHostPort(cfg.Server.Addr)
+	if err == nil {
+		add(net.JoinHostPort(host, port))
+		ip := net.ParseIP(strings.Trim(host, "[]"))
+		if host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			add("localhost:" + port)
+			add("127.0.0.1:" + port)
+			add("[::1]:" + port)
+		}
+	}
+	for _, o := range cfg.Server.Origins {
+		out = append(out, strings.TrimRight(o, "/")+path)
+	}
+	return out
+}
+
+func oauthProvidersFromEnv() map[string]credentials.OAuthProvider {
+	out := map[string]credentials.OAuthProvider{}
+	if id := os.Getenv("CC_OAUTH_GOOGLE_CLIENT_ID"); id != "" {
+		out["google"] = credentials.OAuthProvider{
+			AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
+			TokenURL:     "https://oauth2.googleapis.com/token",
+			ClientID:     id,
+			ClientSecret: os.Getenv("CC_OAUTH_GOOGLE_CLIENT_SECRET"),
+			Scopes:       []string{"openid", "email"},
+		}
+	}
+	return out
 }

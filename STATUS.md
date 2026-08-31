@@ -10,7 +10,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 2 | `storage` + `events` | ✅ | Transactional event insertion works; durable delivery is serial and at-least-once; SSE replay and reset work. |
 | 3 | `policy` | ✅ | Disable admission/cancellation works; persisted integer micro-USD reservations settle and release atomically. |
 | 4 | `jobs` | ✅ | Enqueue, retries, cancellation, progress, and job UI work; disabled plugins cannot admit jobs. |
-| 5 | `credentials` + `ai` | ⬜ | Key replacement and OAuth work without exposing secrets; one provider records usage and settles reservations. |
+| 5 | `credentials` + `ai` | ✅ | Key replacement and OAuth work without exposing secrets; one provider records usage and settles reservations. |
 | 6 | `pluginhost` + `host` | ⬜ | Registry, facade, lifecycle, enforcement matrix all pass. |
 | 7 | `hello` | ⬜ | The validating plugin passes its acceptance test. |
 | 8 | `notifications` | ⬜ | Channels use credential entries; rules and defaults deliver committed events. |
@@ -88,6 +88,17 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | Cron without catch-up | ✅ | Disabled ticks are dropped; DST slot is local wall time. |
 | Progress and batched logs | ✅ | Events are UI invalidations; REST is the snapshot. |
 | Jobs screen and dashboard running list | ✅ | `/api/jobs`; cancel from the UI. |
+
+## Milestone 5 — `credentials` + `ai` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| AES-256-GCM envelopes; startup fails closed on a missing or wrong master key | ✅ | `CC_MASTER_KEY` is 64 hex characters. |
+| API-key create / replace / rotate; Admin never returns secrets | ✅ | Actor stamped from the session; mutations require reauth. |
+| OAuth authorization-code + PKCE S256; state bound to session; consume-once | ✅ | Callback is a top-level GET; SameSite=Lax carries the session. |
+| Credential references block deletion | ✅ | `ai.routes` is replaced from compiled `models.yaml` at startup. |
+| Host-managed AI routing, reserve, settle, `core.ai.usage` | ✅ | In-process `fake` provider for local use and tests. |
+| Settings and Costs screens | ✅ | Reauth UI; routes hide credential ids; costs list settled calls. |
 
 ## Deferred by design (not v1)
 
