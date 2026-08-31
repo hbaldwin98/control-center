@@ -1,6 +1,6 @@
 /** The unauthenticated screens: first-run setup and login. */
 import { useState, type FormEvent, type ReactNode } from "react";
-import { ApiError, Button, Callout, Field, Input, Stack, api, setCsrfToken } from "@cc/ui";
+import { ApiError, Button, Callout, Field, Input, Loading, LogBlock, Stack, api, setCsrfToken } from "@cc/ui";
 import { useSession } from "./session";
 
 function Gate({ title, lede, children }: { title: string; lede: string; children: ReactNode }) {
@@ -151,8 +151,17 @@ export function FatalScreen({ error }: { error: Error }) {
   return (
     <Gate title="Control Center could not start" lede="The shell stopped before rendering.">
       <Callout tone="danger">
-        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12.5 }}>{error.message}</pre>
+        <LogBlock>{error.message}</LogBlock>
       </Callout>
     </Gate>
+  );
+}
+
+/** The blank moment before the session is known. Shown in the same frame as the gates. */
+export function LoadingScreen() {
+  return (
+    <div className="cc-gate">
+      <Loading label="Starting…" />
+    </div>
   );
 }

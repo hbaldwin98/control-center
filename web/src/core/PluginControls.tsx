@@ -1,10 +1,11 @@
 /**
- * The administrative controls for one plugin: state badges, the kill switch, budgets, and
- * spend.
+ * The administrative controls for one plugin: state badges, problems, spend, budgets, and
+ * the kill switch.
  *
  * They live here rather than inside one screen because the Plugins list and a single
  * plugin's detail screen must offer exactly the same controls — an operator who drilled
- * into a plugin should not have to navigate back to turn it off.
+ * into a plugin should not have to navigate back to turn it off. Each piece takes
+ * `heading`, so a screen that has already titled a card does not print the label twice.
  */
 import { useState } from "react";
 import {
@@ -13,16 +14,19 @@ import {
   Button,
   Callout,
   Field,
+  Hint,
   Input,
   Meter,
+  Money,
   Row,
+  Select,
+  Time,
   api,
   formatUSD,
-  formatWhen,
 } from "@cc/ui";
 import type { Budget, ExceedAction, PluginState } from "./types";
 
-/** State, automation, and runtime health, in worst-first order. */
+/** State, automation, and runtime health, worst first. */
 export function PluginBadges({ state }: { state: PluginState }) {
   return (
     <>
@@ -49,55 +53,77 @@ export function PluginProblems({ state }: { state: PluginState }) {
   return (
     <>
       {state.health?.lastError ? <Callout tone="danger">{state.health.lastError}</Callout> : null}
+
       {!state.enabled ? (
-        <div className="cc-field__hint">
-          {state.disabledReason || "disabled"}
+        <Hint>
+          {state.disabledReason || "Disabled."}
           {state.disabledBy ? ` · ${state.disabledBy}` : ""}
-          {state.disabledAt ? ` · ${formatWhen(state.disabledAt)}` : ""}
-        </div>
+          {state.disabledAt ? (
+            <>
+              {" · "}
+              <Time iso={state.disabledAt} />
+            </>
+          ) : null}
+        </Hint>
       ) : null}
+
       {state.accountingFailed ? (
         <Callout tone="danger">
-          Settlement exceeded the reserved maximum at {formatWhen(state.accountingFailed)}. Re-enable
+          Settlement exceeded the reserved maximum at <Time iso={state.accountingFailed} />. Re-enable
           after the AI route is healthy again.
         </Callout>
       ) : null}
+
       {needsDailyBudget ? (
-        <Callout>An automated plugin needs a finite daily budget before it can be enabled.</Callout>
+        <Callout tone="warn">
+          An automated plugin needs a finite daily budget before it can be enabled.
+        </Callout>
       ) : null}
     </>
   );
 }
 
-/** Reserved and committed spend for each budget window, with a bar where a limit is set. */
+const WINDOWS = [
+  { label: "Hour", reserved: "reservedHour", committed: "committedHour", limit: "hourly" },
+  { label: "Day", reserved: "reservedDay", committed: "committedDay", limit: "daily" },
+  { label: "Month", reserved: "reservedMonth", committed: "committedMonth", limit: "monthly" },
+] as const;
+
+/**
+ * Committed and reserved spend for each budget window.
+ *
+ * A window with a limit gets a bar, because "$4.10 of $5.00" is a fact an operator has to
+ * do arithmetic on and a bar is not. Reserved spend is drawn hatched: it is a hold that
+ * may yet be released, and reading it as spent would overstate the day.
+ */
 export function SpendWindows({ state }: { state: PluginState }) {
-  const windows = [
-    { label: "Hour", reserved: state.reservedHour, committed: state.committedHour, limit: state.budget.hourly },
-    { label: "Day", reserved: state.reservedDay, committed: state.committedDay, limit: state.budget.daily },
-    { label: "Month", reserved: state.reservedMonth, committed: state.committedMonth, limit: state.budget.monthly },
-  ];
   return (
     <div className="cc-windows">
-      {windows.map((w) => (
-        <div key={w.label} className="cc-windows__row">
-          <div className="cc-windows__label">{w.label}</div>
-          <div>
-            <div className="cc-windows__value">
-              {formatUSD(w.committed)}
-              <span className="cc-field__hint">
-                {w.reserved > 0 ? ` + ${formatUSD(w.reserved)} held` : ""}
-                {w.limit === 0 ? " / unlimited" : ` / ${formatUSD(w.limit)}`}
-              </span>
+      {WINDOWS.map((w) => {
+        const committed = state[w.committed];
+        const reserved = state[w.reserved];
+        const limit = state.budget[w.limit];
+        return (
+          <div key={w.label} className="cc-windows__row">
+            <div className="cc-windows__label">{w.label}</div>
+            <div>
+              <div className="cc-windows__value">
+                <Money microUsd={committed} />
+                <span className="cc-hint">
+                  {reserved > 0 ? ` + ${formatUSD(reserved)} held` : ""}
+                  {limit === 0 ? " / unlimited" : ` / ${formatUSD(limit)}`}
+                </span>
+              </div>
+              <Meter
+                value={committed}
+                soft={reserved}
+                max={limit}
+                label={`${state.pluginId} ${w.label.toLowerCase()} budget`}
+              />
             </div>
-            <Meter
-              value={w.committed}
-              soft={w.reserved}
-              max={w.limit}
-              label={`${state.pluginId} ${w.label.toLowerCase()} budget`}
-            />
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -111,22 +137,22 @@ export function SpendWindows({ state }: { state: PluginState }) {
  */
 export function KillSwitch({
   state,
-  busy,
+  heading = true,
   onChanged,
   onError,
 }: {
   state: PluginState;
-  busy?: boolean;
+  heading?: boolean;
   onChanged: () => void;
   onError: (message: string | null) => void;
 }) {
   const [reason, setReason] = useState("");
-  const [working, setWorking] = useState(false);
-  const disabledControls = busy || working;
+  const [busy, setBusy] = useState(false);
   const needsDailyBudget = state.automated && state.budget.daily === 0;
+  const path = `/api/admin/plugins/${encodeURIComponent(state.pluginId)}`;
 
   const act = async (fn: () => Promise<unknown>) => {
-    setWorking(true);
+    setBusy(true);
     onError(null);
     try {
       await fn();
@@ -134,43 +160,49 @@ export function KillSwitch({
     } catch (err) {
       onError(messageOf(err));
     } finally {
-      setWorking(false);
+      setBusy(false);
     }
   };
 
-  const path = `/api/admin/plugins/${encodeURIComponent(state.pluginId)}`;
-
   return (
-    <Row>
-      {state.enabled ? (
-        <>
-          <Input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Reason (optional)"
-            aria-label="Disable reason"
-            style={{ maxWidth: 280 }}
-          />
+    <>
+      {heading ? <div className="cc-group__title">Kill switch</div> : null}
+      <Hint>
+        Disable rejects new jobs, AI calls, event handlers, plugin HTTP, publications, and storage
+        writes, and closes this plugin&rsquo;s browser sessions. In-process code that ignores
+        cancellation is not killed.
+      </Hint>
+      <Row>
+        {state.enabled ? (
+          <>
+            <Input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (optional)"
+              aria-label="Disable reason"
+              className="cc-input--reason"
+            />
+            <Button
+              type="button"
+              variant="danger"
+              disabled={busy}
+              onClick={() => void act(() => api.post(`${path}/disable`, { reason: reason.trim() }))}
+            >
+              Disable
+            </Button>
+          </>
+        ) : (
           <Button
             type="button"
-            variant="danger"
-            disabled={disabledControls}
-            onClick={() => void act(() => api.post(`${path}/disable`, { reason: reason.trim() }))}
+            variant="primary"
+            disabled={busy || needsDailyBudget}
+            onClick={() => void act(() => api.post(`${path}/enable`))}
           >
-            Disable
+            Enable
           </Button>
-        </>
-      ) : (
-        <Button
-          type="button"
-          variant="primary"
-          disabled={disabledControls || needsDailyBudget}
-          onClick={() => void act(() => api.post(`${path}/enable`))}
-        >
-          Enable
-        </Button>
-      )}
-    </Row>
+        )}
+      </Row>
+    </>
   );
 }
 
@@ -178,12 +210,14 @@ export function BudgetForm({
   pluginId,
   budget,
   disabled,
+  heading = true,
   onSaved,
   onError,
 }: {
   pluginId: string;
   budget: Budget;
   disabled?: boolean;
+  heading?: boolean;
   onSaved: () => void;
   onError: (message: string | null) => void;
 }) {
@@ -212,6 +246,8 @@ export function BudgetForm({
     }
   };
 
+  const off = disabled || busy;
+
   return (
     <form
       className="cc-stack"
@@ -220,7 +256,8 @@ export function BudgetForm({
         void save();
       }}
     >
-      <Row>
+      {heading ? <div className="cc-group__title">Budget</div> : null}
+      <div className="cc-toolbar">
         <Field label="Hourly $" hint="Empty is unlimited">
           <Input
             inputMode="decimal"
@@ -228,7 +265,7 @@ export function BudgetForm({
             onChange={(e) => setHourly(e.target.value)}
             placeholder="unlimited"
             aria-label="Hourly budget in dollars"
-            disabled={disabled || busy}
+            disabled={off}
           />
         </Field>
         <Field label="Daily $" hint="Required for automated plugins">
@@ -238,33 +275,34 @@ export function BudgetForm({
             onChange={(e) => setDaily(e.target.value)}
             placeholder="unlimited"
             aria-label="Daily budget in dollars"
-            disabled={disabled || busy}
+            disabled={off}
           />
         </Field>
-        <Field label="Monthly $">
+        <Field label="Monthly $" hint="Empty is unlimited">
           <Input
             inputMode="decimal"
             value={monthly}
             onChange={(e) => setMonthly(e.target.value)}
             placeholder="unlimited"
             aria-label="Monthly budget in dollars"
-            disabled={disabled || busy}
+            disabled={off}
           />
         </Field>
-        <Field label="On exceed">
-          <select
-            className="cc-input"
+        <Field label="On exceed" hint="When a window is spent">
+          <Select
             value={onExceed}
             onChange={(e) => setOnExceed(e.target.value as ExceedAction)}
-            disabled={disabled || busy}
+            disabled={off}
             aria-label="Action when a budget is exceeded"
           >
             <option value="reject">Reject the call</option>
             <option value="disable">Disable the plugin</option>
-          </select>
+          </Select>
         </Field>
-        <Button type="submit" disabled={disabled || busy}>
-          Save budget
+      </div>
+      <Row>
+        <Button type="submit" disabled={off}>
+          {busy ? "Saving…" : "Save budget"}
         </Button>
       </Row>
     </form>

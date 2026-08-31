@@ -13,7 +13,7 @@ import { PluginDetail } from "../core/PluginDetail";
 import { Plugins } from "../core/Plugins";
 import { Settings } from "../core/Settings";
 
-import { FatalScreen, LoginScreen, SetupScreen } from "./Gate";
+import { FatalScreen, LoadingScreen, LoginScreen, SetupScreen } from "./Gate";
 import { Layout } from "./Layout";
 import { reconcile } from "./registry";
 import { SessionProvider, useSession } from "./session";
@@ -31,7 +31,7 @@ function Root() {
 
   switch (state.phase) {
     case "loading":
-      return <div className="cc-gate" />;
+      return <LoadingScreen />;
     case "setup":
       return <SetupScreen available={state.available} />;
     case "login":

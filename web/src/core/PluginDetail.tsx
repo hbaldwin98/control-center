@@ -10,21 +10,27 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  Async,
   Badge,
   Callout,
   Card,
+  Dash,
   EmptyState,
   Grid,
+  Hint,
   LiveDot,
+  Loading,
   Metric,
+  Money,
   Page,
   PageHeader,
   RelativeTime,
   Sparkline,
   Stack,
+  Table,
+  Time,
   api,
-  formatTime,
-  formatUSD,
+  formatProgress,
   useActivity,
   useEvents,
   useSnapshot,
@@ -73,13 +79,13 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
   const declared = useMemo(() => module?.dashboard?.live ?? [], [module]);
   const watched = declared.length > 0 ? declared : [`${id}.**`];
   const activity = useActivity(watched);
-  const streamStatus = useStreamStatus();
+  const connected = useStreamStatus() === "live";
 
   if (states.status === "loading") {
     return (
       <Page>
         <PageHeader title={id} />
-        <EmptyState>Loading…</EmptyState>
+        <Loading label="Loading plugin…" />
       </Page>
     );
   }
@@ -107,6 +113,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
   const jobRows = jobs.status === "ready" ? jobs.data : [];
   const open = jobRows.filter((j) => isOpen(j.state));
   const running = open.filter((j) => j.state === "running");
+  const waiting = open.length - running.length;
   const failures = jobRows.filter((j) => isFailure(j.state)).length;
   const own = module?.nav[0];
   const dashboard = module?.dashboard;
@@ -130,42 +137,39 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
       />
 
       <Stack>
-        <div className="cc-row cc-row--tight">
-          <code className="cc-field__hint">{state.pluginId}</code>
-          <span className="cc-field__hint">·</span>
-          <Link className="cc-field__hint" to="/plugins">
-            All plugins
-          </Link>
-        </div>
+        <Hint>
+          <code>{state.pluginId}</code> · <Link to="/plugins">All plugins</Link>
+        </Hint>
 
         <PluginProblems state={state} />
         {error ? <Callout tone="danger">{error}</Callout> : null}
-        {jobs.status === "error" ? <Callout tone="danger">{jobs.error.message}</Callout> : null}
 
-        <Grid min={168}>
+        <Grid density="metric">
           <Metric
             label="Spent today"
-            value={formatUSD(state.committedDay, { compact: true })}
+            value={<Money microUsd={state.committedDay} compact />}
             hint={
-              state.reservedDay > 0
-                ? `${formatUSD(state.reservedDay, { compact: true })} held`
-                : state.budget.daily > 0
-                  ? `of ${formatUSD(state.budget.daily, { compact: true })}`
-                  : "no daily budget"
+              state.reservedDay > 0 ? (
+                <>
+                  <Money microUsd={state.reservedDay} compact /> held
+                </>
+              ) : state.budget.daily > 0 ? (
+                <>
+                  of <Money microUsd={state.budget.daily} compact />
+                </>
+              ) : (
+                "no daily budget"
+              )
             }
           />
           <Metric
             label="Running"
-            value={running.length}
-            hint={
-              open.length - running.length > 0
-                ? `${open.length - running.length} waiting`
-                : "nothing waiting"
-            }
+            value={jobs.status === "ready" ? running.length : <Dash />}
+            hint={waiting > 0 ? `${waiting} waiting` : "nothing waiting"}
           />
           <Metric
             label="Failed jobs"
-            value={failures}
+            value={jobs.status === "ready" ? failures : <Dash />}
             hint="in the last 50"
             tone={failures > 0 ? "warn" : "neutral"}
           />
@@ -185,25 +189,25 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
         <Card
           title="Activity"
           actions={
-            <span className="cc-row cc-row--tight">
+            <>
               <LiveDot
-                state={liveState(true, streamStatus === "live", activity.lastAt)}
-                label={liveLabel(true, streamStatus === "live", activity.lastAt)}
+                state={liveState(true, connected, activity.lastAt)}
+                label={liveLabel(true, connected, activity.lastAt)}
               />
-              <span className="cc-field__hint">{watched.join(", ")}</span>
-            </span>
+              <code className="cc-hint">{watched.join(", ")}</code>
+            </>
           }
         >
           <Sparkline
             values={activity.buckets}
             label={`${state.pluginId} event activity over the last ten minutes`}
-            height={34}
+            tall
           />
         </Card>
 
         {dashboard?.detail ? (
           <Card
-            title={`${state.name || state.pluginId}'s view`}
+            title={`${state.name || state.pluginId} view`}
             actions={
               declared.length > 0 ? <Badge tone="ok">live</Badge> : <Badge>not declared live</Badge>
             }
@@ -216,24 +220,24 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
           </Card>
         ) : null}
 
-        <Card title="Jobs" actions={<Link to={`/jobs?plugin=${encodeURIComponent(id)}`}>All jobs</Link>}>
-          {jobs.status === "loading" ? (
-            <div className="cc-field__hint">Loading…</div>
-          ) : jobRows.length === 0 ? (
-            <div className="cc-field__hint">This plugin has no jobs.</div>
-          ) : (
-            <table className="cc-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>State</th>
-                  <th>Progress</th>
-                  <th>When</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobRows.slice(0, 12).map((j) => (
+        <Card
+          title="Jobs"
+          actions={<Link to={`/jobs?plugin=${encodeURIComponent(id)}`}>All jobs</Link>}
+        >
+          <Async state={jobs} loading="Loading jobs…" empty="This plugin has no jobs.">
+            {(list) => (
+              <Table
+                head={
+                  <>
+                    <th className="cc-num">ID</th>
+                    <th>Name</th>
+                    <th>State</th>
+                    <th>Progress</th>
+                    <th>When</th>
+                  </>
+                }
+              >
+                {list.slice(0, 12).map((j) => (
                   <tr key={j.id}>
                     <td className="cc-num">
                       <Link to={`/jobs?id=${j.id}`}>{j.id}</Link>
@@ -242,57 +246,60 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
                       <code>{j.name}</code>
                     </td>
                     <td>
-                      <Badge tone={isFailure(j.state) ? "danger" : j.state === "running" ? "ok" : "neutral"}>
+                      <Badge
+                        tone={
+                          isFailure(j.state) ? "danger" : j.state === "running" ? "ok" : "neutral"
+                        }
+                      >
                         {j.state}
                       </Badge>
                     </td>
                     <td>
-                      {j.state === "running" ? `${Math.round(j.progress * 100)}%` : "—"}
-                      {j.progressMessage ? (
-                        <div className="cc-field__hint">{j.progressMessage}</div>
-                      ) : null}
+                      {j.state === "running" ? (
+                        formatProgress(j.progress, j.progressMessage ?? "")
+                      ) : j.progressMessage ? (
+                        j.progressMessage
+                      ) : (
+                        <Dash />
+                      )}
                     </td>
-                    <td className="cc-field__hint">
+                    <td>
                       <RelativeTime at={j.finishedAt ?? j.startedAt ?? j.createdAt} />
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          )}
+              </Table>
+            )}
+          </Async>
         </Card>
 
-        <Card
-          title="Live events"
-          actions={<span className="cc-field__hint">since this page opened</span>}
-        >
+        <Card title="Live events" actions={<Hint>since this page opened</Hint>}>
           {feed.length === 0 ? (
-            <div className="cc-field__hint">
+            <EmptyState>
               Nothing from <code>{state.pluginId}</code> yet.
-            </div>
+            </EmptyState>
           ) : (
-            <table className="cc-table">
-              <thead>
-                <tr>
+            <Table
+              head={
+                <>
                   <th>When</th>
                   <th>Type</th>
                   <th>Subject</th>
+                </>
+              }
+            >
+              {[...feed].reverse().map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <Time iso={e.createdAt} timeOnly />
+                  </td>
+                  <td>
+                    <code>{e.type}</code>
+                  </td>
+                  <td className="cc-truncate">{e.subject || <Dash />}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {[...feed].reverse().map((e) => (
-                  <tr key={e.id}>
-                    <td className="cc-field__hint" title={e.createdAt}>
-                      {formatTime(e.createdAt)}
-                    </td>
-                    <td>
-                      <code>{e.type}</code>
-                    </td>
-                    <td className="cc-truncate">{e.subject || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </Table>
           )}
         </Card>
 
@@ -305,6 +312,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
             key={budgetKey(state)}
             pluginId={state.pluginId}
             budget={state.budget}
+            heading={false}
             onSaved={states.reload}
             onError={setError}
           />
@@ -313,14 +321,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
         <ConfigCard state={state} onSaved={states.reload} onError={setError} />
 
         <Card title="Kill switch">
-          <Stack>
-            <p className="cc-field__hint">
-              Disable rejects new jobs, AI calls, event handlers, plugin HTTP, publications, and
-              storage writes, and closes this plugin's browser sessions. In-process code that
-              ignores cancellation is not killed.
-            </p>
-            <KillSwitch state={state} onChanged={states.reload} onError={setError} />
-          </Stack>
+          <KillSwitch state={state} heading={false} onChanged={states.reload} onError={setError} />
         </Card>
       </Stack>
     </Page>

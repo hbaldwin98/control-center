@@ -2,14 +2,16 @@
  * Plugin administration: the kill switch, budgets, health, and schema-backed config.
  *
  * This is the flat list — every plugin, every control, on one page. A single plugin's
- * detail screen at `/plugins/<id>` offers the same controls beside its live view.
+ * detail screen at `/plugins/<id>` offers the same controls beside its live view, from the
+ * same components.
  */
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  Async,
   Callout,
   Card,
-  EmptyState,
+  Hint,
   Page,
   PageHeader,
   Stack,
@@ -40,22 +42,15 @@ export function Plugins() {
         title="Plugins"
         lede="The kill switch, budgets, health, and schema-backed config. Disabled plugins stay listed with the reason."
       />
-
-      {plugins.status === "error" ? (
-        <Callout tone="danger">{plugins.error.message}</Callout>
-      ) : null}
-
-      {plugins.status === "loading" ? (
-        <EmptyState>Loading…</EmptyState>
-      ) : plugins.status === "ready" && plugins.data.length === 0 ? (
-        <EmptyState>No plugins are registered yet.</EmptyState>
-      ) : plugins.status === "ready" ? (
-        <Stack>
-          {plugins.data.map((st) => (
-            <PluginCard key={st.pluginId} state={st} onChanged={plugins.reload} />
-          ))}
-        </Stack>
-      ) : null}
+      <Async state={plugins} loading="Loading plugins…" empty="No plugins are registered yet.">
+        {(list) => (
+          <Stack>
+            {list.map((st) => (
+              <PluginCard key={st.pluginId} state={st} onChanged={plugins.reload} />
+            ))}
+          </Stack>
+        )}
+      </Async>
     </Page>
   );
 }
@@ -66,19 +61,18 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
   return (
     <Card
       title={
-        <Link to={`/plugins/${encodeURIComponent(state.pluginId)}`}>
+        <Link className="cc-tile__link" to={`/plugins/${encodeURIComponent(state.pluginId)}`}>
           {state.name || state.pluginId}
         </Link>
       }
-      actions={<PluginBadges state={state} />}
       muted={!state.enabled}
+      actions={<PluginBadges state={state} />}
     >
       <Stack>
-        <div className="cc-row cc-row--tight">
-          <code className="cc-field__hint">{state.pluginId}</code>
-        </div>
-
-        {state.description ? <p className="cc-field__hint">{state.description}</p> : null}
+        <Hint>
+          <code>{state.pluginId}</code>
+          {state.description ? ` — ${state.description}` : ""}
+        </Hint>
 
         <PluginProblems state={state} />
         {error ? <Callout tone="danger">{error}</Callout> : null}
@@ -101,12 +95,6 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
           onSaved={onChanged}
           onError={setError}
         />
-
-        <p className="cc-field__hint">
-          Disable rejects new jobs, AI calls, event handlers, plugin HTTP, publications, and
-          storage writes, and closes this plugin's browser sessions. In-process code that
-          ignores cancellation is not killed.
-        </p>
 
         <KillSwitch state={state} onChanged={onChanged} onError={setError} />
       </Stack>

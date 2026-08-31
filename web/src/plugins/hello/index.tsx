@@ -11,12 +11,17 @@ import {
   Button,
   Callout,
   Card,
+  Dash,
   EmptyState,
+  Hint,
+  Loading,
   Page,
   PageHeader,
   PluginDisabledError,
   RelativeTime,
   Stack,
+  Table,
+  Time,
   pluginApi,
   useSnapshot,
 } from "@cc/ui";
@@ -80,27 +85,28 @@ function useTicks(): UseSnapshotResult<TicksPage> {
   });
 }
 
+/** The tick history as a table. Shared by the screen and the detail panel. */
 function TickTable({ ticks, limit }: { ticks: Tick[]; limit?: number }) {
-  const rows = limit ? ticks.slice(0, limit) : ticks;
   return (
-    <table className="cc-table">
-      <thead>
-        <tr>
+    <Table
+      head={
+        <>
           <th>When</th>
           <th>Note</th>
           <th>AI</th>
+        </>
+      }
+    >
+      {(limit ? ticks.slice(0, limit) : ticks).map((t) => (
+        <tr key={t.id}>
+          <td>
+            <Time iso={t.at} />
+          </td>
+          <td>{t.note}</td>
+          <td>{t.aiText || <Dash />}</td>
         </tr>
-      </thead>
-      <tbody>
-        {rows.map((t) => (
-          <tr key={t.id}>
-            <td className="cc-mono">{t.at}</td>
-            <td>{t.note}</td>
-            <td className="cc-truncate">{t.aiText || "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+      ))}
+    </Table>
   );
 }
 
@@ -146,14 +152,12 @@ function History() {
         {snap.status === "error" && !disabled ? (
           <Callout tone="danger">{snap.error.message}</Callout>
         ) : null}
-        {note ? <div className="cc-field__hint">Config note: {note}</div> : null}
+        {note ? <Hint>Config note: {note}</Hint> : null}
 
         {snap.status === "loading" ? (
-          <EmptyState>Loading…</EmptyState>
+          <Loading label="Loading ticks…" />
         ) : ticks.length === 0 ? (
-          <EmptyState>
-            No ticks yet. Enable the plugin and press Tick now, or wait for the minute cron.
-          </EmptyState>
+          <EmptyState>No ticks yet. Enable the plugin and press Tick now, or wait for the minute cron.</EmptyState>
         ) : (
           <Card title="History">
             <TickTable ticks={ticks} />
@@ -164,46 +168,38 @@ function History() {
   );
 }
 
-/** The dashboard tile: the last tick, and what the model said about it. */
+/** The dashboard tile: how many ticks, how long ago, and what the model said. */
 function Tile({ enabled }: PluginSurfaceProps) {
   const snap = useTicks();
 
-  if (snap.status === "loading") return <div className="cc-field__hint">Loading…</div>;
+  if (snap.status === "loading") return <Hint>Loading…</Hint>;
   if (snap.status === "error") {
     return (
-      <div className="cc-field__hint">
-        {snap.error instanceof PluginDisabledError ? "Disabled." : snap.error.message}
-      </div>
+      <Hint>{snap.error instanceof PluginDisabledError ? "Disabled." : snap.error.message}</Hint>
     );
   }
 
   const [latest] = snap.data.ticks;
-  if (!latest) {
-    return (
-      <div className="cc-field__hint">
-        {enabled ? "No ticks yet." : "Disabled, and no ticks recorded."}
-      </div>
-    );
-  }
+  if (!latest) return <Hint>{enabled ? "No ticks yet." : "Disabled, and no ticks recorded."}</Hint>;
 
   return (
-    <div className="cc-stack">
-      <div className="cc-row cc-row--tight">
+    <Stack>
+      <div className="cc-row">
         <Badge tone={enabled ? "ok" : "neutral"}>{snap.data.ticks.length} ticks</Badge>
-        <span className="cc-field__hint">
+        <span className="cc-hint">
           <RelativeTime at={latest.at} prefix="last" />
         </span>
       </div>
-      {latest.aiText ? <div className="cc-truncate">{latest.aiText}</div> : null}
-    </div>
+      {latest.aiText ? <Hint>{latest.aiText}</Hint> : null}
+    </Stack>
   );
 }
 
-/** The panel on Hello's detail screen: the most recent ticks, without leaving the page. */
+/** The panel on Hello's detail screen: recent ticks, without leaving the page. */
 function Detail() {
   const snap = useTicks();
-  if (snap.status !== "ready") return <div className="cc-field__hint">Loading…</div>;
-  if (snap.data.ticks.length === 0) return <div className="cc-field__hint">No ticks yet.</div>;
+  if (snap.status !== "ready") return <Hint>Loading…</Hint>;
+  if (snap.data.ticks.length === 0) return <Hint>No ticks yet.</Hint>;
   return <TickTable ticks={snap.data.ticks} limit={8} />;
 }
 

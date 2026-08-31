@@ -1,37 +1,41 @@
 /**
  * The control centre's front page.
  *
- * One tile per registered plugin, in a grid, each one a live summary of what the host
- * knows — state, spend against budget, open work, recent failures — plus whatever the
- * plugin itself chooses to show. A plugin that declares live patterns gets a live
- * indicator and an activity history driven by the one shared stream; one that declares
- * nothing still gets a tile, just a static one. Clicking a tile opens that plugin.
+ * One tile per registered plugin, in a grid, each a live summary of what the host knows —
+ * state, spend against budget, open work, recent failures — plus whatever the plugin
+ * itself chooses to show. A plugin that declares live patterns gets a live indicator and
+ * an activity history driven by the one shared stream; one that declares nothing still
+ * gets a tile, just a static one. Clicking a tile opens that plugin.
  */
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
+  Async,
   Badge,
-  Callout,
   Card,
+  Dash,
   EmptyState,
   Grid,
+  Hint,
   LiveDot,
   Meter,
   Metric,
+  Money,
   Page,
   PageHeader,
   RelativeTime,
   Sparkline,
   Stack,
+  Table,
+  Time,
   api,
-  formatTime,
-  formatUSD,
+  formatProgress,
   useActivity,
   useEvents,
   useSnapshot,
   useStreamStatus,
 } from "@cc/ui";
-import type { Event, PluginModule } from "@cc/ui";
+import type { Event, PluginModule, StreamStatus } from "@cc/ui";
 import { PluginSurface } from "./PluginSurface";
 import { liveLabel, liveState } from "./live";
 import { isFailure, isOpen, verdictOf } from "./types";
@@ -62,8 +66,8 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
     useCallback((signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }), []),
     { events: ["core.plugin.**", "core.ai.usage"] },
   );
-  // Job rows carry progress that changes constantly; the events are invalidations and the
-  // list refetches, which is the shape the rest of the UI already uses for jobs.
+  // Job events are invalidations, so the list refetches rather than reconstructing rows
+  // from partial payloads — the shape the rest of the UI already uses for jobs.
   const jobs = useSnapshot<Job[]>(
     useCallback((signal) => api.snapshot<Job[]>("/api/jobs?limit=200", { signal }), []),
     { events: "core.job.**" },
@@ -102,24 +106,29 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
         actions={<StreamIndicator />}
       />
       <Stack>
-        {states.status === "error" ? <Callout tone="danger">{states.error.message}</Callout> : null}
-        {jobs.status === "error" ? <Callout tone="danger">{jobs.error.message}</Callout> : null}
-
-        <Grid min={168}>
+        <Grid density="metric">
           <Metric
             label="Plugins"
-            value={states.status === "ready" ? `${enabledCount}/${rows.length}` : "—"}
+            value={states.status === "ready" ? `${enabledCount}/${rows.length}` : <Dash />}
             hint={attention > 0 ? `${attention} need attention` : "all healthy"}
             tone={attention > 0 ? "warn" : "neutral"}
           />
           <Metric
             label="Spent today"
-            value={states.status === "ready" ? formatUSD(spentToday, { compact: true }) : "—"}
-            hint={heldToday > 0 ? `${formatUSD(heldToday, { compact: true })} held` : "nothing held"}
+            value={states.status === "ready" ? <Money microUsd={spentToday} compact /> : <Dash />}
+            hint={
+              heldToday > 0 ? (
+                <>
+                  <Money microUsd={heldToday} compact /> held
+                </>
+              ) : (
+                "nothing held"
+              )
+            }
           />
           <Metric
             label="Running"
-            value={jobs.status === "ready" ? running.length : "—"}
+            value={jobs.status === "ready" ? running.length : <Dash />}
             hint={queued.length > 0 ? `${queued.length} waiting` : "nothing waiting"}
           />
           <Metric
@@ -136,40 +145,40 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
           />
         </Grid>
 
-        {states.status === "loading" ? (
-          <EmptyState>Loading plugins…</EmptyState>
-        ) : rows.length === 0 ? (
-          <EmptyState>No plugins are registered yet.</EmptyState>
-        ) : (
-          <Grid min={320}>
-            {rows.map((state) => (
-              <PluginTile
-                key={state.pluginId}
-                state={state}
-                module={modules.get(state.pluginId)}
-                open={byPlugin.open.get(state.pluginId) ?? []}
-                failures={byPlugin.failed.get(state.pluginId) ?? 0}
-              />
-            ))}
-          </Grid>
-        )}
+        <Async state={states} loading="Loading plugins…" empty="No plugins are registered yet.">
+          {(list) => (
+            <Grid density="tile">
+              {list.map((state) => (
+                <PluginTile
+                  key={state.pluginId}
+                  state={state}
+                  module={modules.get(state.pluginId)}
+                  open={byPlugin.open.get(state.pluginId) ?? []}
+                  failures={byPlugin.failed.get(state.pluginId) ?? 0}
+                />
+              ))}
+            </Grid>
+          )}
+        </Async>
 
-        <Card title="Running now" actions={<span className="cc-field__hint">{running.length}</span>}>
-          {jobs.status === "loading" ? (
-            <div className="cc-field__hint">Loading…</div>
-          ) : running.length === 0 ? (
-            <div className="cc-field__hint">Nothing is running.</div>
-          ) : (
-            <table className="cc-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Job</th>
-                  <th>Progress</th>
-                  <th>Started</th>
-                </tr>
-              </thead>
-              <tbody>
+        <Card title="Running now" actions={<Hint>{running.length}</Hint>}>
+          <Async
+            state={jobs}
+            loading="Loading jobs…"
+            empty="Nothing is running."
+            isEmpty={() => running.length === 0}
+          >
+            {() => (
+              <Table
+                head={
+                  <>
+                    <th className="cc-num">ID</th>
+                    <th>Job</th>
+                    <th>Progress</th>
+                    <th>Started</th>
+                  </>
+                }
+              >
                 {running.map((j) => (
                   <tr key={j.id}>
                     <td className="cc-num">
@@ -177,64 +186,55 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
                     </td>
                     <td>
                       <Link to={`/plugins/${encodeURIComponent(j.pluginId)}`}>{j.pluginId}</Link>
-                      <span className="cc-field__hint">.{j.name}</span>
+                      <span className="cc-hint">.{j.name}</span>
                     </td>
                     <td>
-                      <div className="cc-row cc-row--tight">
-                        <Meter value={j.progress} max={1} tone="accent" label={`${j.name} progress`} />
-                        <span className="cc-field__hint">{Math.round(j.progress * 100)}%</span>
-                      </div>
-                      {j.progressMessage ? (
-                        <div className="cc-field__hint">{j.progressMessage}</div>
-                      ) : null}
+                      <Meter value={j.progress} max={1} tone="accent" label={`${j.name} progress`} />
+                      <span className="cc-hint">
+                        {formatProgress(j.progress, j.progressMessage ?? "")}
+                      </span>
                     </td>
-                    <td className="cc-field__hint">
-                      {j.startedAt ? <RelativeTime at={j.startedAt} /> : "—"}
-                    </td>
+                    <td>{j.startedAt ? <RelativeTime at={j.startedAt} /> : <Dash />}</td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          )}
+              </Table>
+            )}
+          </Async>
         </Card>
 
-        <Card
-          title="Recent alerts"
-          actions={<span className="cc-field__hint">live, since this page opened</span>}
-        >
+        <Card title="Recent alerts" actions={<Hint>live, since this page opened</Hint>}>
           {alerts.length === 0 ? (
-            <div className="cc-field__hint">No alerts yet.</div>
+            <EmptyState>No alerts yet.</EmptyState>
           ) : (
-            <table className="cc-table">
-              <thead>
-                <tr>
+            <Table
+              head={
+                <>
                   <th>When</th>
                   <th>Type</th>
                   <th>Source</th>
                   <th>Subject</th>
+                </>
+              }
+            >
+              {[...alerts].reverse().map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <Time iso={e.createdAt} timeOnly />
+                  </td>
+                  <td>
+                    <code>{e.type}</code>
+                  </td>
+                  <td>
+                    {modules.has(e.source) ? (
+                      <Link to={`/plugins/${encodeURIComponent(e.source)}`}>{e.source}</Link>
+                    ) : (
+                      <code>{e.source}</code>
+                    )}
+                  </td>
+                  <td>{e.subject || <Dash />}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {[...alerts].reverse().map((e) => (
-                  <tr key={e.id}>
-                    <td className="cc-field__hint" title={e.createdAt}>
-                      {formatTime(e.createdAt)}
-                    </td>
-                    <td>
-                      <code>{e.type}</code>
-                    </td>
-                    <td>
-                      {modules.has(e.source) ? (
-                        <Link to={`/plugins/${encodeURIComponent(e.source)}`}>{e.source}</Link>
-                      ) : (
-                        <span className="cc-field__hint">{e.source}</span>
-                      )}
-                    </td>
-                    <td>{e.subject || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </Table>
           )}
         </Card>
       </Stack>
@@ -257,17 +257,16 @@ function PluginTile({
   const dashboard = module?.dashboard;
   const live = dashboard?.live ?? [];
   const activity = useActivity(live);
-  const streamStatus = useStreamStatus();
+  const connected = useStreamStatus() === "live";
 
-  const verdict = verdictOf(state, failures);
-  const badge = VERDICTS[verdict];
+  const badge = VERDICTS[verdictOf(state, failures)];
   const running = open.filter((j) => j.state === "running");
+  const waiting = open.length - running.length;
   const detail = `/plugins/${encodeURIComponent(state.pluginId)}`;
   const own = module?.nav[0];
 
   return (
     <Card
-      className="cc-tile"
       muted={!state.enabled}
       title={
         <Link className="cc-tile__link" to={detail}>
@@ -276,35 +275,33 @@ function PluginTile({
       }
       actions={
         <LiveDot
-          state={liveState(live.length > 0, streamStatus === "live", activity.lastAt)}
-          label={liveLabel(live.length > 0, streamStatus === "live", activity.lastAt)}
+          state={liveState(live.length > 0, connected, activity.lastAt)}
+          label={liveLabel(live.length > 0, connected, activity.lastAt)}
         />
       }
     >
       <Stack>
-        <div className="cc-row cc-row--tight">
+        <div className="cc-row">
           <Badge tone={badge.tone}>{badge.label}</Badge>
           {state.automated ? <Badge>automated</Badge> : null}
-          <code className="cc-field__hint">{state.pluginId}</code>
+          <code className="cc-hint">{state.pluginId}</code>
         </div>
 
         {dashboard?.summary || state.description ? (
-          <p className="cc-tile__lede">{dashboard?.summary || state.description}</p>
+          <Hint>{dashboard?.summary || state.description}</Hint>
         ) : null}
 
-        {!state.enabled && state.disabledReason ? (
-          <div className="cc-field__hint">{state.disabledReason}</div>
-        ) : null}
+        {!state.enabled && state.disabledReason ? <Hint>{state.disabledReason}</Hint> : null}
 
         <div className="cc-tile__stats">
           <div>
             <div className="cc-tile__stat-label">Today</div>
             <div className="cc-tile__stat-value">
-              {formatUSD(state.committedDay, { compact: true })}
+              <Money microUsd={state.committedDay} compact />
               {state.budget.daily > 0 ? (
-                <span className="cc-field__hint">
+                <span className="cc-hint">
                   {" / "}
-                  {formatUSD(state.budget.daily, { compact: true })}
+                  <Money microUsd={state.budget.daily} compact />
                 </span>
               ) : null}
             </div>
@@ -316,18 +313,16 @@ function PluginTile({
                 label={`${state.pluginId} daily budget`}
               />
             ) : (
-              <div className="cc-field__hint">no daily budget</div>
+              <Hint>no daily budget</Hint>
             )}
           </div>
           <div>
             <div className="cc-tile__stat-label">Work</div>
             <div className="cc-tile__stat-value">{running.length}</div>
-            <div className="cc-field__hint">
-              {open.length - running.length > 0
-                ? `${open.length - running.length} waiting`
-                : "nothing waiting"}
+            <Hint>
+              {waiting > 0 ? `${waiting} waiting` : "nothing waiting"}
               {failures > 0 ? ` · ${failures} failed` : ""}
-            </div>
+            </Hint>
           </div>
         </div>
 
@@ -337,15 +332,15 @@ function PluginTile({
               values={activity.buckets}
               label={`${state.pluginId} event activity over the last ten minutes`}
             />
-            <div className="cc-field__hint">
-              {activity.lastAt !== null ? (
+            <Hint>
+              {activity.last ? (
                 <>
-                  <code>{activity.last?.type}</code> <RelativeTime at={activity.lastAt} />
+                  <code>{activity.last.type}</code> <RelativeTime at={activity.lastAt} />
                 </>
               ) : (
                 `watching ${live.join(", ")}`
               )}
-            </div>
+            </Hint>
           </div>
         ) : null}
 
@@ -360,30 +355,27 @@ function PluginTile({
   );
 }
 
-/** The header indicator for the one shared connection. */
+const STREAM: Record<StreamStatus, { tone: "ok" | "warn" | "danger" | "neutral"; label: string }> = {
+  live: { tone: "ok", label: "live" },
+  connecting: { tone: "warn", label: "connecting" },
+  reconnecting: { tone: "warn", label: "reconnecting" },
+  reset: { tone: "warn", label: "reloading" },
+  offline: { tone: "danger", label: "offline" },
+  idle: { tone: "neutral", label: "idle" },
+};
+
+/**
+ * The header indicator for the one shared connection.
+ *
+ * Every live claim on this page is downstream of it, so when it is not up the page says so
+ * once, plainly, rather than leaving each tile to look healthy on stale data.
+ */
 function StreamIndicator() {
   const status = useStreamStatus();
-  const tone =
-    status === "live"
-      ? "ok"
-      : status === "connecting" || status === "reconnecting"
-        ? "warn"
-        : "danger";
-  const label =
-    status === "live"
-      ? "live"
-      : status === "connecting"
-        ? "connecting"
-        : status === "reconnecting"
-          ? "reconnecting"
-          : status === "reset"
-            ? "reloading"
-            : status === "offline"
-              ? "offline"
-              : "idle";
+  const { tone, label } = STREAM[status];
   return (
     <Badge tone={tone}>
-      <LiveDot state={status === "live" ? "live" : "off"} label={`stream ${label}`} />
+      <LiveDot state={status === "live" ? "live" : "off"} label={`event stream ${label}`} />
       {label}
     </Badge>
   );

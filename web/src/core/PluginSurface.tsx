@@ -8,6 +8,7 @@
  */
 import { Component } from "react";
 import type { ComponentType, ErrorInfo, ReactNode } from "react";
+import { Hint } from "@cc/ui";
 import type { PluginSurfaceProps } from "@cc/ui";
 
 type BoundaryProps = {
@@ -32,8 +33,8 @@ class SurfaceBoundary extends Component<BoundaryProps, BoundaryState> {
     if (this.state.error) {
       return (
         <div className="cc-surface cc-surface--failed" role="status">
-          This plugin's own view failed to render.
-          <div className="cc-field__hint">{this.state.error.message}</div>
+          This plugin&rsquo;s own view failed to render.
+          <Hint>{this.state.error.message}</Hint>
         </div>
       );
     }
