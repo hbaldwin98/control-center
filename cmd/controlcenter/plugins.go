@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/plugins/hello"
+	"github.com/hbaldwin98/control-center/plugins/tid"
 )
 
 // This is the only file in the program that imports plugin packages.
@@ -14,5 +15,6 @@ import (
 func registerPlugins(r *pluginhost.Registry) error {
 	return r.RegisterAll(
 		hello.New(),
+		tid.New(),
 	)
 }

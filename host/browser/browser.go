@@ -32,6 +32,18 @@ type Page interface {
 	WaitFor(ctx context.Context, selector string, d time.Duration) error
 	Content(ctx context.Context) (string, error)
 	Get(ctx context.Context, url string) (Resource, error)
+	// Responses are JSON/CSV bodies this page fetched (XHR/fetch), already allowlisted.
+	// An Angular app that POSTs usage to its API shows up here; Get only does GET and
+	// does not send in-page Authorization headers.
+	Responses(ctx context.Context) ([]Resource, error)
+	// Fill sets the value of the first matching input, textarea, or contenteditable.
+	Fill(ctx context.Context, selector, value string) error
+	// Click the first matching element. A navigation that follows is allowlist-checked
+	// the same way as Goto.
+	Click(ctx context.Context, selector string) error
+	// FillCredential fills selector with the secret of a stored credential. The plugin
+	// never receives the secret; the host reads it and types it.
+	FillCredential(ctx context.Context, selector, credentialID string) error
 	Close(ctx context.Context) error
 }
 

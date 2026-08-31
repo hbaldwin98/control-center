@@ -87,6 +87,18 @@ func (p *scopedPage) Get(ctx context.Context, url string) (Resource, error) {
 	return p.inner.Get(WithPlugin(ctx, p.pluginID), url)
 }
 
+func (p *scopedPage) Responses(ctx context.Context) ([]Resource, error) {
+	return p.inner.Responses(WithPlugin(ctx, p.pluginID))
+}
+
+func (p *scopedPage) Fill(ctx context.Context, selector, value string) error {
+	return p.inner.Fill(WithPlugin(ctx, p.pluginID), selector, value)
+}
+
+func (p *scopedPage) Click(ctx context.Context, selector string) error {
+	return p.inner.Click(WithPlugin(ctx, p.pluginID), selector)
+}
+
 func (p *scopedPage) Close(ctx context.Context) error {
 	return p.inner.Close(WithPlugin(ctx, p.pluginID))
 }

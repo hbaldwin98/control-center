@@ -284,6 +284,67 @@ func (p *page) WaitFor(ctx context.Context, selector string, d time.Duration) er
 	}
 }
 
+func (p *page) Fill(ctx context.Context, selector, value string) error {
+	if err := p.admit(ctx); err != nil {
+		return err
+	}
+	if strings.TrimSpace(selector) == "" {
+		return fmt.Errorf("%w: empty selector", ErrEngine)
+	}
+	op, cancel := p.opCtx(ctx, p.sess.svc.opts.NavigationTimeout)
+	defer cancel()
+	if err := p.engine.Fill(op, selector, value); err != nil {
+		if p.sess.ctx.Err() != nil {
+			return ErrClosed
+		}
+		if op.Err() != nil && !errors.Is(err, ErrDenied) {
+			return op.Err()
+		}
+		return err
+	}
+	return nil
+}
+
+func (p *page) Click(ctx context.Context, selector string) error {
+	if err := p.admit(ctx); err != nil {
+		return err
+	}
+	if strings.TrimSpace(selector) == "" {
+		return fmt.Errorf("%w: empty selector", ErrEngine)
+	}
+	op, cancel := p.opCtx(ctx, p.sess.svc.opts.NavigationTimeout)
+	defer cancel()
+	doc, final, err := p.engine.Click(op, selector, func(next *url.URL) error {
+		return p.gateURL(ctx, next)
+	})
+	if p.sess.ctx.Err() != nil {
+		return ErrClosed
+	}
+	if err != nil {
+		if op.Err() != nil && !errors.Is(err, ErrDenied) {
+			return op.Err()
+		}
+		return err
+	}
+	if doc == "" && final == nil {
+		return nil
+	}
+	if final != nil {
+		if err := p.gateURL(ctx, final); err != nil {
+			return err
+		}
+		if err := p.checkSubresources(ctx, final, doc); err != nil {
+			return err
+		}
+	}
+	if doc != "" {
+		p.mu.Lock()
+		p.html = doc
+		p.mu.Unlock()
+	}
+	return nil
+}
+
 func (p *page) Content(ctx context.Context) (string, error) {
 	if err := p.admit(ctx); err != nil {
 		return "", err
@@ -347,6 +408,24 @@ func (p *page) Get(ctx context.Context, raw string) (Resource, error) {
 	return res, nil
 }
 
+func (p *page) Responses(ctx context.Context) ([]Resource, error) {
+	if err := p.admit(ctx); err != nil {
+		return nil, err
+	}
+	out := p.engine.Resources()
+	kept := out[:0]
+	for _, r := range out {
+		if len(r.Body) > p.sess.svc.opts.MaxResourceBytes {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	if len(kept) == 0 {
+		return nil, nil
+	}
+	return kept, nil
+}
+
 func (p *page) Close(ctx context.Context) error {
 	return p.closeEngine(ctx)
 }
@@ -394,57 +473,9 @@ func resourceRefs(doc string) ([]string, error) {
 	return refs, nil
 }
 
-func htmlMatches(doc, selector string) (bool, error) {
-	if selector == "" {
-		return false, fmt.Errorf("empty selector")
-	}
-	tag, id, class := parseSelector(selector)
-	root, err := html.Parse(strings.NewReader(doc))
-	if err != nil {
-		return false, err
-	}
-	var found bool
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if found {
-			return
-		}
-		if n.Type == html.ElementNode {
-			if (tag == "" || n.Data == tag) &&
-				(id == "" || attr(n, "id") == id) &&
-				(class == "" || hasClass(n, class)) {
-				found = true
-				return
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(root)
-	return found, nil
-}
-
-func parseSelector(sel string) (tag, id, class string) {
-	sel = strings.TrimSpace(sel)
-	if strings.HasPrefix(sel, "#") {
-		return "", strings.TrimPrefix(sel, "#"), ""
-	}
-	if strings.HasPrefix(sel, ".") {
-		return "", "", strings.TrimPrefix(sel, ".")
-	}
-	if i := strings.IndexByte(sel, '#'); i >= 0 {
-		return sel[:i], sel[i+1:], ""
-	}
-	if i := strings.IndexByte(sel, '.'); i >= 0 {
-		return sel[:i], "", sel[i+1:]
-	}
-	return sel, "", ""
-}
-
 func attr(n *html.Node, name string) string {
 	for _, a := range n.Attr {
-		if a.Key == name {
+		if strings.EqualFold(a.Key, name) {
 			return a.Val
 		}
 	}

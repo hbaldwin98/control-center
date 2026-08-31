@@ -45,7 +45,7 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
   mutation, and browser-session admission points.
-- Two plugins: `hello` (validating) and `bidrl` (real).
+- Two plugins: `hello` (validating) and `tid` (energy usage). `bidrl` remains sketched.
 
 ### Not in v1
 
@@ -281,4 +281,7 @@ Step 7 is not optional. It is where the host API gets fixed while fixing it is s
    may be added later without changing persisted jobs.
 4. **Browser.** The host owns sessions, allowlists, and teardown. Plugins pass the DNS
    names they intend to touch; they never import Playwright or an equivalent. Disable
-   closes admitted sessions rather than letting navigation finish.
+   closes admitted sessions rather than letting navigation finish. Login is `Fill` /
+   `FillCredential` / `Click` each session; there is no persistent cookie jar. SPA JSON
+   that the page POSTs after login is read from `Responses`, not by giving plugins
+   `Evaluate` or a raw fetch client with the in-page token.

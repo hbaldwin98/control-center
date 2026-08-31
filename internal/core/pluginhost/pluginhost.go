@@ -17,6 +17,7 @@ import (
 	"github.com/hbaldwin98/control-center/host"
 	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/browser"
+	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
@@ -50,15 +51,17 @@ const (
 
 // Options wires the lower-layer modules pluginhost composes.
 type Options struct {
-	DB     *storage.Store
-	Blobs  *storage.BlobStore
-	Events *events.Log
-	Policy *policy.Store
-	Jobs   *jobs.Queue
-	AI     *ai.Service
+	DB      *storage.Store
+	Blobs   *storage.BlobStore
+	Events  *events.Log
+	Policy  *policy.Store
+	Jobs    *jobs.Queue
+	AI      *ai.Service
 	Browser *browser.Service
-	Log    *slog.Logger
-	Now    func() time.Time
+	Creds   credentials.Runtime
+	Refs    credentials.ReferenceStore
+	Log     *slog.Logger
+	Now     func() time.Time
 
 	ShutdownTimeout time.Duration
 }

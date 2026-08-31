@@ -275,6 +275,165 @@ func TestGetUsesCookieJarAndLimit(t *testing.T) {
 	}
 }
 
+func TestFillAndClickLogin(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><form method="post" action="/login">
+<input type="email" name="user" id="email">
+<input type="password" name="pass">
+<button type="submit">Sign in</button>
+</form>`)
+	})
+	mux.HandleFunc("POST /login", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "form", http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("user") != "me@tid.test" || r.Form.Get("pass") != "secret" {
+			http.Error(w, "denied", http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "ok", Path: "/"})
+		http.Redirect(w, r, "https://hello.test/usage", http.StatusFound)
+	})
+	mux.HandleFunc("GET /usage", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := r.Cookie("sid"); err != nil {
+			http.Error(w, "no session", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<table class="usage"><tr><th>Date</th><th>kWh</th></tr>
+<tr><td>2026-08-01</td><td>12.5</td></tr></table>`)
+	})
+	h := newHarness(t, map[string]http.Handler{"hello.test": mux})
+	ctx := h.ctxHello()
+	sess, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close(ctx)
+	page, err := sess.NewPage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Close(ctx)
+	if err := page.Goto(ctx, "https://hello.test/"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.WaitFor(ctx, `input[type=password]`, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Fill(ctx, "#email", "me@tid.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Fill(ctx, `input[type=password]`, "secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Click(ctx, `button[type=submit]`); err != nil {
+		t.Fatal(err)
+	}
+	html, err := page.Content(ctx)
+	if err != nil || !strings.Contains(html, "12.5") {
+		t.Fatalf("usage page %q %v", html, err)
+	}
+}
+
+func TestResponsesRecordsJSON(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<html><body>ok</body></html>`)
+	})
+	mux.HandleFunc("GET /ouaf/retrieve-usage-for-sa", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":{"usageList":[{"periodStartDate":"2026-08-01","usage":3}]}}`)
+	})
+	h := newHarness(t, map[string]http.Handler{"hello.test": mux})
+	ctx := h.ctxHello()
+	sess, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close(ctx)
+	page, err := sess.NewPage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Close(ctx)
+	if err := page.Goto(ctx, "https://hello.test/"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := page.Get(ctx, "https://hello.test/ouaf/retrieve-usage-for-sa")
+	if err != nil || res.Status != 200 {
+		t.Fatalf("get: %+v %v", res, err)
+	}
+	got, err := page.Responses(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(string(got[0].Body), "usageList") {
+		t.Fatalf("responses %+v", got)
+	}
+}
+
+func TestFillAngularFormControlName(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /authentication/login", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<app-root><form method="post" action="/authentication/login">
+<input type="email" formControlName="email">
+<input type="password" formControlName="password">
+<button mat-flat-button color="primary" class="w-100">Sign in</button>
+</form></app-root>`)
+	})
+	mux.HandleFunc("POST /authentication/login", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("email") != "me@tid.test" || r.Form.Get("password") != "secret" {
+			http.Error(w, "denied", http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "ok", Path: "/"})
+		http.Redirect(w, r, "https://hello.test/usage/graphs", http.StatusFound)
+	})
+	mux.HandleFunc("GET /usage/graphs", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := r.Cookie("sid"); err != nil {
+			http.Error(w, "no session", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<table><tr><th>Date</th><th>kWh</th></tr><tr><td>2026-08-01</td><td>4</td></tr></table>`)
+	})
+	h := newHarness(t, map[string]http.Handler{"hello.test": mux})
+	ctx := h.ctxHello()
+	sess, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close(ctx)
+	page, err := sess.NewPage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Close(ctx)
+	if err := page.Goto(ctx, "https://hello.test/authentication/login"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Fill(ctx, `input[formControlName=email]`, "me@tid.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Fill(ctx, `input[formControlName=password]`, "secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Click(ctx, `button[mat-flat-button]`); err != nil {
+		t.Fatal(err)
+	}
+	html, err := page.Content(ctx)
+	if err != nil || !strings.Contains(html, ">4<") {
+		t.Fatalf("usage page %q %v", html, err)
+	}
+}
+
 func TestDeniedPublishesEvent(t *testing.T) {
 	h := newHarness(t, map[string]http.Handler{"hello.test": HTMLHandler(`x`)})
 	ctx := WithJob(h.ctxHello(), "9")

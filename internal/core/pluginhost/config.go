@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/hbaldwin98/control-center/host"
@@ -32,9 +33,13 @@ func (r *Registry) UpdateConfig(ctx context.Context, pluginID string, value json
 	if err := validateAgainstSchema(s.decl.manifest.Config, value); err != nil {
 		return err
 	}
+	credIDs, err := credentialIDsFromConfig(value)
+	if err != nil {
+		return err
+	}
 	now := rfc3339(r.now())
-	err := r.opts.DB.Tx(ctx, func(tx storage.Tx) error {
-		_, err := tx.Exec(ctx,
+	err = r.opts.DB.Tx(ctx, func(tx storage.Tx) error {
+		if _, err := tx.Exec(ctx,
 			`INSERT INTO core_plugin_config(plugin_id, value_json, version, updated_at, updated_by)
 			 VALUES (?, ?, 1, ?, ?)
 			 ON CONFLICT(plugin_id) DO UPDATE SET
@@ -42,14 +47,35 @@ func (r *Registry) UpdateConfig(ctx context.Context, pluginID string, value json
 			     version    = core_plugin_config.version + 1,
 			     updated_at = excluded.updated_at,
 			     updated_by = excluded.updated_by`,
-			pluginID, string(value), now, actor)
-		return err
+			pluginID, string(value), now, actor); err != nil {
+			return err
+		}
+		if r.opts.Refs == nil {
+			return nil
+		}
+		return r.opts.Refs.ReplaceTx(ctx, tx, "plugin:"+pluginID+":config", credIDs)
 	})
 	if err != nil {
 		return err
 	}
 	s.notifyConfig(value)
 	return nil
+}
+
+func credentialIDsFromConfig(value json.RawMessage) ([]string, error) {
+	if len(value) == 0 || string(value) == "null" {
+		return nil, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(value, &doc); err != nil {
+		return nil, fmt.Errorf("%w: value is not JSON: %v", ErrInvalidConfig, err)
+	}
+	id, _ := doc["credential_id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, nil
+	}
+	return []string{id}, nil
 }
 
 func validateAgainstSchema(spec host.ConfigSpec, value json.RawMessage) error {

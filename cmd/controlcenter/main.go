@@ -167,6 +167,7 @@ func run() error {
 
 	ph, err := pluginhost.New(ctx, store, pluginhost.Options{
 		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: jq, AI: aisvc, Browser: br,
+		Creds: creds, Refs: creds,
 	})
 	if err != nil {
 		return err

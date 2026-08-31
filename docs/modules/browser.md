@@ -48,6 +48,18 @@ type Page interface {
     // session's cookie jar and the same SSRF checks as Goto. Bounded by max-resource.
     Get(ctx context.Context, url string) (Resource, error)
 
+    // Responses are JSON/CSV bodies the page fetched (XHR/fetch), already
+    // allowlisted. An SPA that POSTs usage to its API with a bearer token in
+    // localStorage shows up here; Get cannot replay that. Bounded by max-resource.
+    Responses(ctx context.Context) ([]Resource, error)
+
+    // Fill sets the value of the first matching control. It does not run script.
+    Fill(ctx context.Context, selector, value string) error
+
+    // Click the first matching element. A navigation that follows is allowlist-checked
+    // the same way as Goto.
+    Click(ctx context.Context, selector string) error
+
     Close(ctx context.Context) error
 }
 
@@ -59,11 +71,11 @@ type Resource struct {
 }
 ```
 
-Conversation and DOM state belong to the `Page`. The plugin parses HTML itself; v1 does
-not expose `Evaluate`, screenshots, or a raw CDP handle. Those would leak the engine into
-plugin code and make the allowlist unenforceable.
+Conversation and DOM state belong to the `Page`. The plugin parses HTML and captured
+XHR bodies itself; v1 does not expose `Evaluate`, screenshots, or a raw CDP handle.
+Those would leak the engine into plugin code and make the allowlist unenforceable.
 
-`Open`, `NewPage`, `Goto`, `WaitFor`, `Content`, and `Get` all require a plugin identity
+`Open`, `NewPage`, `Goto`, `WaitFor`, `Content`, `Get`, `Responses`, `Fill`, and `Click` all require a plugin identity
 on the context (stamped by the scoped facade) and call `policy.Gate.CheckWork` before
 doing work. A cancelled context does not leave a Chromium context behind: `Session.Close`
 and plugin disable both close the underlying browser context.
@@ -168,13 +180,16 @@ Finite, host-wide, and not configurable by plugin code:
 | Sessions per plugin | 1 | Collection is sequential; raise later if a second plugin needs overlap. |
 | Pages per session | 4 | Extra `NewPage` returns `ErrLimit`. |
 | Document HTML (`Content`) | 5 MiB | Larger pages fail the call; the session stays up. |
-| Resource body (`Get`) | 10 MiB | Same as BIDRL's per-image cap, enforced here so every plugin inherits it. |
+| Resource body (`Get` / `Responses`) | 10 MiB | Same as BIDRL's per-image cap, enforced here so every plugin inherits it. `Responses` keeps the last 32 capturable XHR/fetch bodies. |
 | Navigation timeout | 30s | `WaitFor` uses the caller's duration, capped at 60s. |
 
 The engine is one Chromium (or equivalent) for the process. Host-wide page count is
 capped so a stuck plugin cannot spawn unbounded renderers. Cookies, storage, and cache
 are scoped to the session and discarded on `Close` or disable. V1 has no persistent
-browser profile and no credential-backed login jar.
+browser profile. A site that needs a password is logged into each session with `Fill`
+and the host-only `FillCredential` on the plugin-facing page (the host reads the
+credential and types it; the plugin never receives the secret). There is still no
+saved cookie jar.
 
 ---
 
@@ -231,7 +246,7 @@ reason (scheme, host, port, userinfo, address); callers use `errors.Is`.
 
 | Missing | Why |
 |---|---|
-| `Evaluate` / CDP / screenshots | Engine leak; allowlist would not see scripted fetches the same way. Parse `Content`. |
-| Persistent profiles, saved cookies | A login jar is a credential. If a site needs auth, that is a later capability, not a cookie file in the plugin. |
+| `Evaluate` / CDP / screenshots | Engine leak; allowlist would not see scripted fetches the same way. Parse `Content` and `Responses`. |
+| Persistent profiles, saved cookies | A login jar is a credential store. Login each session with `Fill` / `FillCredential` / `Click`; cookies die with the session. |
 | Host-hardcoded site lists | The plugin names the hosts it intends to touch; the host enforces them. |
 | A notifications-style admin UI in v1 | Denied events and logs are enough until a second operator needs a session list. |

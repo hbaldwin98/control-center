@@ -148,6 +148,7 @@ func (s *pwSession) NewPage(ctx context.Context) (EnginePage, error) {
 		_ = page.Close()
 		return nil, err
 	}
+	page.OnResponse(p.onResponse)
 	return p, nil
 }
 
@@ -170,10 +171,11 @@ type pwPage struct {
 	sess *pwSession
 	page playwright.Page
 
-	mu     sync.Mutex
-	check  func(*url.URL) error
-	denied error
-	closed bool
+	mu       sync.Mutex
+	check    func(*url.URL) error
+	denied   error
+	closed   bool
+	captured []Resource
 }
 
 func (p *pwPage) onRoute(route playwright.Route) {
@@ -207,6 +209,64 @@ func (p *pwPage) onRoute(route playwright.Route) {
 		return
 	}
 	_ = route.Continue()
+}
+
+func (p *pwPage) onResponse(resp playwright.Response) {
+	if resp == nil {
+		return
+	}
+	req := resp.Request()
+	if req == nil {
+		return
+	}
+	switch strings.ToLower(req.ResourceType()) {
+	case "xhr", "fetch":
+	default:
+		return
+	}
+	raw := req.URL()
+	u, err := url.Parse(raw)
+	if err != nil {
+		return
+	}
+	p.mu.Lock()
+	check := p.check
+	closed := p.closed
+	p.mu.Unlock()
+	if closed || check == nil {
+		return
+	}
+	if err := check(u); err != nil {
+		return
+	}
+	body, err := resp.Body()
+	if err != nil || len(body) == 0 {
+		return
+	}
+	mime := ""
+	if h := resp.Headers(); h != nil {
+		mime = h["content-type"]
+	}
+	if !captureMIME(mime, body) {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	p.captured = appendCaptured(p.captured, Resource{
+		URL:    raw,
+		MIME:   mime,
+		Body:   body,
+		Status: resp.Status(),
+	}, maxCapturedResponses, defaultMaxResource)
+}
+
+func (p *pwPage) Resources() []Resource {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return copyResources(p.captured)
 }
 
 func (p *pwPage) setDenied(err error) {
@@ -354,6 +414,68 @@ func (p *pwPage) Content(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return doc, nil
+}
+
+func (p *pwPage) Fill(ctx context.Context, selector, value string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return ErrClosed
+	}
+	page := p.page
+	p.mu.Unlock()
+	err := page.Fill(selector, value, playwright.PageFillOptions{Timeout: timeoutMS(ctx)})
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if p.sessClosed() {
+			return ErrClosed
+		}
+		return fmt.Errorf("%w: %v", ErrEngine, err)
+	}
+	return nil
+}
+
+func (p *pwPage) Click(ctx context.Context, selector string, check func(*url.URL) error) (string, *url.URL, error) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return "", nil, ErrClosed
+	}
+	p.check = check
+	p.denied = nil
+	page := p.page
+	p.mu.Unlock()
+
+	err := page.Click(selector, playwright.PageClickOptions{Timeout: timeoutMS(ctx)})
+	if denied := p.takeDenied(); denied != nil {
+		return "", nil, denied
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", nil, ctx.Err()
+		}
+		if p.sessClosed() {
+			return "", nil, ErrClosed
+		}
+		return "", nil, fmt.Errorf("%w: %v", ErrEngine, err)
+	}
+	doc, err := page.Content()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", nil, ctx.Err()
+		}
+		return "", nil, fmt.Errorf("%w: %v", ErrEngine, err)
+	}
+	final, err := url.Parse(page.URL())
+	if err != nil {
+		return doc, nil, nil
+	}
+	return doc, final, nil
 }
 
 func (p *pwPage) Close(context.Context) error {

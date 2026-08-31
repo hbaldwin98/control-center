@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hbaldwin98/control-center/host"
@@ -19,6 +20,7 @@ import (
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/browser"
+	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
@@ -38,42 +40,51 @@ type scopedHost struct {
 	clock    host.Clock
 }
 
-func (h *scopedHost) PluginID() string          { return h.pluginID }
-func (h *scopedHost) AI() hostai.AI             { return h.ai }
+func (h *scopedHost) PluginID() string             { return h.pluginID }
+func (h *scopedHost) AI() hostai.AI                { return h.ai }
 func (h *scopedHost) Browser() hostbrowser.Browser { return h.browser }
-func (h *scopedHost) Jobs() hostjobs.Jobs       { return h.jobs }
-func (h *scopedHost) Events() host.Events    { return h.events }
-func (h *scopedHost) Store() hoststorage.DB  { return h.store }
-func (h *scopedHost) Blobs() hoststorage.Blobs { return h.blobs }
-func (h *scopedHost) Config() host.Config    { return h.config }
-func (h *scopedHost) Log() host.Logger       { return h.log }
-func (h *scopedHost) Clock() host.Clock { return h.clock }
+func (h *scopedHost) Jobs() hostjobs.Jobs          { return h.jobs }
+func (h *scopedHost) Events() host.Events          { return h.events }
+func (h *scopedHost) Store() hoststorage.DB        { return h.store }
+func (h *scopedHost) Blobs() hoststorage.Blobs     { return h.blobs }
+func (h *scopedHost) Config() host.Config          { return h.config }
+func (h *scopedHost) Log() host.Logger             { return h.log }
+func (h *scopedHost) Clock() host.Clock            { return h.clock }
 
-type browserAdapter struct{ inner browser.Browser }
+type browserAdapter struct {
+	inner browser.Browser
+	creds credentials.Runtime
+}
 
 func (a *browserAdapter) Open(ctx context.Context, opts hostbrowser.OpenOptions) (hostbrowser.Session, error) {
 	sess, err := a.inner.Open(ctx, browser.OpenOptions{AllowedHosts: opts.AllowedHosts})
 	if err != nil {
 		return nil, mapBrowserErr(err)
 	}
-	return browserSessionAdapter{inner: sess}, nil
+	return browserSessionAdapter{inner: sess, creds: a.creds}, nil
 }
 
-type browserSessionAdapter struct{ inner browser.Session }
+type browserSessionAdapter struct {
+	inner browser.Session
+	creds credentials.Runtime
+}
 
 func (s browserSessionAdapter) NewPage(ctx context.Context) (hostbrowser.Page, error) {
 	p, err := s.inner.NewPage(ctx)
 	if err != nil {
 		return nil, mapBrowserErr(err)
 	}
-	return browserPageAdapter{inner: p}, nil
+	return browserPageAdapter{inner: p, creds: s.creds}, nil
 }
 
 func (s browserSessionAdapter) Close(ctx context.Context) error {
 	return mapBrowserErr(s.inner.Close(ctx))
 }
 
-type browserPageAdapter struct{ inner browser.Page }
+type browserPageAdapter struct {
+	inner browser.Page
+	creds credentials.Runtime
+}
 
 func (p browserPageAdapter) Goto(ctx context.Context, url string) error {
 	return mapBrowserErr(p.inner.Goto(ctx, url))
@@ -94,6 +105,43 @@ func (p browserPageAdapter) Get(ctx context.Context, url string) (hostbrowser.Re
 		return hostbrowser.Resource{}, mapBrowserErr(err)
 	}
 	return hostbrowser.Resource{URL: r.URL, MIME: r.MIME, Body: r.Body, Status: r.Status}, nil
+}
+
+func (p browserPageAdapter) Responses(ctx context.Context) ([]hostbrowser.Resource, error) {
+	rs, err := p.inner.Responses(ctx)
+	if err != nil {
+		return nil, mapBrowserErr(err)
+	}
+	if len(rs) == 0 {
+		return nil, nil
+	}
+	out := make([]hostbrowser.Resource, len(rs))
+	for i, r := range rs {
+		out[i] = hostbrowser.Resource{URL: r.URL, MIME: r.MIME, Body: r.Body, Status: r.Status}
+	}
+	return out, nil
+}
+
+func (p browserPageAdapter) Fill(ctx context.Context, selector, value string) error {
+	return mapBrowserErr(p.inner.Fill(ctx, selector, value))
+}
+
+func (p browserPageAdapter) Click(ctx context.Context, selector string) error {
+	return mapBrowserErr(p.inner.Click(ctx, selector))
+}
+
+func (p browserPageAdapter) FillCredential(ctx context.Context, selector, credentialID string) error {
+	if strings.TrimSpace(credentialID) == "" {
+		return fmt.Errorf("%w: empty credential id", hostbrowser.ErrEngine)
+	}
+	if p.creds == nil {
+		return fmt.Errorf("%w: credentials not configured", hostbrowser.ErrEngine)
+	}
+	secret, err := p.creds.Token(ctx, credentialID)
+	if err != nil {
+		return err
+	}
+	return mapBrowserErr(p.inner.Fill(ctx, selector, secret))
 }
 
 func (p browserPageAdapter) Close(ctx context.Context) error {
@@ -134,7 +182,7 @@ func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
 	}
 	var browserHandle hostbrowser.Browser
 	if r.opts.Browser != nil {
-		browserHandle = &browserAdapter{inner: browser.Scoped(r.opts.Browser, id)}
+		browserHandle = &browserAdapter{inner: browser.Scoped(r.opts.Browser, id), creds: r.opts.Creds}
 	} else {
 		browserHandle = disabledBrowser{}
 	}
@@ -145,7 +193,7 @@ func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
 		jobs:     &jobsAdapter{inner: jobs.Scoped(r.opts.Jobs, id)},
 		events:   &gatedEvents{inner: events.Scoped(r.opts.Events, id), db: r.opts.DB, gate: r.opts.Policy, pluginID: id},
 		store:    &gatedStore{db: r.opts.DB, inner: storage.Prefixed(r.opts.DB, id), gate: r.opts.Policy, pluginID: id},
-		blobs:    &blobAdapter{inner: storage.WithMutationAdmission(r.opts.Blobs.Scoped(id), func(ctx context.Context, tx storage.Tx) error {
+		blobs: &blobAdapter{inner: storage.WithMutationAdmission(r.opts.Blobs.Scoped(id), func(ctx context.Context, tx storage.Tx) error {
 			return r.opts.Policy.CheckWorkTx(ctx, tx, id)
 		})},
 		config: cfg,
@@ -431,7 +479,7 @@ func (a *aiAdapter) Embed(ctx context.Context, req hostai.EmbedRequest) (*hostai
 		Usage: hostai.Usage{
 			InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
 			CostMicroUSD: hostpolicy.MicroUSD(resp.Usage.CostMicroUSD),
-			Latency: resp.Usage.Latency, Attempts: resp.Usage.Attempts,
+			Latency:      resp.Usage.Latency, Attempts: resp.Usage.Attempts,
 		},
 	}, nil
 }
@@ -453,7 +501,7 @@ func mapChatResp(resp *ai.ChatResponse) *hostai.ChatResponse {
 		Usage: hostai.Usage{
 			InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
 			CostMicroUSD: hostpolicy.MicroUSD(resp.Usage.CostMicroUSD),
-			Latency: resp.Usage.Latency, Attempts: resp.Usage.Attempts,
+			Latency:      resp.Usage.Latency, Attempts: resp.Usage.Attempts,
 		},
 		Finish: resp.Finish,
 	}
@@ -471,7 +519,7 @@ func (s streamAdapter) Recv() (hostai.Chunk, error) {
 		u := hostai.Usage{
 			InputTokens: c.Usage.InputTokens, OutputTokens: c.Usage.OutputTokens,
 			CostMicroUSD: hostpolicy.MicroUSD(c.Usage.CostMicroUSD),
-			Latency: c.Usage.Latency, Attempts: c.Usage.Attempts,
+			Latency:      c.Usage.Latency, Attempts: c.Usage.Attempts,
 		}
 		out.Usage = &u
 	}

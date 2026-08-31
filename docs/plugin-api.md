@@ -179,7 +179,7 @@ but invoke no plugin code.
 | Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
-| Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). |
+| Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). For a login form, `Fill` / `Click` / `FillCredential` — the host types the password; you never see it. For an SPA that POSTs JSON after login, parse `Responses`. |
 | Anything belonging to another plugin | Plugins compose through events, not imports. | Subscribe to their events. |
 
 Ordinary `net/http` for APIs is still the plugin's own. The host-managed browser is the
