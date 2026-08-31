@@ -60,6 +60,8 @@ func (p *Plugin) writeInsight(jc hostjobs.Context, h host.Host, cfg settings) er
 		b.WriteByte('\n')
 	}
 
+	_ = jc.Logf("asking model for an insight over %d days", len(days))
+	aiStart := time.Now()
 	resp, err := h.AI().Chat(jc, hostai.ChatRequest{
 		Model:  "cheap-chat",
 		Schema: insightSchema,
@@ -71,8 +73,11 @@ func (p *Plugin) writeInsight(jc hostjobs.Context, h host.Host, cfg settings) er
 		}},
 	})
 	if err != nil {
+		_ = jc.Logf("insight model call failed after %dms: %v", time.Since(aiStart).Milliseconds(), err)
 		return err
 	}
+	_ = jc.Logf("insight model answered in %dms (%d in / %d out tokens)",
+		time.Since(aiStart).Milliseconds(), resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
 	var parsed struct {
 		Summary        string   `json:"summary"`
@@ -80,7 +85,11 @@ func (p *Plugin) writeInsight(jc hostjobs.Context, h host.Host, cfg settings) er
 		Anomalies      []string `json:"anomalies"`
 	}
 	if len(resp.Parsed) > 0 {
-		_ = json.Unmarshal(resp.Parsed, &parsed)
+		if err := json.Unmarshal(resp.Parsed, &parsed); err != nil {
+			_ = jc.Logf("structured insight did not unmarshal, falling back to plain text: %v", err)
+		}
+	} else {
+		_ = jc.Logf("model returned no structured output; falling back to plain text")
 	}
 	if parsed.Summary == "" {
 		parsed.Summary = strings.TrimSpace(resp.Text)

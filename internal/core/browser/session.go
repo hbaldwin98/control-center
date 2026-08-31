@@ -167,14 +167,40 @@ func (p *page) opCtx(ctx context.Context, timeout time.Duration) (context.Contex
 func (p *page) check(ctx context.Context, raw string) (*url.URL, error) {
 	u, err := parsePageURL(raw)
 	if err != nil {
-		p.sess.svc.deny(ctx, p.sess.pluginID, p.sess.jobID, "", "scheme")
+		p.denied(ctx, "start url", nil, err)
 		return nil, err
 	}
 	if err := checkURL(u, p.sess.allowed); err != nil {
-		p.sess.svc.deny(ctx, p.sess.pluginID, p.sess.jobID, deniedHost(u), deniedReason(err))
+		p.denied(ctx, "start url", u, err)
 		return nil, err
 	}
 	return u, nil
+}
+
+// denied logs the rejection with the URL and the stage that produced it, then
+// publishes the audit event. The plugin only sees the error, so the log is the one
+// place that says which of a page's many requests was blocked.
+func (p *page) denied(ctx context.Context, stage string, u *url.URL, err error) {
+	var d *denial
+	if errors.As(err, &d) {
+		if d.reported {
+			return
+		}
+		d.reported = true
+		if u == nil && d.target != "" {
+			if parsed, perr := url.Parse(d.target); perr == nil {
+				u = parsed
+			}
+		}
+	}
+	p.sess.svc.opts.Log.Warn("browser: url denied",
+		"plugin", p.sess.pluginID,
+		"job", p.sess.jobID,
+		"stage", stage,
+		"host", deniedHost(u),
+		"reason", deniedReason(err),
+		"err", err)
+	p.sess.svc.deny(ctx, p.sess.pluginID, p.sess.jobID, deniedHost(u), deniedReason(err))
 }
 
 func (p *page) Goto(ctx context.Context, raw string) error {
@@ -190,6 +216,7 @@ func (p *page) Goto(ctx context.Context, raw string) error {
 	doc, final, err := p.engine.Goto(op, u, func(next *url.URL) error {
 		return p.gateURL(ctx, next)
 	})
+	p.logBlocked(ctx)
 	if p.sess.ctx.Err() != nil {
 		return ErrClosed
 	}
@@ -197,12 +224,21 @@ func (p *page) Goto(ctx context.Context, raw string) error {
 		if op.Err() != nil && !errors.Is(err, ErrDenied) {
 			return op.Err()
 		}
+		if errors.Is(err, ErrDenied) {
+			p.denied(ctx, "engine", nil, err)
+		}
 		return err
 	}
 	base := final
 	if base == nil {
 		base = u
 	}
+	p.sess.svc.opts.Log.Debug("browser: navigated",
+		"plugin", p.sess.pluginID,
+		"job", p.sess.jobID,
+		"url", u.Redacted(),
+		"final", base.Redacted(),
+		"bytes", len(doc))
 	if err := p.checkSubresources(ctx, base, doc); err != nil {
 		return err
 	}
@@ -214,13 +250,52 @@ func (p *page) Goto(ctx context.Context, raw string) error {
 
 func (p *page) gateURL(ctx context.Context, u *url.URL) error {
 	if err := checkURL(u, p.sess.allowed); err != nil {
-		p.sess.svc.deny(ctx, p.sess.pluginID, p.sess.jobID, deniedHost(u), deniedReason(err))
+		p.denied(ctx, "request", u, err)
 		return err
 	}
 	return nil
 }
 
+// logBlocked reports subresources the engine aborted during the last operation. The
+// page rendered without them, so this is the only trace that a host is missing from
+// the session allowlist -- the place to look when a page half-loads.
+func (p *page) logBlocked(ctx context.Context) {
+	r, ok := p.engine.(blockReporter)
+	if !ok {
+		return
+	}
+	for _, b := range r.TakeBlocked() {
+		p.sess.svc.opts.Log.Warn("browser: subresource blocked",
+			"plugin", p.sess.pluginID,
+			"job", p.sess.jobID,
+			"url", b.URL,
+			"reason", b.Reason,
+			"err", b.Err)
+		p.sess.svc.deny(ctx, p.sess.pluginID, p.sess.jobID, blockedHost(b.URL), b.Reason)
+	}
+}
+
+func blockedHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return deniedHost(u)
+}
+
+// gatesRequests reports whether the engine allowlist-checks every network request it
+// makes. An engine that does (Playwright, via route interception) has already blocked
+// any off-allowlist subresource, so re-scanning the rendered DOM would only fail the
+// navigation on references the browser never fetched.
+func (p *page) gatesRequests() bool {
+	g, ok := p.engine.(requestGater)
+	return ok && g.GatesRequests()
+}
+
 func (p *page) checkSubresources(ctx context.Context, pageURL *url.URL, doc string) error {
+	if p.gatesRequests() {
+		return nil
+	}
 	refs, err := resourceRefs(doc)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrEngine, err)
@@ -228,8 +303,9 @@ func (p *page) checkSubresources(ctx context.Context, pageURL *url.URL, doc stri
 	for _, ref := range refs {
 		abs, err := pageURL.Parse(ref)
 		if err != nil {
-			p.sess.svc.deny(ctx, p.sess.pluginID, p.sess.jobID, "", "scheme")
-			return fmt.Errorf("%w: scheme", ErrDenied)
+			err := denyTarget("scheme", ref+" is not a parseable reference")
+			p.denied(ctx, "subresource", nil, err)
+			return err
 		}
 		if abs.Scheme == "" {
 			abs.Scheme = "https"
@@ -317,12 +393,16 @@ func (p *page) Click(ctx context.Context, selector string) error {
 	doc, final, err := p.engine.Click(op, selector, func(next *url.URL) error {
 		return p.gateURL(ctx, next)
 	})
+	p.logBlocked(ctx)
 	if p.sess.ctx.Err() != nil {
 		return ErrClosed
 	}
 	if err != nil {
 		if op.Err() != nil && !errors.Is(err, ErrDenied) {
 			return op.Err()
+		}
+		if errors.Is(err, ErrDenied) {
+			p.denied(ctx, "engine", nil, err)
 		}
 		return err
 	}

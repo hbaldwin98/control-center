@@ -87,10 +87,13 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 	if err := jc.Progress(0.1, "opening My TID"); err != nil {
 		return nil, err
 	}
+	_ = jc.Logf("opening login page %s", loginURL)
 	if err := page.Goto(jc, loginURL); err != nil {
+		_ = jc.Logf("login page did not load: %v", err)
 		return nil, fmt.Errorf("tid: login page: %w", err)
 	}
 	if err := waitAny(jc, page, passwordSelectors, 45*time.Second); err != nil {
+		_ = jc.Logf("no password field matched %d selectors within 45s: %v", len(passwordSelectors), err)
 		return nil, fmt.Errorf("tid: no password field on login page: %w", err)
 	}
 
@@ -102,6 +105,7 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 		}
 	}
 	if !userFilled {
+		_ = jc.Logf("no username field matched any of %d selectors; the login page markup has changed", len(userSelectors))
 		return nil, hostjobs.Permanent(fmt.Errorf("tid: could not find a username field on the login page"))
 	}
 	passFilled := false
@@ -112,6 +116,7 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 		}
 	}
 	if !passFilled {
+		_ = jc.Logf("no password field accepted credential %s across %d selectors", cfg.CredentialID, len(passwordSelectors))
 		return nil, fmt.Errorf("tid: password field")
 	}
 
@@ -123,6 +128,7 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 		}
 	}
 	if !clicked {
+		_ = jc.Logf("no sign-in button matched any of %d selectors", len(submitSelectors))
 		return nil, hostjobs.Permanent(fmt.Errorf("tid: could not find a sign-in button"))
 	}
 	if err := jc.Progress(0.35, "signed in"); err != nil {
@@ -131,6 +137,7 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 	waitLogin(jc, page, 25*time.Second)
 
 	found := waitHarvest(jc, page, 20*time.Second)
+	_ = jc.Logf("after sign-in, harvested %d readings from the landing page", len(found))
 
 	if cfg.UsageURL != "" {
 		u, err := url.Parse(cfg.UsageURL)
@@ -139,10 +146,13 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 		}
 		res, err := page.Get(jc, cfg.UsageURL)
 		if err != nil {
+			_ = jc.Logf("configured usage_url %s failed: %v", cfg.UsageURL, err)
 			return nil, fmt.Errorf("tid: usage_url: %w", err)
 		}
 		_ = storeBlob(jc, h, "sync/override", res.MIME, res.Body)
-		if got := Parse(res.Body, res.MIME); len(got) > len(found) {
+		got := Parse(res.Body, res.MIME)
+		_ = jc.Logf("configured usage_url returned %d bytes of %s, parsed %d readings", len(res.Body), res.MIME, len(got))
+		if len(got) > len(found) {
 			found = got
 		}
 	}
@@ -151,24 +161,30 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 		if err := jc.Progress(0.55, "opening usage graphs"); err != nil {
 			return nil, err
 		}
+		_ = jc.Logf("no readings yet; opening usage graphs at %s", usageURL)
 		if err := page.Goto(jc, usageURL); err != nil {
 			_ = jc.Logf("usage graphs: %v", err)
 		}
 		found = waitHarvest(jc, page, 30*time.Second)
+		_ = jc.Logf("usage graphs yielded %d readings", len(found))
 	}
 
 	if len(found) == 0 {
 		if err := jc.Progress(0.7, "trying usage paths"); err != nil {
 			return nil, err
 		}
+		_ = jc.Logf("still empty; trying %d fallback usage paths", len(usagePaths))
 		for _, path := range usagePaths {
 			if jc.Err() != nil {
 				return nil, jc.Err()
 			}
 			if err := page.Goto(jc, "https://"+portalHost+path); err != nil {
+				_ = jc.Logf("path %s did not load: %v", path, err)
 				continue
 			}
-			if got := waitHarvest(jc, page, 8*time.Second); len(got) > len(found) {
+			got := waitHarvest(jc, page, 8*time.Second)
+			_ = jc.Logf("path %s yielded %d readings", path, len(got))
+			if len(got) > len(found) {
 				found = got
 			}
 			if len(found) > 0 {
@@ -178,6 +194,10 @@ func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Read
 	}
 
 	if len(found) == 0 {
+		_ = jc.Logf("exhausted every usage source and found no rows; saving page HTML for inspection")
+		if html, err := page.Content(jc); err == nil {
+			_ = storeBlob(jc, h, "sync/last.html", "text/html", []byte(html))
+		}
 		return nil, hostjobs.Permanent(fmt.Errorf("tid: signed in but found no usage rows; on My TID open Usage Graphs and paste the CSV export instead"))
 	}
 	if html, err := page.Content(jc); err == nil {

@@ -65,3 +65,26 @@ type EnginePage interface {
 	Click(ctx context.Context, selector string, check func(*url.URL) error) (doc string, final *url.URL, err error)
 	Close(ctx context.Context) error
 }
+
+// requestGater is the optional EnginePage capability of allowlist-checking every
+// network request the engine issues, including subresources the page pulls in.
+type requestGater interface {
+	GatesRequests() bool
+}
+
+// maxBlockedReports caps the per-operation blocked-subresource log so a page that
+// beacons in a loop cannot grow the report without bound.
+const maxBlockedReports = 32
+
+// Blocked is one aborted subresource: the page loaded without it.
+type Blocked struct {
+	URL    string
+	Reason string
+	Err    string
+}
+
+// blockReporter is the optional EnginePage capability of reporting subresources it
+// aborted. Reported requests never left the host; they are logged, not fatal.
+type blockReporter interface {
+	TakeBlocked() []Blocked
+}

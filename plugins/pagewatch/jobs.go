@@ -63,8 +63,10 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 	s := p.settings()
 	target, allowedHost, err := validateTarget(s.URL)
 	if err != nil {
+		_ = jc.Logf("target %q rejected: %v", s.URL, err)
 		return hostjobs.Permanent(err)
 	}
+	_ = jc.Logf("checking %s (host %s, expected text %q)", target, allowedHost, s.ExpectedText)
 
 	if err := jc.Progress(0.05, "opening page"); err != nil {
 		return err
@@ -72,12 +74,15 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 	browserStart := time.Now()
 	visible, err := fetchVisibleText(jc, h, target, allowedHost)
 	if err != nil {
+		_ = jc.Logf("browser failed after %dms: %v", time.Since(browserStart).Milliseconds(), err)
 		return fmt.Errorf("pagewatch: browser: %w", err)
 	}
 	browserMS := time.Since(browserStart).Milliseconds()
 	if visible == "" {
+		_ = jc.Logf("browser returned 0 bytes of visible text after %dms", browserMS)
 		return fmt.Errorf("pagewatch: page has no visible text")
 	}
+	_ = jc.Logf("fetched %d bytes of visible text in %dms", len(visible), browserMS)
 
 	var previousURL, previousHash, previousSummary, lastAIAt, previousCheckedAt string
 	err = h.Store().QueryRow(jc, `
@@ -97,6 +102,8 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 	if !expectedFound {
 		status = "attention"
 	}
+	_ = jc.Logf("status %s (hash %s, previous %s, expected text present: %t, last checked %s)",
+		status, shortHash(contentHash), shortHash(previousHash), expectedFound, orNever(previousCheckedAt))
 
 	now := h.Clock().Now().UTC()
 	lastAI, _ := time.Parse(time.RFC3339Nano, lastAIAt)
@@ -107,6 +114,7 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 		if err := jc.Progress(0.5, "asking model"); err != nil {
 			return err
 		}
+		_ = jc.Logf("asking model (reason: %s; last ran %s)", aiReason(status, lastAI), orNever(lastAIAt))
 		aiStart := time.Now()
 		resp, err := h.AI().Chat(jc, hostai.ChatRequest{
 			Model:     "cheap-chat",
@@ -116,14 +124,20 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 			)}},
 		})
 		if err != nil {
+			_ = jc.Logf("model call failed after %dms: %v", time.Since(aiStart).Milliseconds(), err)
 			return fmt.Errorf("pagewatch: ai: %w", err)
 		}
 		aiMS = time.Since(aiStart).Milliseconds()
+		_ = jc.Logf("model answered in %dms (%d in / %d out tokens, %d microUSD)",
+			aiMS, resp.Usage.InputTokens, resp.Usage.OutputTokens, int64(resp.Usage.CostMicroUSD))
 		summary = truncateUTF8(strings.TrimSpace(resp.Text), maxSummaryText)
 		inputTokens = resp.Usage.InputTokens
 		outputTokens = resp.Usage.OutputTokens
 		costMicroUSD = int64(resp.Usage.CostMicroUSD)
 		lastAIAt = now.Format(time.RFC3339Nano)
+	}
+	if !aiRan {
+		_ = jc.Logf("skipped the model: unchanged and last asked %s (interval %s)", orNever(lastAIAt), aiInterval)
 	}
 	if summary == "" {
 		summary = "Page loaded and the expected text was present."
@@ -134,8 +148,10 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 	}
 	stored := truncateUTF8(visible, maxStoredText)
 	if _, err := h.Blobs().Put(jc, snapshotKey, bytes.NewBufferString(stored), "text/plain; charset=utf-8"); err != nil {
+		_ = jc.Logf("saving snapshot %s failed: %v", snapshotKey, err)
 		return fmt.Errorf("pagewatch: save snapshot: %w", err)
 	}
+	_ = jc.Logf("saved %d byte snapshot to %s", len(stored), snapshotKey)
 
 	result := checkEvent{
 		CheckedAt: now.Format(time.RFC3339Nano), URL: target, Status: status,
@@ -263,4 +279,35 @@ func boolInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+// shortHash keeps a content hash readable in a job log line.
+func shortHash(h string) string {
+	if h == "" {
+		return "none"
+	}
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
+}
+
+func orNever(ts string) string {
+	if ts == "" {
+		return "never"
+	}
+	return ts
+}
+
+// aiReason says why the model was consulted, so a log line explains a cost rather than
+// only recording it.
+func aiReason(status string, lastAI time.Time) string {
+	switch {
+	case status != "unchanged":
+		return "status is " + status
+	case lastAI.IsZero():
+		return "no previous run"
+	default:
+		return "refresh interval elapsed"
+	}
 }

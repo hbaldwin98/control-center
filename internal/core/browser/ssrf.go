@@ -126,14 +126,17 @@ func tunnel(client, dest net.Conn) {
 
 func (p *ssrfProxy) checkHost(ctx context.Context, host string) error {
 	if host == "" {
-		return fmt.Errorf("%w: address", ErrDenied)
+		return denyTarget("address", "empty host")
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return fmt.Errorf("%w: address", ErrDenied)
+		return denyTarget("address", host+" is a literal IP; only DNS names may be reached")
 	}
 	ips, err := p.lookup(ctx, host)
-	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("%w: address", ErrDenied)
+	if err != nil {
+		return denyTarget("address", host+" did not resolve: "+err.Error())
+	}
+	if len(ips) == 0 {
+		return denyTarget("address", host+" resolved to no addresses")
 	}
 	for _, ip := range ips {
 		if err := checkResolvedIP(ip); err != nil {
@@ -145,14 +148,14 @@ func (p *ssrfProxy) checkHost(ctx context.Context, host string) error {
 
 func (p *ssrfProxy) dialChecked(ctx context.Context, host, port string) (net.Conn, error) {
 	if port != "443" {
-		return nil, fmt.Errorf("%w: port", ErrDenied)
+		return nil, denyTarget("port", host+":"+port+" (only 443 is allowed)")
 	}
 	if err := p.checkHost(ctx, host); err != nil {
 		return nil, err
 	}
 	ips, err := p.lookup(ctx, host)
 	if err != nil {
-		return nil, fmt.Errorf("%w: address", ErrDenied)
+		return nil, denyTarget("address", host+" did not resolve: "+err.Error())
 	}
 	var last error
 	for _, ip := range ips {
@@ -163,7 +166,7 @@ func (p *ssrfProxy) dialChecked(ctx context.Context, host, port string) (net.Con
 		last = err
 	}
 	if last == nil {
-		return nil, fmt.Errorf("%w: address", ErrDenied)
+		return nil, denyTarget("address", host+" had no dialable address")
 	}
 	return nil, last
 }

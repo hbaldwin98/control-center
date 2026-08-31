@@ -41,20 +41,25 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 
 	var readings []Reading
 	var err error
+	_ = jc.Logf("sync starting from source %q", source)
 	if source == "upload" {
 		if err := jc.Progress(0.2, "parsing upload"); err != nil {
 			return err
 		}
 		readings = Parse([]byte(args.CSV), "text/csv")
 		if len(readings) == 0 {
+			_ = jc.Logf("upload did not parse as CSV (%d bytes); retrying as JSON", len(args.CSV))
 			readings = Parse([]byte(args.CSV), "application/json")
 		}
 		if len(readings) == 0 {
+			_ = jc.Logf("upload parsed as neither CSV nor JSON (%d bytes)", len(args.CSV))
 			return hostjobs.Permanent(fmt.Errorf("tid: upload contained no daily readings"))
 		}
+		_ = jc.Logf("parsed %d readings from the upload", len(readings))
 	} else {
 		readings, err = p.collect(jc, h, cfg)
 		if err != nil {
+			_ = jc.Logf("portal collection failed: %v", err)
 			_ = p.recordSync(jc, h, "failed", 0, source, err.Error())
 			return err
 		}
@@ -63,9 +68,11 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
 	n, err := p.upsertReadings(jc, h, readings, source, now)
 	if err != nil {
+		_ = jc.Logf("storing %d readings failed: %v", len(readings), err)
 		_ = p.recordSync(jc, h, "failed", 0, source, err.Error())
 		return err
 	}
+	_ = jc.Logf("stored %d of %d readings from %s", n, len(readings), source)
 	if err := jc.Progress(0.8, "recorded readings"); err != nil {
 		return err
 	}
@@ -78,7 +85,8 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	}
 
 	if err := p.writeInsight(jc, h, cfg); err != nil {
-		_ = jc.Logf("insight: %v", err)
+		// The sync itself succeeded; a failed insight is reported, not fatal.
+		_ = jc.Logf("insight generation failed (readings are saved): %v", err)
 	}
 	return nil
 }

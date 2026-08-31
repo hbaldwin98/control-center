@@ -174,15 +174,27 @@ type pwPage struct {
 	mu       sync.Mutex
 	check    func(*url.URL) error
 	denied   error
+	blocked  []Blocked
 	closed   bool
 	captured []Resource
 }
 
+// onRoute is the enforcement point: every request Chromium makes is allowlist- and
+// SSRF-checked here, and anything that fails is aborted so it never leaves the host.
+//
+// Aborting is the whole of the enforcement. Only a denied *navigation* also fails the
+// caller's operation, because that is the document the plugin asked for. A denied
+// subresource (a third-party font, tag manager, analytics beacon) is blocked and
+// recorded, and the page loads without it -- a real site references hosts no plugin
+// author can enumerate, and failing the navigation on the first one made every login
+// unreachable.
 func (p *pwPage) onRoute(route playwright.Route) {
-	raw := route.Request().URL()
+	req := route.Request()
+	raw := req.URL()
+	nav := req.IsNavigationRequest()
 	u, err := url.Parse(raw)
 	if err != nil {
-		p.setDenied(fmt.Errorf("%w: scheme (%q)", ErrDenied, raw))
+		p.block(nav, raw, denyTarget("scheme", raw+" is not a parseable URL"))
 		_ = route.Abort("blockedbyclient")
 		return
 	}
@@ -194,21 +206,52 @@ func (p *pwPage) onRoute(route playwright.Route) {
 	check := p.check
 	p.mu.Unlock()
 	if check == nil {
-		p.setDenied(fmt.Errorf("%w: host", ErrDenied))
+		// The page fired a request outside any Goto/Get/Click, so there is no
+		// allowlist to check it against. Fail closed and name what was blocked.
+		p.block(nav, raw, denyTarget("host", raw+" was requested outside a navigation"))
 		_ = route.Abort("blockedbyclient")
 		return
 	}
 	if err := check(u); err != nil {
-		p.setDenied(fmt.Errorf("%s: %w", raw, err))
+		p.block(nav, raw, err)
 		_ = route.Abort("blockedbyclient")
 		return
 	}
 	if err := p.sess.proxy.checkHost(context.Background(), u.Hostname()); err != nil {
-		p.setDenied(err)
+		p.block(nav, raw, err)
 		_ = route.Abort("blockedbyclient")
 		return
 	}
 	_ = route.Continue()
+}
+
+// block records an aborted request. A navigation failure is returned to the caller;
+// a subresource failure is only reported, so the caller can log what the page lost.
+func (p *pwPage) block(nav bool, raw string, err error) {
+	if nav {
+		p.setDenied(err)
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.blocked) >= maxBlockedReports {
+		return
+	}
+	for _, b := range p.blocked {
+		if b.URL == raw {
+			return
+		}
+	}
+	p.blocked = append(p.blocked, Blocked{URL: raw, Reason: deniedReason(err), Err: err.Error()})
+}
+
+// TakeBlocked returns and clears the subresources aborted since the last call.
+func (p *pwPage) TakeBlocked() []Blocked {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.blocked
+	p.blocked = nil
+	return out
 }
 
 func (p *pwPage) onResponse(resp playwright.Response) {
@@ -530,3 +573,6 @@ func header(resp playwright.APIResponse, name string) string {
 
 var _ io.Closer = (*Playwright)(nil)
 var _ Engine = (*Playwright)(nil)
+
+// GatesRequests reports that route interception checks every request this page makes.
+func (p *pwPage) GatesRequests() bool { return true }

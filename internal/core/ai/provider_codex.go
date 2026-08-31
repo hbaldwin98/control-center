@@ -62,7 +62,6 @@ type responsesRequest struct {
 	Store             bool            `json:"store"`
 	Stream            bool            `json:"stream"`
 	Include           []string        `json:"include"`
-	MaxOutputTokens   int             `json:"max_output_tokens,omitempty"`
 }
 
 type responsesItem struct {
@@ -93,9 +92,13 @@ func (p Codex) Chat(ctx context.Context, d Dispatch, req ChatRequest) (providerR
 			"%w: %s has no ChatGPT account id; reauthorize the credential", ErrMissingCredential, d.ProviderID)
 	}
 
+	// The ChatGPT backend rejects max_output_tokens outright ("Unsupported parameter"),
+	// so the caller's cap cannot be pushed down the wire here. It still bounds the
+	// reservation host-side; this path is subscription-billed, so an answer longer than
+	// the cap costs nothing extra and the caller truncates what it stores.
 	body := responsesRequest{
 		Model: d.Model, ToolChoice: "auto", Store: false, Stream: true,
-		Include: []string{}, MaxOutputTokens: req.MaxTokens,
+		Include: []string{},
 	}
 	for _, m := range req.Messages {
 		// The Responses API separates the standing instruction from the turn history.

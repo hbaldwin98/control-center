@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ type Service struct {
 	refs  credentials.ReferenceStore
 	now   func() time.Time
 	http  *http.Client
+	log   *slog.Logger
 
 	// adapters are keyed by ProviderKind. They are stateless and shared by every
 	// configured provider of that kind.
@@ -47,6 +49,9 @@ type Service struct {
 }
 
 type Options struct {
+	// Log receives one line per failed provider attempt. Defaults to slog.Default().
+	Log *slog.Logger
+
 	// Seed configures an empty database. It is ignored once anything is configured.
 	Seed Seed
 	// Providers replaces the built-in adapter for its kind. Tests use it; production
@@ -73,9 +78,13 @@ func New(m storage.Migrator, db storage.DB, bus events.Bus, gate policy.Gate, cr
 	if client == nil {
 		client = defaultClient()
 	}
+	log := opts.Log
+	if log == nil {
+		log = slog.Default()
+	}
 	s := &Service{
 		db: db, bus: bus, gate: gate, creds: creds, refs: opts.Refs,
-		now: now, http: client, providerCfg: map[string]ProviderConfig{},
+		now: now, http: client, log: log, providerCfg: map[string]ProviderConfig{},
 		adapters: map[ProviderKind]Provider{
 			KindOpenAICompatible: OpenAICompatible{Client: client},
 			KindCodex:            Codex{Client: client},
@@ -207,6 +216,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		cost        policy.MicroUSD
 		finish      = "stop"
 		errClass    string
+		errDetail   string
 		attempts    []attemptOutcome
 		billedAny   bool
 		unknownBill bool
@@ -239,8 +249,22 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 			a: a, ordinal: i + 1, result: out, latency: lat,
 			errClass: out.errClass, billed: out.billed,
 		}
-		if perr != nil && oc.errClass == "" {
-			oc.errClass = "provider"
+		if perr != nil {
+			oc.detail = truncateDetail(perr.Error())
+			if oc.errClass == "" {
+				oc.errClass = "provider"
+			}
+		}
+		if oc.errClass != "" {
+			// One line per failed attempt, at the moment it fails. The call-level
+			// error names only the class; a provider that refuses a parameter or a
+			// model id can only say so here.
+			s.log.Warn("ai: attempt failed",
+				"call", callID, "plugin", plugin, "job", jobID(ctx),
+				"model", req.Model, "attempt", i+1,
+				"provider", a.providerID, "providerModel", a.model,
+				"status", out.providerStatus, "class", oc.errClass,
+				"latencyMs", lat.Milliseconds(), "detail", oc.detail)
 		}
 		if out.cost > max {
 			oc.errClass = "accounting_invariant"
@@ -259,9 +283,11 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		if perr == nil && oc.errClass == "" {
 			text = out.text
 			errClass = ""
+			errDetail = ""
 			break
 		}
 		errClass = oc.errClass
+		errDetail = oc.detail
 		if !spillover(oc.errClass) {
 			break
 		}
@@ -312,10 +338,11 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 			}
 			if _, err := tx.Exec(settleCtx,
 				`UPDATE core_ai_attempts SET status = ?, error_class = ?, billing_state = ?, provider_status = ?,
-				        input_tokens = ?, output_tokens = ?, cost_micro_usd = ?, latency_ms = ?
+				        input_tokens = ?, output_tokens = ?, cost_micro_usd = ?, latency_ms = ?,
+				        provider_error = ?
 				  WHERE call_id = ? AND ordinal = ?`,
 				st, oc.errClass, bill, oc.result.providerStatus, oc.result.inputTokens, oc.result.outputTokens,
-				int64(oc.result.cost), oc.latency.Milliseconds(), callID, oc.ordinal); err != nil {
+				int64(oc.result.cost), oc.latency.Milliseconds(), oc.detail, callID, oc.ordinal); err != nil {
 				return err
 			}
 		}
@@ -351,6 +378,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		return nil, err
 	}
 	if status != "succeeded" {
+		if errDetail != "" {
+			return nil, fmt.Errorf("ai: call %s %s: %s: %s", callID, status, errClass, errDetail)
+		}
 		return nil, fmt.Errorf("ai: call %s %s: %s", callID, status, errClass)
 	}
 	return &ChatResponse{
@@ -370,6 +400,9 @@ type attemptOutcome struct {
 	latency  time.Duration
 	errClass string
 	billed   bool
+	// detail is what the provider said, kept so a failure can be read without a
+	// packet capture. Empty on success.
+	detail string
 }
 
 func spillover(class string) bool {
@@ -478,4 +511,19 @@ func lastText(msgs []Message) string {
 		}
 	}
 	return ""
+}
+
+// truncateDetail bounds a provider message so a failure is legible in a log line and in
+// the attempt row, without a hostile or verbose provider setting the size of either.
+func truncateDetail(s string) string {
+	const max = 500
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	end := max
+	for end > 0 && !utf8.ValidString(s[:end]) {
+		end--
+	}
+	return s[:end] + "…"
 }

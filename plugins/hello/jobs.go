@@ -68,7 +68,7 @@ func (p *Plugin) tick(jc hostjobs.Context) error {
 		Messages: []hostai.Message{{Role: hostai.RoleUser, Text: "ping"}},
 	})
 	if err != nil {
-		_ = jc.Logf("ai: %v", err)
+		_ = jc.Logf("ai call failed: %v", err)
 	} else {
 		aiText = resp.Text
 	}
@@ -78,7 +78,7 @@ func (p *Plugin) tick(jc hostjobs.Context) error {
 	}
 
 	if err := p.fetchHello(jc, h); err != nil {
-		_ = jc.Logf("browser: %v", err)
+		_ = jc.Logf("browser call failed: %v", err)
 	}
 
 	payload := []byte(note + " " + now.Format(time.RFC3339Nano))

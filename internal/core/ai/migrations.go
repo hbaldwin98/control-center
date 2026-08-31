@@ -93,4 +93,10 @@ CREATE TABLE core_ai_route_attempts (
     PRIMARY KEY (route_name, ordinal)
 ) STRICT;
 `},
+	// The provider's own words about a failure. error_class says which bucket a failure
+	// fell into; it cannot say that a model rejected a parameter or that an id was
+	// unknown. Without this the only record of a 400 is the word "provider".
+	{Version: 3, Name: "attempt_provider_error", Up: `
+ALTER TABLE core_ai_attempts ADD COLUMN provider_error TEXT NOT NULL DEFAULT '';
+`},
 }
