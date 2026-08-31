@@ -3,6 +3,15 @@
 # Secrets never live here. API keys, OAuth credentials, and notification channel secrets
 # are credential entries, encrypted at rest with a key from the environment or the OS
 # keyring. Copy this file to config/config.yaml and edit.
+#
+# Environment, not this file:
+#   CC_MASTER_KEY                  64 hex characters; encrypts every stored secret
+#   CC_OAUTH_GOOGLE_CLIENT_ID      enables the Google OAuth provider, with
+#   CC_OAUTH_GOOGLE_CLIENT_SECRET
+#   CC_OAUTH_CODEX_CLIENT_ID       overrides the public ChatGPT client id. The ChatGPT
+#                                  login needs no per-deployment secret and is always
+#                                  offered; a credential exists only once an
+#                                  administrator completes or imports a login.
 
 server:
   # A loopback address may serve plain HTTP. Any other address requires TLS.
@@ -36,7 +45,8 @@ blobs:
   maxScopeBytes: 2147483648  # 2 GiB
 
 ai:
-  # Logical model routes. Secrets are credential ids, not values.
+  # Seed providers and routes for an installation that has none yet. After the first
+  # start, providers and routes are edited under Models and this file is ignored.
   models: "config/models.yaml"
 
 browser:

@@ -29,17 +29,41 @@ type Query interface {
     Calls(ctx context.Context, q CallQuery) (CallPage, error)
 }
 
+// Admin is injected only into the authenticated web API. It manages providers,
+// discovers models, and edits routes. Nothing here returns credential material.
+type Admin interface {
+    Providers(ctx context.Context) ([]ProviderConfig, error)
+    PutProvider(ctx context.Context, p ProviderConfig) error
+    DeleteProvider(ctx context.Context, id string) error
+    Models(ctx context.Context, providerID string, refresh bool) ([]Model, error)
+    Routes(ctx context.Context) ([]RouteDescriptor, error)
+    PutRoute(ctx context.Context, in RouteInput) error
+    DeleteRoute(ctx context.Context, name string) error
+}
+
+type ProviderConfig struct {
+    ID           string
+    Kind         ProviderKind // openai_compatible | codex | fake
+    BaseURL      string
+    CredentialID string
+    Billing      Billing // metered | subscription
+}
+
 type RouteDescriptor struct {
-    LogicalName  string
-    Capabilities []string
-    AttemptPlan  []AttemptDescriptor // provider/model names are visible to the administrator
-    Healthy      bool
-    LastError    string
+    LogicalName     string
+    Capabilities    []string
+    MaxInputTokens  int
+    MaxOutputTokens int
+    AttemptPlan     []AttemptDescriptor // provider/model names are visible to the administrator
+    Healthy         bool
+    LastError       string
 }
 
 type AttemptDescriptor struct {
     Provider string
     Model    string
+    Billing  Billing
+    InputMicroUSDPerMillion, OutputMicroUSDPerMillion policy.MicroUSD
 }
 
 type CallQuery struct {
@@ -160,14 +184,88 @@ or a route without embedding capability, fails before reservation or dispatch.
 
 ---
 
+## Providers and model discovery
+
+A provider is one configured upstream: a wire protocol, a base URL, a credential, and how
+it charges. Plugins never name one. Providers live in the database and are created from
+the UI; `config/models.yaml` is a seed applied only to an empty installation.
+
+| Kind | Transport | Authorized by |
+|---|---|---|
+| `openai_compatible` | `/chat/completions` and `/models` | an API-key credential |
+| `codex` | the ChatGPT backend the Codex CLI uses: `/responses` (SSE) and `/models` | a subscription OAuth credential |
+| `fake` | in process, no network | any credential |
+
+The kind is the protocol, not the vendor: OpenAI, OpenRouter, and a local model server are
+all `openai_compatible` and differ only in base URL and credential. Plain `http` is
+accepted only on loopback, where a local server lives.
+
+`Models(providerID, refresh)` reads the cached catalog unless a refresh is asked for or
+nothing has been fetched yet, so opening the administration screen does not call out to
+every configured provider. A refresh asks the provider and replaces the cache.
+
+Discovery reports a price only when the provider publishes one. OpenRouter publishes
+USD-per-token decimals, which are converted to micro-USD per million tokens; the OpenAI
+platform and the ChatGPT backend publish none. A model without a published price is marked
+unpriced rather than free, because a zero that means "not stated" is exactly the value
+that would let an unbounded metered request through.
+
+A route records the prices in effect when it was saved, on the attempt itself. Refreshing
+a catalog therefore cannot silently reprice a call the host already admits, and a price
+change is an edit an administrator makes and can see.
+
+### Subscription billing
+
+A `subscription` provider charges a flat fee already paid outside this system, so the
+marginal cost of a call is zero and an attempt on it reserves zero. That is a computed
+bound, not a missing one — the invariant that no unbounded paid request may dispatch is
+intact, because the request is not paid per token. Its attempt row records
+`billing_state = subscription` and no cost. Budgets do not constrain such a route; the
+plan's own rate limits do, and they arrive as ordinary provider errors.
+
+A metered provider is unchanged: every attempt needs a price, and the route reserves the
+most the whole plan could cost before dispatching.
+
+The `codex` kind is always `subscription` — it authorizes with a plan, so a plan is what
+it charges — and requires an OAuth credential rather than an API key. It sends the account
+id read from that credential's `id_token` as `ChatGPT-Account-Id`, and refuses to dispatch
+without one rather than sending a request that would be billed to an account nobody chose.
+
+### Tables
+
+```
+core_ai_providers(id, kind, base_url, credential_id, billing, created_at, updated_at)
+
+core_ai_catalog(provider_id, model, display_name, context_window, max_output_tokens,
+                input_micro_usd_per_million, output_micro_usd_per_million,
+                priced, fetched_at)
+
+core_ai_routes(name, capabilities, max_input_tokens, max_output_tokens, updated_at)
+
+core_ai_route_attempts(route_name, ordinal, provider_id, model,
+                       input_micro_usd_per_million, output_micro_usd_per_million)
+```
+
+`core_ai_catalog` is a cache and may be emptied at any time. `core_ai_route_attempts` is
+not: it is the admitted contract, prices included.
+
+---
+
 ## Routing
 
 Each logical route has a finite ordered attempt plan: primary, bounded retries, and
-fallbacks. It also declares its supported capabilities and hard request limits. Startup
-fails unless every configured attempt has credentials and pricing and supports every
-capability enabled on that route: chat, streaming, embeddings, tools, structured output,
-vision, and grounding/search as applicable. A request for a capability outside the route
-contract is rejected before reservation.
+fallbacks. It also declares its supported capabilities and hard request limits. Every
+attempt must resolve to a configured provider with a credential, and a metered attempt
+must carry pricing; a route that fails those checks is rejected when it is saved. A
+request for a capability outside the route contract is rejected before reservation.
+
+Providers and routes are administrator-owned rows, edited while the process runs, so a
+route that stops compiling later — its provider was deleted, its credential revoked — is
+kept with `lastError` set, reported unhealthy, and refuses to dispatch with
+`ErrRouteUncompiled`. That error is deliberately distinct from `ErrUnknownRoute`: the
+plugin named a route that exists, and it is the host's configuration that is wrong.
+Failing the process to start over such an edit would take the whole deployment down for a
+mistake the administrator can only fix from inside it.
 
 Spillover is limited to configured error classes such as rate limit, quota exhaustion,
 and provider 5xx. Refusals and schema validation failures do not spill over. The finite
@@ -184,7 +282,9 @@ Before the first provider dispatch, AI computes a conservative maximum for every
 that the route may make. The estimate includes maximum input, output, reasoning and cached
 tokens; image count and resolution; grounding/search queries; embeddings; and every
 priced provider option. Missing pricing, an unbounded dimension, or arithmetic overflow
-rejects the request. No unbounded paid request may dispatch.
+rejects the request. No unbounded paid request may dispatch. An attempt on a
+subscription provider contributes zero to that maximum, which is a bound it computed, not
+one it lacks.
 
 An adapter reporting cost above that bound is an invariant breach, not a reason to hide
 the charge. Finalization records the actual cost, policy disables the plugin, and the

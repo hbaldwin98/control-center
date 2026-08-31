@@ -168,9 +168,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/admin/credentials/{id}/rotate", s.requireReauth(s.handleCredentialRotate))
 	s.mux.HandleFunc("DELETE /api/admin/credentials/{id}", s.requireReauth(s.handleCredentialDelete))
 	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/begin", s.requireReauth(s.handleOAuthBegin))
+	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/manual", s.requireReauth(s.handleOAuthManual))
+	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/import", s.requireReauth(s.handleOAuthImport))
 	s.mux.HandleFunc("GET /api/admin/credentials/oauth/callback", s.authenticated(s.withActor(s.handleOAuthCallback)))
 
+	// Providers and routes are configuration, not secrets: they name a credential but
+	// never carry one, so they need a session and CSRF rather than reauthentication.
+	s.mux.HandleFunc("GET /api/admin/ai/providers", s.authenticated(s.handleAIProviderList))
+	s.mux.HandleFunc("PUT /api/admin/ai/providers/{id}", s.authenticated(s.handleAIProviderPut))
+	s.mux.HandleFunc("DELETE /api/admin/ai/providers/{id}", s.authenticated(s.handleAIProviderDelete))
+	s.mux.HandleFunc("GET /api/admin/ai/providers/{id}/models", s.authenticated(s.handleAIModels))
 	s.mux.HandleFunc("GET /api/admin/ai/routes", s.authenticated(s.handleAIRoutes))
+	s.mux.HandleFunc("PUT /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRoutePut))
+	s.mux.HandleFunc("DELETE /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRouteDelete))
 	s.mux.HandleFunc("GET /api/ai/calls", s.authenticated(s.handleAICalls))
 
 	s.mux.HandleFunc("/", s.serveStatic)

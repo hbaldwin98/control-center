@@ -12,23 +12,34 @@ import (
 // contacts a network. Cost is computed from the route attempt's pricing.
 type Fake struct{}
 
-func (Fake) Name() string { return "fake" }
+func (Fake) Kind() ProviderKind { return KindFake }
 
-func (Fake) Chat(_ context.Context, token string, a attempt, req ChatRequest) (providerResult, error) {
-	if token == "" {
+func (Fake) Chat(_ context.Context, d Dispatch, req ChatRequest) (providerResult, error) {
+	if d.Token == "" {
 		return providerResult{errClass: "credential"}, ErrMissingCredential
 	}
 	prompt := lastText(req.Messages)
 	inTok := approxTokens(prompt)
 	reply := "echo: " + strings.TrimSpace(prompt)
 	outTok := approxTokens(reply)
-	cost, err := a.charge(inTok, outTok)
+	cost, err := d.charge(inTok, outTok)
 	if err != nil {
 		return providerResult{}, err
 	}
 	return providerResult{
 		text: reply, inputTokens: inTok, outputTokens: outTok, cost: cost, billed: true,
 	}, nil
+}
+
+// Models gives the fake a catalog, so the discovery path is exercisable without a
+// network in tests and in a local deployment alike.
+func (Fake) Models(_ context.Context, d Dispatch) ([]Model, error) {
+	return []Model{{
+		Provider: d.ProviderID, ID: "echo", DisplayName: "Echo",
+		ContextWindow: 4096, MaxOutputTokens: 1024,
+		InputMicroUSDPerMillion: 1_000_000, OutputMicroUSDPerMillion: 2_000_000,
+		Priced: true,
+	}}, nil
 }
 
 // HoldFake is Fake with a latch inside Chat so a test can disable the plugin
@@ -45,7 +56,7 @@ func NewHoldFake() *HoldFake {
 	return &HoldFake{started: make(chan struct{}), release: make(chan struct{})}
 }
 
-func (*HoldFake) Name() string { return "fake" }
+func (*HoldFake) Kind() ProviderKind { return KindFake }
 
 // Calls is the number of times Chat has been entered.
 func (h *HoldFake) Calls() int { return int(h.n.Load()) }
@@ -62,11 +73,15 @@ func (h *HoldFake) Release() {
 	}
 }
 
-func (h *HoldFake) Chat(ctx context.Context, token string, a attempt, req ChatRequest) (providerResult, error) {
+func (h *HoldFake) Chat(ctx context.Context, d Dispatch, req ChatRequest) (providerResult, error) {
 	h.n.Add(1)
 	h.once.Do(func() { close(h.started) })
 	<-h.release
-	return Fake{}.Chat(ctx, token, a, req)
+	return Fake{}.Chat(ctx, d, req)
+}
+
+func (h *HoldFake) Models(ctx context.Context, d Dispatch) ([]Model, error) {
+	return Fake{}.Models(ctx, d)
 }
 
 func parseTime(s string) (time.Time, error) {

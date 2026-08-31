@@ -202,7 +202,8 @@ affected resource rather than reconstructing it from partial event payloads.
 | Jobs | queue, history, per-job progress and logs, cancel; filterable by plugin from the URL |
 | Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
-| Settings | credentials (with re-auth), read-only effective model routes |
+| Models | AI providers, the model catalogs they publish, and the routes plugins name |
+| Settings | credentials (with re-auth), API keys, and OAuth logins |
 
 The dashboard is a grid of plugin tiles. Each tile carries the plugin's state, what it has
 spent today against its daily budget, its open and failed work, its live indicator and
@@ -219,6 +220,12 @@ mutations, closes that plugin's browser sessions, and cancels admitted contexts.
 logs remain available. It does not claim to terminate trusted in-process code that ignores
 cancellation or uses direct networking. An already-admitted paid call may finish and
 remains accounted. Schema-backed plugin config is edited on the same screen.
+
+The Models screen is administration, not secrets: it edits providers and routes with a
+session and CSRF, and shows credential ids without ever showing credential material. A
+model catalog is read from its last fetch until someone asks to refresh it, so opening the
+screen never calls out to every configured provider. A route's prices are the ones it was
+saved with, and the editor states the reservation a call will take before it is saved.
 
 For `Automated: true` plugins, the toggle is disabled until a daily budget is set, with the
 reason shown inline — the UI half of the guardrail enforced in

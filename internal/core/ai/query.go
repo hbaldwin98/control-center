@@ -6,15 +6,76 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
 
+// Routes describes every configured route for the administrator.
+//
+// The plan comes from the stored intent rather than from the compiled route, so a route
+// that failed to compile still reports every attempt it was saved with — an editor that
+// loaded the truncated compilation would quietly drop the attempts after the broken one.
+//
+// Health is the union of two questions: did the route compile against the current
+// providers, and can its credentials still be resolved. Both are answered here rather
+// than at startup, because routes are edited while the process runs and a route that
+// broke this morning should say so instead of preventing a restart.
 func (s *Service) Routes(ctx context.Context) ([]RouteDescriptor, error) {
-	out := make([]RouteDescriptor, 0, len(s.routes))
+	inputs, err := s.loadRouteInputs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	failures := make(map[string]string, len(s.routes))
 	for _, r := range s.routes {
+		failures[r.name] = r.lastError
+	}
+	providers := make(map[string]ProviderConfig, len(s.providerCfg))
+	for k, v := range s.providerCfg {
+		providers[k] = v
+	}
+	s.mu.RUnlock()
+
+	// One credential is usually shared by every attempt on every route. Resolve each
+	// at most once.
+	checked := map[string]string{}
+	credError := func(id string) string {
+		if msg, ok := checked[id]; ok {
+			return msg
+		}
+		msg := ""
+		if _, err := s.creds.Attributes(ctx, id); err != nil {
+			msg = err.Error()
+		}
+		checked[id] = msg
+		return msg
+	}
+
+	out := make([]RouteDescriptor, 0, len(inputs))
+	for _, in := range inputs {
 		d := RouteDescriptor{
-			LogicalName: r.name, Capabilities: r.capList, Healthy: r.lastError == "", LastError: r.lastError,
+			LogicalName: in.Name, Capabilities: in.Capabilities,
+			MaxInputTokens: in.MaxInputTokens, MaxOutputTokens: in.MaxOutputTokens,
+			LastError: failures[in.Name],
 		}
-		for _, a := range r.attempts {
-			d.AttemptPlan = append(d.AttemptPlan, AttemptDescriptor{Provider: a.provider, Model: a.model})
+		if d.Capabilities == nil {
+			d.Capabilities = []string{}
 		}
+		for _, a := range in.Attempts {
+			p, known := providers[a.Provider]
+			d.AttemptPlan = append(d.AttemptPlan, AttemptDescriptor{
+				Provider: a.Provider, Model: a.Model, Billing: p.Billing,
+				InputMicroUSDPerMillion:  policy.MicroUSD(a.InputMicroUSDPerMillion),
+				OutputMicroUSDPerMillion: policy.MicroUSD(a.OutputMicroUSDPerMillion),
+			})
+			if !known || d.LastError != "" {
+				continue
+			}
+			if msg := credError(p.CredentialID); msg != "" {
+				d.LastError = "credential " + p.CredentialID + ": " + msg
+			}
+		}
+		if d.AttemptPlan == nil {
+			d.AttemptPlan = []AttemptDescriptor{}
+		}
+		d.Healthy = d.LastError == ""
 		out = append(out, d)
 	}
 	return out, nil

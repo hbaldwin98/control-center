@@ -24,17 +24,28 @@ type Query interface {
 	Calls(ctx context.Context, q CallQuery) (CallPage, error)
 }
 
+// RouteDescriptor is a route as an administrator sees and edits it. It carries the whole
+// stored intent, not just what compiled, so a route the editor loads is the route that
+// was saved even when it currently refuses to dispatch.
 type RouteDescriptor struct {
-	LogicalName  string               `json:"logicalName"`
-	Capabilities []string             `json:"capabilities"`
-	AttemptPlan  []AttemptDescriptor  `json:"attemptPlan"`
-	Healthy      bool                 `json:"healthy"`
-	LastError    string               `json:"lastError"`
+	LogicalName     string              `json:"logicalName"`
+	Capabilities    []string            `json:"capabilities"`
+	MaxInputTokens  int                 `json:"maxInputTokens"`
+	MaxOutputTokens int                 `json:"maxOutputTokens"`
+	AttemptPlan     []AttemptDescriptor `json:"attemptPlan"`
+	Healthy         bool                `json:"healthy"`
+	LastError       string              `json:"lastError"`
 }
 
+// AttemptDescriptor is one step of the plan. The prices are the ones recorded when the
+// route was saved, which are what a call is admitted against — not whatever the
+// provider's catalog says today.
 type AttemptDescriptor struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Provider                 string          `json:"provider"`
+	Model                    string          `json:"model"`
+	Billing                  Billing         `json:"billing"`
+	InputMicroUSDPerMillion  policy.MicroUSD `json:"inputMicroUsdPerMillion"`
+	OutputMicroUSDPerMillion policy.MicroUSD `json:"outputMicroUsdPerMillion"`
 }
 
 type CallQuery struct {
@@ -49,17 +60,17 @@ type CallPage struct {
 }
 
 type CallRecord struct {
-	ID               string         `json:"id"`
-	PluginID         string         `json:"pluginId"`
-	JobID            string         `json:"jobId"`
-	Operation        string         `json:"operation"`
-	LogicalModel     string         `json:"logicalModel"`
-	Status           string         `json:"status"`
-	ErrorClass       string         `json:"errorClass"`
+	ID               string          `json:"id"`
+	PluginID         string          `json:"pluginId"`
+	JobID            string          `json:"jobId"`
+	Operation        string          `json:"operation"`
+	LogicalModel     string          `json:"logicalModel"`
+	Status           string          `json:"status"`
+	ErrorClass       string          `json:"errorClass"`
 	ReservedMicroUSD policy.MicroUSD `json:"reservedMicroUsd"`
 	SettledMicroUSD  policy.MicroUSD `json:"settledMicroUsd"`
-	StartedAt        time.Time      `json:"startedAt"`
-	FinalizedAt      *time.Time     `json:"finalizedAt"`
+	StartedAt        time.Time       `json:"startedAt"`
+	FinalizedAt      *time.Time      `json:"finalizedAt"`
 }
 
 type Stream interface {
@@ -101,19 +112,19 @@ type ChatResponse struct {
 }
 
 type Usage struct {
-	InputTokens    int64
-	OutputTokens   int64
-	CostMicroUSD   policy.MicroUSD
-	Latency        time.Duration
-	Attempts       int
+	InputTokens  int64
+	OutputTokens int64
+	CostMicroUSD policy.MicroUSD
+	Latency      time.Duration
+	Attempts     int
 }
 
 var (
-	ErrUnknownRoute     = errors.New("ai: unknown logical model")
-	ErrCapability       = errors.New("ai: capability not enabled on this route")
-	ErrNoPlugin         = errors.New("ai: plugin identity missing")
-	ErrUnbounded        = errors.New("ai: request cost cannot be bounded")
-	ErrMissingPrice     = errors.New("ai: attempt is missing pricing")
+	ErrUnknownRoute      = errors.New("ai: unknown logical model")
+	ErrCapability        = errors.New("ai: capability not enabled on this route")
+	ErrNoPlugin          = errors.New("ai: plugin identity missing")
+	ErrUnbounded         = errors.New("ai: request cost cannot be bounded")
+	ErrMissingPrice      = errors.New("ai: attempt is missing pricing")
 	ErrMissingCredential = errors.New("ai: attempt is missing credentials")
 )
 

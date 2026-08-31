@@ -607,6 +607,12 @@ kbd {
   cursor: pointer;
 }
 
+.cc-textarea {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
 /* ---- feedback ---- */
 
 .cc-callout {

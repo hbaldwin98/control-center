@@ -115,7 +115,7 @@ routes:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := ai.LoadRoutes(models)
+	seed, err := ai.LoadSeed(models)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,11 +123,9 @@ routes:
 	if hold {
 		f.hold = ai.NewHoldFake()
 		providers = []ai.Provider{f.hold}
-	} else {
-		providers = []ai.Provider{ai.Fake{}}
 	}
 	svc, err := ai.New(store, store, bus, pol, creds, ai.Options{
-		Routes: routes, Providers: providers, Refs: creds, Now: f.clock,
+		Seed: seed, Providers: providers, Refs: creds, Now: f.clock,
 	})
 	if err != nil {
 		t.Fatal(err)

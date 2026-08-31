@@ -131,7 +131,7 @@ So plugin state, budgets, spend counters, and the gate are extracted into `polic
 | L1 | [events](docs/modules/events.md) | Insert events transactionally, then dispatch committed events to live and durable subscribers. |
 | L2 | [policy](docs/modules/policy.md) | Own plugin enabled state and atomically reserve, settle, and release budget capacity. |
 | L2 | [credentials](docs/modules/credentials.md) | Store API keys and OAuth credentials; keep tokens fresh. |
-| L3 | [ai](docs/modules/ai.md) | Route logical model names to providers, record usage and cost. |
+| L3 | [ai](docs/modules/ai.md) | Route logical model names to administrator-configured providers, discover what those providers serve, and record usage and cost. |
 | L3 | [jobs](docs/modules/jobs.md) | Durable queue with cron, retries, cancellation, and progress. |
 | L3 | [browser](docs/modules/browser.md) | Own headless browser sessions, allowlists, and teardown for plugins. |
 | L3 | [notifications](docs/modules/notifications.md) | Turn events into deliveries via rules and channels, using credential entries for channel secrets. |
@@ -208,7 +208,7 @@ control-center/
     bidrl/  go.mod          ← separate module
   web/                      ← React/TS frontend; canonical plugin UI under src/plugins/
   config/
-    models.yaml
+    models.yaml             ← seed only; providers and routes live in the database
   docs/
   DESIGN.md
 ```
@@ -234,7 +234,13 @@ architectural test rather than a review convention.
 - Secrets live in `credentials`, encrypted at rest with a key from the environment or the
   OS keyring, never in `config/*.yaml`. Notification channel secrets are credential
   entries. Credentials administration supports API-key create/replace and secure OAuth,
-  but neither its web API nor UI returns secret values.
+  but neither its web API nor UI returns secret values. A provider that pins a redirect
+  this server cannot receive is completed by pasting the address the browser landed on;
+  the state, its session binding, the PKCE verifier, and single use are all still enforced
+  server-side.
+- Providers and model routes are configuration rather than secrets. Editing them needs a
+  session and CSRF, not password reauthentication, and no route or provider response ever
+  carries credential material.
 - Plugins are trusted code. The table prefix and the facade are guardrails against
   mistakes, not a sandbox. Untrusted plugins are the out-of-process milestone.
 

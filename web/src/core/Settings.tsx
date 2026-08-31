@@ -6,7 +6,6 @@ import {
   Button,
   Callout,
   Card,
-  Dash,
   Field,
   Hint,
   Input,
@@ -14,7 +13,7 @@ import {
   PageHeader,
   Row,
   Stack,
-  Table,
+  Textarea,
   Time,
   api,
   useSnapshot,
@@ -30,23 +29,24 @@ type Credential = {
   scopes: string[];
 };
 
-type Route = {
-  logicalName: string;
-  capabilities: string[];
-  attemptPlan: { provider: string; model: string }[];
-  healthy: boolean;
-  lastError: string;
+/**
+ * An OAuth provider as the server describes it. `manual` means the provider pins a
+ * redirect this deployment can never receive, so the administrator finishes the flow by
+ * pasting back the URL their browser landed on.
+ */
+type OAuthProvider = {
+  name: string;
+  manual: boolean;
+  redirectUri: string;
+  scopes: string[];
+  importable: boolean;
 };
 
-/** Credentials (with re-auth), read-only effective model routes. */
+/** Credentials: the administrator password gate, API keys, and OAuth logins. */
 export function Settings() {
   const creds = useSnapshot<Credential[]>(
     useCallback((signal) => api.snapshot<Credential[]>("/api/admin/credentials", { signal }), []),
     { events: "core.credential.**" },
-  );
-  const routes = useSnapshot<Route[]>(
-    useCallback((signal) => api.snapshot<Route[]>("/api/admin/ai/routes", { signal }), []),
-    { events: "core.ai.**" },
   );
 
   const [oauthFlash, setOauthFlash] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
@@ -68,7 +68,7 @@ export function Settings() {
     <Page>
       <PageHeader
         title="Settings"
-        lede="Credentials, reauthentication, and the effective model routes."
+        lede="Credentials and reauthentication. Providers and routes live under Models."
       />
       <Stack>
         {oauthFlash ? <Callout tone={oauthFlash.tone}>{oauthFlash.text}</Callout> : null}
@@ -91,45 +91,6 @@ export function Settings() {
             </Stack>
           )}
         </Async>
-
-        <Card title="Model routes">
-          <Async
-            state={routes}
-            loading="Loading routes…"
-            empty="No routes in models.yaml. Add a route and restart after creating its credential."
-          >
-            {(list) => (
-              <Table
-                head={
-                  <>
-                    <th>Logical name</th>
-                    <th>Capabilities</th>
-                    <th>Attempts</th>
-                    <th>Health</th>
-                  </>
-                }
-              >
-                {list.map((r) => (
-                  <tr key={r.logicalName}>
-                    <td>
-                      <code>{r.logicalName}</code>
-                    </td>
-                    <td>{r.capabilities.join(", ") || <Dash />}</td>
-                    <td>
-                      <code>{r.attemptPlan.map((a) => `${a.provider}/${a.model}`).join(" → ")}</code>
-                    </td>
-                    <td>
-                      <Badge tone={r.healthy ? "ok" : "danger"}>
-                        {r.healthy ? "healthy" : "unhealthy"}
-                      </Badge>
-                      {!r.healthy && r.lastError ? <Hint>{r.lastError}</Hint> : null}
-                    </td>
-                  </tr>
-                ))}
-              </Table>
-            )}
-          </Async>
-        </Card>
       </Stack>
     </Page>
   );
@@ -259,14 +220,11 @@ function CreateKeyCard({ onChanged }: { onChanged: () => void }) {
 }
 
 function OAuthCard({ onChanged }: { onChanged: () => void }) {
-  const [providers, setProviders] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [needReauth, setNeedReauth] = useState(false);
+  const [providers, setProviders] = useState<OAuthProvider[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    api.get<string[]>("/api/admin/credentials/oauth/providers").then(
+    api.get<OAuthProvider[]>("/api/admin/credentials/oauth/providers").then(
       (list) => {
         if (!cancelled) setProviders(list);
       },
@@ -281,38 +239,223 @@ function OAuthCard({ onChanged }: { onChanged: () => void }) {
 
   if (providers.length === 0) return null;
 
-  const begin = async (provider: string) => {
+  return (
+    <Card title="OAuth">
+      <Stack>
+        <Hint>Tokens are never displayed. State is bound to this session and is spent on first use.</Hint>
+        {providers.map((p) => (
+          <OAuthProviderBlock key={p.name} provider={p} onChanged={onChanged} />
+        ))}
+      </Stack>
+    </Card>
+  );
+}
+
+/**
+ * One provider's login. A served flow redirects the browser and comes back to this
+ * server. A pinned flow cannot: the provider registered a fixed loopback address that
+ * belongs to a local command-line tool, so the browser lands on a page that fails to load
+ * and the administrator pastes that address back here. Everything the served callback
+ * verifies — the state, its session binding, the PKCE verifier, single use — is still
+ * verified on that paste.
+ */
+function OAuthProviderBlock({
+  provider,
+  onChanged,
+}: {
+  provider: OAuthProvider;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [needReauth, setNeedReauth] = useState(false);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [callbackUrl, setCallbackUrl] = useState("");
+  const [done, setDone] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     setNeedReauth(false);
     try {
-      const res = await api.post<{ authUrl: string }>(
-        `/api/admin/credentials/oauth/${encodeURIComponent(provider)}/begin`,
-      );
-      onChanged();
-      window.location.assign(res.authUrl);
+      await fn();
     } catch (err) {
       if (isReauth(err)) setNeedReauth(true);
       else setError(formatErr(err));
+    } finally {
       setBusy(false);
     }
   };
 
+  const begin = () =>
+    act(async () => {
+      const res = await api.post<{ authUrl: string }>(
+        `/api/admin/credentials/oauth/${encodeURIComponent(provider.name)}/begin`,
+      );
+      onChanged();
+      if (!provider.manual) {
+        window.location.assign(res.authUrl);
+        return;
+      }
+      setDone(null);
+      setAuthUrl(res.authUrl);
+      window.open(res.authUrl, "_blank", "noopener,noreferrer");
+    });
+
+  const complete = () =>
+    act(async () => {
+      const cred = await api.post<Credential>(
+        `/api/admin/credentials/oauth/${encodeURIComponent(provider.name)}/manual`,
+        { callbackUrl },
+      );
+      setCallbackUrl("");
+      setAuthUrl(null);
+      setDone(`Saved ${cred.id}.`);
+      onChanged();
+    });
+
   return (
-    <Card title="OAuth">
+    <Card muted title={provider.name}>
       <Stack>
+        <Hint>
+          Scopes: {provider.scopes.length > 0 ? provider.scopes.join(" ") : "provider default"}.
+        </Hint>
         {needReauth ? <ReauthNotice /> : null}
         {error ? <Callout tone="danger">{error}</Callout> : null}
-        <Hint>The callback never shows tokens. State is bound to this session.</Hint>
+        {done ? <Callout tone="ok">{done}</Callout> : null}
         <Row>
-          {providers.map((p) => (
-            <Button key={p} type="button" disabled={busy} onClick={() => void begin(p)}>
-              Connect {p}
+          <Button type="button" disabled={busy} onClick={() => void begin()}>
+            {provider.manual ? "Open sign-in page" : `Connect ${provider.name}`}
+          </Button>
+          {provider.importable ? (
+            <Button type="button" disabled={busy} onClick={() => setImporting((v) => !v)}>
+              {importing ? "Cancel import" : "Paste existing tokens"}
             </Button>
-          ))}
+          ) : null}
         </Row>
+        {provider.manual && authUrl ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void complete();
+            }}
+          >
+            <Stack>
+              <Callout>
+                Sign in on the page that opened. Your browser finishes at{" "}
+                <code>{provider.redirectUri}</code>, which will not load — that address belongs to a
+                local command-line tool, not to this server. Copy the whole address out of the
+                address bar and paste it below.
+              </Callout>
+              <Hint>
+                If no tab opened,{" "}
+                <a href={authUrl} target="_blank" rel="noreferrer">
+                  open the sign-in page
+                </a>
+                .
+              </Hint>
+              <Field
+                label="Address your browser landed on"
+                hint="Carries code and state. It works exactly once."
+              >
+                <Textarea
+                  mono
+                  value={callbackUrl}
+                  onChange={(e) => setCallbackUrl(e.target.value)}
+                  placeholder={`${provider.redirectUri}?code=...&state=...`}
+                  required
+                />
+              </Field>
+              <Row>
+                <Button type="submit" variant="primary" disabled={busy}>
+                  Finish sign-in
+                </Button>
+              </Row>
+            </Stack>
+          </form>
+        ) : null}
+        {importing ? (
+          <ImportTokensForm
+            provider={provider.name}
+            busy={busy}
+            onSubmit={(body) =>
+              act(async () => {
+                const cred = await api.post<Credential>(
+                  `/api/admin/credentials/oauth/${encodeURIComponent(provider.name)}/import`,
+                  body,
+                );
+                setImporting(false);
+                setDone(`Imported ${cred.id}.`);
+                onChanged();
+              })
+            }
+          />
+        ) : null}
       </Stack>
     </Card>
+  );
+}
+
+type ImportBody = { accessToken: string; refreshToken: string; idToken: string; expiresIn: number };
+
+/**
+ * Adopts tokens another client already minted, such as a local `codex login`. The refresh
+ * token is mandatory: without it the credential works until the access token expires and
+ * then dies with no way back.
+ */
+function ImportTokensForm({
+  provider,
+  busy,
+  onSubmit,
+}: {
+  provider: string;
+  busy: boolean;
+  onSubmit: (body: ImportBody) => Promise<void>;
+}) {
+  const [accessToken, setAccessToken] = useState("");
+  const [refreshToken, setRefreshToken] = useState("");
+  const [idToken, setIdToken] = useState("");
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void onSubmit({ accessToken, refreshToken, idToken, expiresIn: 0 });
+      }}
+    >
+      <Stack>
+        <Hint>
+          Paste the tokens a local sign-in already produced for {provider}. Both clients then share
+          one refresh token, and whichever renews first may invalidate the other — sign in above
+          instead if you would rather not have that.
+        </Hint>
+        <Field label="Access token">
+          <Textarea
+            mono
+            value={accessToken}
+            onChange={(e) => setAccessToken(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Refresh token" hint="Required. Without it the credential cannot renew itself.">
+          <Textarea
+            mono
+            value={refreshToken}
+            onChange={(e) => setRefreshToken(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="ID token" hint="Optional. Names the account the plan belongs to.">
+          <Textarea mono value={idToken} onChange={(e) => setIdToken(e.target.value)} />
+        </Field>
+        <Row>
+          <Button type="submit" variant="primary" disabled={busy}>
+            Import
+          </Button>
+        </Row>
+      </Stack>
+    </form>
   );
 }
 

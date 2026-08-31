@@ -236,12 +236,12 @@ routes:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := ai.LoadRoutes(path)
+	seed, err := ai.LoadSeed(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc, err := ai.New(h.store, h.store, h.server.deps.Events, pol, creds, ai.Options{
-		Routes: compiled, Providers: []ai.Provider{ai.Fake{}}, Refs: creds,
+		Seed: seed, Refs: creds,
 	})
 	if err != nil {
 		t.Fatal(err)

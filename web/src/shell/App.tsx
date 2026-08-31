@@ -9,6 +9,7 @@ import { Costs } from "../core/Costs";
 import { Dashboard } from "../core/Dashboard";
 import { Events } from "../core/Events";
 import { Jobs } from "../core/Jobs";
+import { Models } from "../core/Models";
 import { PluginDetail } from "../core/PluginDetail";
 import { Plugins } from "../core/Plugins";
 import { Settings } from "../core/Settings";
@@ -76,6 +77,7 @@ function Shell({
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/events" element={<Events />} />
           <Route path="/costs" element={<Costs />} />
+          <Route path="/models" element={<Models />} />
           <Route path="/settings" element={<Settings />} />
           {pluginRoutes.map((r) => (
             <Route key={r.key} path={r.path} element={r.element} />

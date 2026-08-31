@@ -71,6 +71,7 @@ export {
   Sparkline,
   Stack,
   Table,
+  Textarea,
   Time,
   Toolbar,
 } from "./components";

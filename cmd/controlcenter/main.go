@@ -135,14 +135,15 @@ func run() error {
 	}
 	defer br.Close()
 
-	routes, err := ai.LoadRoutes(cfg.AI.Models)
+	// Providers and routes are administrator-owned state in SQLite, edited from
+	// Settings against a live model catalog. The file only seeds an empty database.
+	seed, err := ai.LoadSeed(cfg.AI.Models)
 	if err != nil {
 		return err
 	}
 	aisvc, err := ai.New(store, store, bus, pol, creds, ai.Options{
-		Routes:    routes,
-		Providers: []ai.Provider{ai.Fake{}},
-		Refs:      creds,
+		Seed: seed,
+		Refs: creds,
 	})
 	if err != nil {
 		return err
@@ -230,7 +231,7 @@ func oauthRedirects(cfg config.Config) []string {
 }
 
 func oauthProvidersFromEnv() map[string]credentials.OAuthProvider {
-	out := map[string]credentials.OAuthProvider{}
+	out := map[string]credentials.OAuthProvider{"codex": codexOAuthProvider()}
 	if id := os.Getenv("CC_OAUTH_GOOGLE_CLIENT_ID"); id != "" {
 		out["google"] = credentials.OAuthProvider{
 			AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
@@ -241,4 +242,41 @@ func oauthProvidersFromEnv() map[string]credentials.OAuthProvider {
 		}
 	}
 	return out
+}
+
+// codexClientID is the public OAuth client the Codex CLI uses. It is a public client:
+// it has no secret, it is pinned to one redirect, and PKCE is what protects the flow.
+// Overridable so a future client id does not require a rebuild.
+const codexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+
+// codexRedirectURI is registered against that client and cannot be changed by us. It
+// points at the machine running the browser, not at this server, which is why the codex
+// flow completes by pasting the callback URL back in.
+const codexRedirectURI = "http://localhost:1455/auth/callback"
+
+// codexOAuthProvider authorizes against a ChatGPT subscription rather than a platform
+// API key. It is always configured: it needs no per-deployment secret, and a
+// credential only exists once the administrator completes or imports a login.
+func codexOAuthProvider() credentials.OAuthProvider {
+	clientID := os.Getenv("CC_OAUTH_CODEX_CLIENT_ID")
+	if clientID == "" {
+		clientID = codexClientID
+	}
+	return credentials.OAuthProvider{
+		AuthURL:     "https://auth.openai.com/oauth/authorize",
+		TokenURL:    "https://auth.openai.com/oauth/token",
+		ClientID:    clientID,
+		RedirectURI: codexRedirectURI,
+		Scopes:      []string{"openid", "profile", "email", "offline_access"},
+		ExtraAuthParams: map[string]string{
+			"id_token_add_organizations": "true",
+			"codex_cli_simplified_flow":  "true",
+			"originator":                 "codex_cli_rs",
+		},
+		// The authorization-code exchange takes a form body; the refresh grant takes
+		// JSON. That asymmetry is the provider's, not ours.
+		RefreshJSON:  true,
+		AccountClaim: []string{"https://api.openai.com/auth", "chatgpt_account_id"},
+		PlanClaim:    []string{"https://api.openai.com/auth", "chatgpt_plan_type"},
+	}
 }

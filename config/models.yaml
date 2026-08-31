@@ -1,6 +1,26 @@
-# Logical model routes. Secrets live in credential entries created in Settings, not here.
+# Seed providers and routes. Secrets live in credential entries created in Settings, not here.
+#
+# This file is a seed, not the configuration. It is applied only when the database holds
+# no providers and no routes — a first start. After that, providers and routes are edited
+# under Models in the UI and this file is ignored, so editing it on a running deployment
+# changes nothing.
+#
+# A provider is a wire protocol, a base URL, a credential, and how it charges:
+#
+#   kind: openai_compatible   OpenAI, OpenRouter, or any /chat/completions server
+#         codex               the ChatGPT backend the Codex CLI uses (OAuth, plan-billed)
+#         fake                in process, never contacts a network
+#
+#   billing: metered          per token; every attempt needs a price
+#            subscription     paid for outside this system; reserves nothing
 #
 # Example after creating an API key with id `fake-key`:
+#
+# providers:
+#   fake:
+#     kind: fake
+#     credential: fake-key
+#     billing: metered
 #
 # routes:
 #   cheap-chat:
@@ -10,9 +30,13 @@
 #     attempts:
 #       - provider: fake
 #         model: echo
-#         credential: fake-key
 #         inputMicroUSDPerMillion: 1000000
 #         outputMicroUSDPerMillion: 2000000
 #
-# Startup fails if a named credential or provider is missing. Empty routes are valid.
+# An attempt may still name a `credential:` directly, as older files did; the provider it
+# names is then implied from that credential. A seeded route that does not compile is kept
+# and reported unhealthy under Models rather than failing the process: routes are edited
+# while it runs, so a broken one has to be visible and fixable, not a reason the
+# deployment will not start. Empty is valid.
+providers: {}
 routes: {}

@@ -97,9 +97,9 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | AES-256-GCM envelopes; startup fails closed on a missing or wrong master key | ✅ | `CC_MASTER_KEY` is 64 hex characters. |
 | API-key create / replace / rotate; Admin never returns secrets | ✅ | Actor stamped from the session; mutations require reauth. |
 | OAuth authorization-code + PKCE S256; state bound to session; consume-once | ✅ | Callback is a top-level GET; SameSite=Lax carries the session. |
-| Credential references block deletion | ✅ | `ai.routes` is replaced from compiled `models.yaml` at startup. |
+| Credential references block deletion | ✅ | `ai.providers` is republished on every provider reload. |
 | Host-managed AI routing, reserve, settle, `core.ai.usage` | ✅ | In-process `fake` provider for local use and tests. |
-| Settings and Costs screens | ✅ | Reauth UI; routes hide credential ids; costs grouped plugin → job → model. |
+| Settings and Costs screens | ✅ | Reauth UI; costs grouped plugin → job → model. Routes moved to the Models screen. |
 
 ## Milestone 6 — `pluginhost` + `host` ✅
 
@@ -152,6 +152,23 @@ Not a numbered milestone; it completes the Dashboard row of
 | Liveness needs both a declaration and a live connection | ✅ | Reconnecting turns every indicator off rather than leaving it pulsing. |
 | Jobs screen filters by plugin from the URL | ✅ | `/jobs?plugin=<id>`, so a detail screen can link to its own queue. |
 | `hello` contributes a tile and a detail panel | ✅ | Both fold `hello.ticked` into one snapshot; no polling, no refetch per tick. |
+
+## Provider administration and subscription auth ✅
+
+Not a numbered milestone: it replaces the compiled-in half of milestone 5's routing with
+administrator-owned providers, live model discovery, and a second way to authorize.
+
+| Feature | State | Notes |
+|---|---|---|
+| Providers are database rows, created and edited from the UI | ✅ | `core_ai_providers`; `config/models.yaml` seeds an empty install and is ignored after. |
+| Model discovery per provider, cached until refreshed | ✅ | `core_ai_catalog`; OpenRouter's published prices are converted, an unpriced model stays unpriced rather than free. |
+| Routes are editable at runtime; a broken one is reported, not fatal | ✅ | Kept with `lastError`, unhealthy in the UI, `ErrRouteUncompiled` on dispatch. |
+| Route attempts record the price they were admitted at | ✅ | A catalog refresh cannot silently reprice an admitted call. |
+| Subscription billing reserves zero and settles zero | ✅ | A computed bound, not a missing one; the attempt row records `billing_state = subscription`. |
+| Codex adapter: SSE `/responses`, account id header, `/models` | ✅ | Refuses to dispatch without the account id from the credential's `id_token`. |
+| ChatGPT OAuth with a pinned loopback redirect, completed by paste | ✅ | State, session binding, PKCE, and single use are all still enforced server-side. |
+| Token import from an existing local `codex login` | ✅ | Refresh token required; the shared-rotation caveat is stated in the UI. |
+| Models screen: providers, catalogs, route editor | ✅ | Attempts pick a discovered model, prices prefill, the reservation is shown before saving. |
 
 ## Deferred by design (not v1)
 

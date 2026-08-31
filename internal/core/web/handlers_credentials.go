@@ -51,7 +51,7 @@ func (s *Server) handleOAuthProviders(w http.ResponseWriter, r *http.Request) {
 	if store == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, store.OAuthProviders())
+	writeJSON(w, http.StatusOK, store.OAuthProviderList())
 }
 
 type apiKeyBody struct {
@@ -148,6 +148,68 @@ func (s *Server) handleOAuthBegin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"authUrl": authURL})
 }
 
+// handleOAuthManual finishes a flow whose redirect this server cannot receive. The
+// administrator pastes the URL their browser landed on; the code and state are read
+// from it here and verified against the pending state exactly as a served callback is.
+func (s *Server) handleOAuthManual(w http.ResponseWriter, r *http.Request) {
+	store := s.credsOrUnavailable(w)
+	if store == nil {
+		return
+	}
+	sess := sessionFrom(r.Context())
+	if sess == nil {
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "authentication required")
+		return
+	}
+	var body struct {
+		CallbackURL string `json:"callbackUrl"`
+	}
+	if !decodeJSON(w, r, maxAuthBody, &body) {
+		return
+	}
+	got, err := store.CompleteOAuthManual(r.Context(), credentials.OAuthManualCallback{
+		Provider:    r.PathValue("provider"),
+		SessionID:   sess.ID,
+		CallbackURL: body.CallbackURL,
+	})
+	if err != nil {
+		s.writeCredentialResult(w, "complete oauth", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+// handleOAuthImport adopts tokens minted by another client for the same provider, such
+// as a local `codex login`. The request body carries secret material and is never
+// echoed back: the response is the ordinary secret-free credential view.
+func (s *Server) handleOAuthImport(w http.ResponseWriter, r *http.Request) {
+	store := s.credsOrUnavailable(w)
+	if store == nil {
+		return
+	}
+	var body struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+		IDToken      string `json:"idToken"`
+		ExpiresIn    int    `json:"expiresIn"`
+	}
+	if !decodeJSON(w, r, maxAuthBody, &body) {
+		return
+	}
+	got, err := store.ImportOAuth(r.Context(), credentials.OAuthImport{
+		Provider:     r.PathValue("provider"),
+		AccessToken:  credentials.SecretInput{Value: body.AccessToken},
+		RefreshToken: credentials.SecretInput{Value: body.RefreshToken},
+		IDToken:      credentials.SecretInput{Value: body.IDToken},
+		ExpiresIn:    body.ExpiresIn,
+	})
+	if err != nil {
+		s.writeCredentialResult(w, "import oauth", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, got)
+}
+
 func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	store := s.credsOrUnavailable(w)
 	if store == nil {
@@ -193,7 +255,8 @@ func (s *Server) writeCredentialResult(w http.ResponseWriter, op string, err err
 		writeError(w, http.StatusConflict, CodeConflict, "a credential with that id already exists")
 	case errors.Is(err, credentials.ErrInvalidID), errors.Is(err, credentials.ErrInvalidSecret),
 		errors.Is(err, credentials.ErrKindMismatch), errors.Is(err, credentials.ErrRedirect),
-		errors.Is(err, credentials.ErrUnknownProvider), errors.Is(err, credentials.ErrOAuthState):
+		errors.Is(err, credentials.ErrUnknownProvider), errors.Is(err, credentials.ErrOAuthState),
+		errors.Is(err, credentials.ErrCallbackURL), errors.Is(err, credentials.ErrNotManual):
 		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
 	default:
 		s.fail(w, op, err)

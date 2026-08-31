@@ -41,7 +41,15 @@ func newHarness(t *testing.T) *harness {
 	}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	creds, err := credentials.New(st, st, bus, credentials.Options{Keys: map[int][]byte{1: key}, Active: 1})
+	creds, err := credentials.New(st, st, bus, credentials.Options{
+		Keys: map[int][]byte{1: key}, Active: 1,
+		OAuth: map[string]credentials.OAuthProvider{"codex": {
+			AuthURL: "https://auth.example/authorize", TokenURL: "https://auth.example/token",
+			ClientID: "test-client", RedirectURI: "http://localhost:1455/auth/callback",
+			AccountClaim: []string{"https://api.openai.com/auth", "chatgpt_account_id"},
+			PlanClaim:    []string{"https://api.openai.com/auth", "chatgpt_plan_type"},
+		}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,34 +59,35 @@ func newHarness(t *testing.T) *harness {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := creds.Replace(ctx, "ai.routes", []string{"fake-key"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := pol.Register(ctx, "hello", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := pol.Enable(ctx, "hello", "test", "setup"); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := compileRoutes(File{Routes: map[string]RouteYAML{
-		"cheap-chat": {
-			Capabilities:    []string{"chat"},
-			MaxInputTokens:  128,
-			MaxOutputTokens: 64,
-			Attempts: []AttemptYAML{{
-				Provider: "fake", Model: "echo", Credential: "fake-key",
-				InputMicroUSDPerMillion: 1_000_000, OutputMicroUSDPerMillion: 2_000_000,
-			}},
-		},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc, err := New(st, st, bus, pol, creds, Options{Routes: routes, Providers: []Provider{Fake{}}, Refs: creds})
+	svc, err := New(st, st, bus, pol, creds, Options{Seed: cheapChatSeed(), Refs: creds})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &harness{t: t, ai: svc, pol: pol, creds: creds, bus: bus}
+}
+
+// cheapChatSeed is the one route every test in this file dispatches through: a single
+// metered attempt on the in-process fake provider.
+func cheapChatSeed() Seed {
+	return Seed{
+		Providers: []ProviderConfig{{
+			ID: "fake", Kind: KindFake, CredentialID: "fake-key", Billing: BillingMetered,
+		}},
+		Routes: []RouteInput{{
+			Name: "cheap-chat", Capabilities: []string{"chat"},
+			MaxInputTokens: 128, MaxOutputTokens: 64,
+			Attempts: []RouteAttemptInput{{
+				Provider: "fake", Model: "echo",
+				InputMicroUSDPerMillion: 1_000_000, OutputMicroUSDPerMillion: 2_000_000,
+			}},
+		}},
+	}
 }
 
 func TestChatReservesAndSettles(t *testing.T) {
@@ -172,7 +181,15 @@ func TestChatAdmittedBeforeDisableStillSettles(t *testing.T) {
 	}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	creds, err := credentials.New(st, st, bus, credentials.Options{Keys: map[int][]byte{1: key}, Active: 1})
+	creds, err := credentials.New(st, st, bus, credentials.Options{
+		Keys: map[int][]byte{1: key}, Active: 1,
+		OAuth: map[string]credentials.OAuthProvider{"codex": {
+			AuthURL: "https://auth.example/authorize", TokenURL: "https://auth.example/token",
+			ClientID: "test-client", RedirectURI: "http://localhost:1455/auth/callback",
+			AccountClaim: []string{"https://api.openai.com/auth", "chatgpt_account_id"},
+			PlanClaim:    []string{"https://api.openai.com/auth", "chatgpt_plan_type"},
+		}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,20 +205,10 @@ func TestChatAdmittedBeforeDisableStillSettles(t *testing.T) {
 	if err := pol.Enable(ctx, "hello", "test", "setup"); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := compileRoutes(File{Routes: map[string]RouteYAML{
-		"cheap-chat": {
-			Capabilities: []string{"chat"}, MaxInputTokens: 128, MaxOutputTokens: 64,
-			Attempts: []AttemptYAML{{
-				Provider: "fake", Model: "echo", Credential: "fake-key",
-				InputMicroUSDPerMillion: 1_000_000, OutputMicroUSDPerMillion: 2_000_000,
-			}},
-		},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	hold := NewHoldFake()
-	svc, err := New(st, st, bus, pol, creds, Options{Routes: routes, Providers: []Provider{hold}, Refs: creds})
+	svc, err := New(st, st, bus, pol, creds, Options{
+		Seed: cheapChatSeed(), Providers: []Provider{hold}, Refs: creds,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

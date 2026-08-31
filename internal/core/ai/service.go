@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -16,17 +18,12 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
 
-type Provider interface {
-	Name() string
-	Chat(ctx context.Context, token string, a attempt, req ChatRequest) (providerResult, error)
-}
-
 type providerResult struct {
-	text                         string
-	inputTokens, outputTokens    int64
-	cost                         policy.MicroUSD
-	billed                       bool
-	errClass, providerStatus     string
+	text                      string
+	inputTokens, outputTokens int64
+	cost                      policy.MicroUSD
+	billed                    bool
+	errClass, providerStatus  string
 }
 
 type Service struct {
@@ -34,20 +31,35 @@ type Service struct {
 	bus   events.Bus
 	gate  policy.Gate
 	creds credentials.Runtime
+	refs  credentials.ReferenceStore
 	now   func() time.Time
+	http  *http.Client
 
-	routes    []route
-	providers map[string]Provider
+	// adapters are keyed by ProviderKind. They are stateless and shared by every
+	// configured provider of that kind.
+	adapters map[ProviderKind]Provider
+
+	// mu guards the compiled view of administrator-owned configuration, which changes
+	// while requests are in flight.
+	mu          sync.RWMutex
+	routes      []route
+	providerCfg map[string]ProviderConfig
 }
 
 type Options struct {
-	Routes    []route
+	// Seed configures an empty database. It is ignored once anything is configured.
+	Seed Seed
+	// Providers replaces the built-in adapter for its kind. Tests use it; production
+	// leaves it empty and gets the real ones.
 	Providers []Provider
-	// Refs records which credentials the compiled routes use, so deletion is refused
-	// while a route still names them. Optional only when Routes is empty.
-	Refs credentials.ReferenceStore
-	Now  func() time.Time
+	// Refs records which credentials configured providers use, so deletion is refused
+	// while a provider still names them.
+	Refs       credentials.ReferenceStore
+	Now        func() time.Time
+	HTTPClient *http.Client
 }
+
+var _ Admin = (*Service)(nil)
 
 func New(m storage.Migrator, db storage.DB, bus events.Bus, gate policy.Gate, creds credentials.Runtime, opts Options) (*Service, error) {
 	if err := m.Apply("ai", migrations); err != nil {
@@ -57,38 +69,30 @@ func New(m storage.Migrator, db storage.DB, bus events.Bus, gate policy.Gate, cr
 	if now == nil {
 		now = time.Now
 	}
-	provs := map[string]Provider{}
+	client := opts.HTTPClient
+	if client == nil {
+		client = defaultClient()
+	}
+	s := &Service{
+		db: db, bus: bus, gate: gate, creds: creds, refs: opts.Refs,
+		now: now, http: client, providerCfg: map[string]ProviderConfig{},
+		adapters: map[ProviderKind]Provider{
+			KindOpenAICompatible: OpenAICompatible{Client: client},
+			KindCodex:            Codex{Client: client},
+			KindFake:             Fake{},
+		},
+	}
 	for _, p := range opts.Providers {
-		provs[p.Name()] = p
+		s.adapters[p.Kind()] = p
 	}
-	s := &Service{db: db, bus: bus, gate: gate, creds: creds, now: now, routes: opts.Routes, providers: provs}
-	for _, r := range s.routes {
-		for _, a := range r.attempts {
-			if _, ok := s.providers[a.provider]; !ok {
-				return nil, fmt.Errorf("ai: route %q: unknown provider %q", r.name, a.provider)
-			}
-			if _, err := s.creds.Token(context.Background(), a.credential); err != nil {
-				return nil, fmt.Errorf("%w: route %q credential %q: %v", ErrMissingCredential, r.name, a.credential, err)
-			}
-		}
+	ctx := context.Background()
+	if err := s.seed(ctx, opts.Seed); err != nil {
+		return nil, err
 	}
-	if opts.Refs != nil {
-		seen := map[string]struct{}{}
-		var ids []string
-		for _, r := range s.routes {
-			for _, a := range r.attempts {
-				if _, ok := seen[a.credential]; ok {
-					continue
-				}
-				seen[a.credential] = struct{}{}
-				ids = append(ids, a.credential)
-			}
-		}
-		if err := opts.Refs.Replace(context.Background(), "ai.routes", ids); err != nil {
-			return nil, err
-		}
+	if err := s.reload(ctx); err != nil {
+		return nil, err
 	}
-	if err := s.recover(context.Background()); err != nil {
+	if err := s.recover(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -123,6 +127,28 @@ func (s *Service) recover(ctx context.Context) error {
 	return nil
 }
 
+// dispatchFor resolves an attempt into everything its adapter needs. The credential is
+// read here, once per attempt, so a token that expires between attempts is refreshed
+// rather than reused.
+func (s *Service) dispatchFor(ctx context.Context, a attempt) (Dispatch, error) {
+	token, err := s.creds.Token(ctx, a.credential)
+	if err != nil {
+		return Dispatch{}, err
+	}
+	d := Dispatch{
+		ProviderID: a.providerID, BaseURL: a.baseURL, Token: token,
+		Model: a.model, Billing: a.billing, attempt: a,
+	}
+	if !a.metered() {
+		attrs, err := s.creds.Attributes(ctx, a.credential)
+		if err != nil {
+			return Dispatch{}, err
+		}
+		d.AccountID = attrs.AccountID
+	}
+	return d, nil
+}
+
 func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	plugin, err := pluginID(ctx)
 	if err != nil {
@@ -131,6 +157,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	rt, err := s.route(req.Model)
 	if err != nil {
 		return nil, err
+	}
+	if !rt.usable() {
+		return nil, fmt.Errorf("%w: %s: %s", ErrRouteUncompiled, rt.name, rt.lastError)
 	}
 	if !rt.has("chat") {
 		return nil, ErrCapability
@@ -172,14 +201,14 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	var (
-		text       string
-		inTok      int64
-		outTok     int64
-		cost       policy.MicroUSD
-		finish     = "stop"
-		errClass   string
-		attempts   []attemptOutcome
-		billedAny  bool
+		text        string
+		inTok       int64
+		outTok      int64
+		cost        policy.MicroUSD
+		finish      = "stop"
+		errClass    string
+		attempts    []attemptOutcome
+		billedAny   bool
 		unknownBill bool
 	)
 	for i, a := range rt.attempts {
@@ -191,15 +220,20 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		if err := s.markDispatching(ctx, callID, i+1, a); err != nil {
 			return nil, err
 		}
-		token, err := s.creds.Token(ctx, a.credential)
+		d, err := s.dispatchFor(ctx, a)
 		if err != nil {
 			attempts = append(attempts, attemptOutcome{a: a, ordinal: i + 1, errClass: "credential", billed: false})
 			errClass = "credential"
 			continue
 		}
-		prov := s.providers[a.provider]
+		prov, ok := s.adapters[a.kind]
+		if !ok {
+			attempts = append(attempts, attemptOutcome{a: a, ordinal: i + 1, errClass: "provider", billed: false})
+			errClass = "provider"
+			continue
+		}
 		start := s.now()
-		out, perr := prov.Chat(ctx, token, a, req)
+		out, perr := prov.Chat(ctx, d, req)
 		lat := s.now().Sub(start)
 		oc := attemptOutcome{
 			a: a, ordinal: i + 1, result: out, latency: lat,
@@ -251,7 +285,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		settled = cost // truthful charge; policy will disable
 	}
 
-	var usage events.Event
 	// Accounting must complete even if the caller was cancelled after admission.
 	// A paid provider call that already ran still has to settle its reservation.
 	settleCtx := context.WithoutCancel(ctx)
@@ -267,6 +300,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 			if oc.billed {
 				bill = "billed"
 			}
+			if !oc.a.metered() {
+				bill = "subscription"
+			}
 			if unknownBill && oc.errClass != "" {
 				bill = "ambiguous"
 			}
@@ -275,10 +311,10 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 				st = "failed"
 			}
 			if _, err := tx.Exec(settleCtx,
-				`UPDATE core_ai_attempts SET status = ?, error_class = ?, billing_state = ?,
+				`UPDATE core_ai_attempts SET status = ?, error_class = ?, billing_state = ?, provider_status = ?,
 				        input_tokens = ?, output_tokens = ?, cost_micro_usd = ?, latency_ms = ?
 				  WHERE call_id = ? AND ordinal = ?`,
-				st, oc.errClass, bill, oc.result.inputTokens, oc.result.outputTokens,
+				st, oc.errClass, bill, oc.result.providerStatus, oc.result.inputTokens, oc.result.outputTokens,
 				int64(oc.result.cost), oc.latency.Milliseconds(), callID, oc.ordinal); err != nil {
 				return err
 			}
@@ -309,7 +345,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 			return err
 		}
 		_, err = tx.Exec(settleCtx, `UPDATE core_ai_calls SET usage_event_id = ? WHERE id = ?`, eid, callID)
-		_ = usage
 		return err
 	})
 	if err != nil {
@@ -350,7 +385,7 @@ func (s *Service) markDispatching(ctx context.Context, callID string, ordinal in
 		_, err := tx.Exec(ctx,
 			`INSERT INTO core_ai_attempts(call_id, ordinal, provider, provider_model, status)
 			 VALUES (?, ?, ?, ?, 'dispatching')`,
-			callID, ordinal, a.provider, a.model)
+			callID, ordinal, a.providerID, a.model)
 		return err
 	})
 }
@@ -376,6 +411,8 @@ func (s *Service) finalizeConservative(ctx context.Context, callID, resID string
 }
 
 func (s *Service) route(name string) (route, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, r := range s.routes {
 		if r.name == name {
 			return r, nil

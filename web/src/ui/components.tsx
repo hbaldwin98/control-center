@@ -5,6 +5,7 @@ import type {
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
+  TextareaHTMLAttributes,
 } from "react";
 import { formatDateTime, formatRelative, formatTime, formatUSD } from "./format";
 import { useNow } from "./hooks";
@@ -205,11 +206,29 @@ export function Input({ mono, className, ...rest }: InputProps) {
   return <input className={cx("cc-input", mono && "cc-input--mono", className)} {...rest} />;
 }
 
-export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select({
+  mono,
+  className,
+  children,
+  ...rest
+}: SelectHTMLAttributes<HTMLSelectElement> & { mono?: boolean }) {
   return (
-    <select className={cx("cc-input", "cc-select", className)} {...rest}>
+    <select className={cx("cc-input", "cc-select", mono && "cc-input--mono", className)} {...rest}>
       {children}
     </select>
+  );
+}
+
+export function Textarea({
+  mono,
+  className,
+  ...rest
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { mono?: boolean }) {
+  return (
+    <textarea
+      className={cx("cc-input", "cc-textarea", mono && "cc-input--mono", className)}
+      {...rest}
+    />
   );
 }
 
