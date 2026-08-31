@@ -74,8 +74,8 @@ export function Settings() {
         {oauthFlash ? <Callout tone={oauthFlash.tone}>{oauthFlash.text}</Callout> : null}
 
         <ReauthCard />
-        <CreateKeyCard onChanged={creds.reload} />
         <OAuthCard onChanged={creds.reload} />
+        <CreateKeyCard onChanged={creds.reload} />
 
         <div className="cc-group__title">Credentials</div>
         <Async
@@ -105,8 +105,29 @@ function formatErr(err: unknown): string {
 }
 
 /** The one place a mutation card says "reauthenticate first", worded the same way. */
+// The id the notice focuses. "Reauthenticate above" is not enough on its own: another
+// card sits between, and the password asked for is the administrator's own, not a secret
+// belonging to whatever is being configured.
+const reauthFieldID = "settings-reauth-password";
+
 function ReauthNotice() {
-  return <Callout tone="warn">Reauthenticate above, then try again.</Callout>;
+  return (
+    <Callout tone="warn">
+      Confirm your administrator password under{" "}
+      <a
+        href={`#${reauthFieldID}`}
+        onClick={(e) => {
+          e.preventDefault();
+          const field = document.getElementById(reauthFieldID);
+          field?.scrollIntoView({ block: "center", behavior: "smooth" });
+          field?.focus();
+        }}
+      >
+        Reauthenticate
+      </a>{" "}
+      at the top of this page, then try again.
+    </Callout>
+  );
 }
 
 function ReauthCard() {
@@ -142,6 +163,7 @@ function ReauthCard() {
           {ok ? <Callout tone="ok">Reauthenticated. Mutations are allowed for five minutes.</Callout> : null}
           <Field label="Password">
             <Input
+              id={reauthFieldID}
               type="password"
               autoComplete="current-password"
               value={password}
@@ -242,7 +264,11 @@ function OAuthCard({ onChanged }: { onChanged: () => void }) {
   return (
     <Card title="OAuth">
       <Stack>
-        <Hint>Tokens are never displayed. State is bound to this session and is spent on first use.</Hint>
+        <Hint>
+          Starting a sign-in needs your administrator password from the last five minutes;
+          finishing one does not, because the login itself can take longer than that. Tokens are
+          never displayed, and the state is bound to this session and spent on first use.
+        </Hint>
         {providers.map((p) => (
           <OAuthProviderBlock key={p.name} provider={p} onChanged={onChanged} />
         ))}

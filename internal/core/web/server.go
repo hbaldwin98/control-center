@@ -168,8 +168,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/admin/credentials/{id}/rotate", s.requireReauth(s.handleCredentialRotate))
 	s.mux.HandleFunc("DELETE /api/admin/credentials/{id}", s.requireReauth(s.handleCredentialDelete))
 	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/begin", s.requireReauth(s.handleOAuthBegin))
-	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/manual", s.requireReauth(s.handleOAuthManual))
 	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/import", s.requireReauth(s.handleOAuthImport))
+	// Completing a flow is gated the same way whether the callback is served or pasted:
+	// a session, and the one-time state that only the browser which began it holds.
+	// Reauthentication is spent at the beginning, because the sign-in in between is a
+	// trip through the provider's own login and can outlast the five-minute window.
+	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/manual", s.authenticated(s.withActor(s.handleOAuthManual)))
 	s.mux.HandleFunc("GET /api/admin/credentials/oauth/callback", s.authenticated(s.withActor(s.handleOAuthCallback)))
 
 	// Providers and routes are configuration, not secrets: they name a credential but

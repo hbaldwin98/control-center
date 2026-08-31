@@ -200,6 +200,76 @@ func TestOAuthBeginAndCallback(t *testing.T) {
 	}
 }
 
+// A pinned-redirect sign-in is a trip through the provider's own login page, which can
+// easily outlast the five-minute reauthentication window. Spending the password at the
+// beginning and finishing on the one-time state matches how the served callback already
+// works; requiring it again at the end would strand the administrator mid-flow.
+func TestOAuthManualCompletionSurvivesTheReauthWindow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "tok-live", "refresh_token": "ref-live", "expires_in": 3600,
+		})
+	}))
+	t.Cleanup(ts.Close)
+
+	const pinned = "http://localhost:1455/auth/callback"
+	h, creds := newCredsHarness(t, map[string]credentials.OAuthProvider{
+		"codex": {
+			AuthURL: ts.URL + "/auth", TokenURL: ts.URL, ClientID: "cid",
+			RedirectURI: pinned, Scopes: []string{"openid"},
+		},
+	})
+	h.bootstrapAdmin()
+
+	// Beginning still costs a password: it is the step that will create a credential.
+	if rec := h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/begin", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("begin without reauth: %d %s", rec.Code, rec.Body)
+	}
+	h.reauth()
+	rec := h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/begin", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("begin: %d %s", rec.Code, rec.Body)
+	}
+	var begin struct {
+		AuthURL string `json:"authUrl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &begin); err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(begin.AuthURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := u.Query().Get("state")
+	if got := u.Query().Get("redirect_uri"); got != pinned {
+		t.Fatalf("redirect_uri = %q, want the provider's pinned address", got)
+	}
+
+	// The administrator signs in, which takes longer than the window allows.
+	if _, err := h.store.Exec(context.Background(), `UPDATE core_sessions SET reauth_at = NULL`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/manual",
+		map[string]string{"callbackUrl": pinned + "?code=auth-code&state=" + url.QueryEscape(state)})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manual completion: %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "tok-live") || strings.Contains(rec.Body.String(), "ref-live") {
+		t.Fatalf("completion leaked tokens: %s", rec.Body)
+	}
+	if tok, err := creds.Token(context.Background(), "oauth-codex"); err != nil || tok != "tok-live" {
+		t.Fatalf("token = %q %v", tok, err)
+	}
+
+	// The state is spent, so a replayed paste is refused even from the same session.
+	rec = h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/manual",
+		map[string]string{"callbackUrl": pinned + "?code=auth-code&state=" + url.QueryEscape(state)})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("replayed paste: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestAIRoutesAndCalls(t *testing.T) {
 	h, creds := newCredsHarness(t, nil)
 	h.bootstrapAdmin()

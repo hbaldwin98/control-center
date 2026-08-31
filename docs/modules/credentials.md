@@ -196,6 +196,11 @@ address instead of the caller's, and records it in the state row. The browser fi
 a page that fails to load; the administrator copies that address out of the address bar
 and posts it back, and `CompleteOAuthManual` reads the code and state out of it.
 
+Completion is gated the way the served callback is: a session, plus the one-time state
+only the browser that began the flow holds. The password is spent at the beginning, which
+is the step that will create a credential; requiring it again at the end would strand an
+administrator whose trip through the provider's login outlasted the five-minute window.
+
 Nothing about the security of the flow is relaxed by that paste. The state is still 256
 bits, still bound to the initiating web session, still expires in 10 minutes, and is still
 consumed once in a transaction before the exchange. The PKCE verifier still never leaves
