@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/plugins/hello"
+	"github.com/hbaldwin98/control-center/plugins/pagewatch"
 	"github.com/hbaldwin98/control-center/plugins/tid"
 )
 
@@ -15,6 +16,7 @@ import (
 func registerPlugins(r *pluginhost.Registry) error {
 	return r.RegisterAll(
 		hello.New(),
+		pagewatch.New(),
 		tid.New(),
 	)
 }

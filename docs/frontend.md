@@ -15,7 +15,8 @@ web/src/
   core/             dashboard, jobs, events, costs, settings, plugin admin
   plugins/
     hello/index.tsx
-    bidrl/index.tsx
+    pagewatch/index.tsx
+    tid/index.tsx
   plugins.ts        ← the only file importing plugin modules
 ```
 
@@ -54,10 +55,11 @@ Registered in one place:
 
 ```ts
 // web/src/plugins.ts
-import bidrl from "./plugins/bidrl";
 import hello from "./plugins/hello";
+import pagewatch from "./plugins/pagewatch";
+import tid from "./plugins/tid";
 
-export const plugins = [hello, bidrl];
+export const plugins = [hello, pagewatch, tid];
 ```
 
 The build rejects duplicate frontend IDs and route or navigation collisions. Plugin route

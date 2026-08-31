@@ -26,6 +26,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/plugins/hello"
+	"github.com/hbaldwin98/control-center/plugins/pagewatch"
 )
 
 type helloFix struct {
@@ -134,7 +135,8 @@ routes:
 
 	br, err := browser.New(bus, pol, browser.Options{
 		Engine: browser.NewFake(map[string]http.Handler{
-			"hello.test": browser.HTMLHandler(`<!doctype html><article class="lot">hello</article>`),
+			"hello.test":  browser.HTMLHandler(`<!doctype html><article class="lot">hello</article>`),
+			"example.com": browser.HTMLHandler(`<!doctype html><main><h1>Example Domain</h1><p>This domain is for examples.</p></main>`),
 		}),
 	})
 	if err != nil {
@@ -151,7 +153,7 @@ routes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterAll(plug); err != nil {
+	if err := reg.RegisterAll(plug, pagewatch.New()); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.Start(ctx); err != nil {

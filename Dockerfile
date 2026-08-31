@@ -16,6 +16,8 @@ ENV GOTOOLCHAIN=local
 COPY go.work go.work.sum go.mod go.sum ./
 COPY host/ ./host/
 COPY plugins/hello/ ./plugins/hello/
+COPY plugins/pagewatch/ ./plugins/pagewatch/
+COPY plugins/tid/ ./plugins/tid/
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY config/ ./config/

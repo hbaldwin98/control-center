@@ -3,6 +3,11 @@ go 1.25.0
 // The application module. The plugin-facing `host` module and each plugin module join
 // this workspace as they land, so a plugin can depend on `host` alone.
 use .
+
 use ./host
+
 use ./plugins/hello
+
+use ./plugins/pagewatch
+
 use ./plugins/tid

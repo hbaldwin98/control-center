@@ -120,6 +120,21 @@ func TestChatReservesAndSettles(t *testing.T) {
 	}
 }
 
+func TestFakeChatHonorsMaxTokens(t *testing.T) {
+	h := newHarness(t)
+	ctx := WithPlugin(context.Background(), "hello")
+	resp, err := h.ai.Chat(ctx, ChatRequest{
+		Model: "cheap-chat", MaxTokens: 8,
+		Messages: []Message{{Role: "user", Text: "This prompt is long enough that the echo must be truncated by the fake provider."}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.OutputTokens > 8 {
+		t.Fatalf("output tokens = %d, want at most 8", resp.Usage.OutputTokens)
+	}
+}
+
 func TestChatRequiresPluginAndEnabled(t *testing.T) {
 	h := newHarness(t)
 	if _, err := h.ai.Chat(context.Background(), ChatRequest{Model: "cheap-chat"}); !errors.Is(err, ErrNoPlugin) {

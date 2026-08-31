@@ -6,6 +6,7 @@
  */
 import type { PluginModule } from "@cc/ui";
 import hello from "./plugins/hello";
+import pagewatch from "./plugins/pagewatch";
 import tid from "./plugins/tid";
 
-export const plugins: PluginModule[] = [hello, tid];
+export const plugins: PluginModule[] = [hello, pagewatch, tid];
