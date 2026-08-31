@@ -216,7 +216,8 @@ func newBrowserEngine(cfg config.Config) (browser.Engine, error) {
 	default:
 		slog.Info("browser engine fake")
 		return browser.NewFake(map[string]http.Handler{
-			"hello.test": browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
+			"hello.test":  browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
+			"example.com": browser.HTMLHandler(`<!doctype html><html><body><main><h1>Example Domain</h1><p>This domain is for use in illustrative examples in documents.</p></main></body></html>`),
 		}), nil
 	}
 }

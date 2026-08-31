@@ -455,6 +455,7 @@ One file in the core app, and one line in it:
 func registerPlugins(r pluginhost.Registry) error {
     return r.RegisterAll(
         hello.New(),
+        pagewatch.New(),
         bidrl.New(),
     )
 }

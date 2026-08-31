@@ -1,6 +1,6 @@
 # Control Center — Design
 
-Status: draft · 2026-08-30 · pre-implementation
+Status: implemented through Page Watch · 2026-08-31
 
 A personal, self-hosted web application that runs on one Linux box and hosts plugins.
 **The host owns capabilities; plugins own workflows.**
@@ -22,6 +22,7 @@ The interfaces translate directly to Rust if that changes; the layering does not
 | [`docs/plugin-api.md`](docs/plugin-api.md) | Everything needed to write a plugin. Self-contained. |
 | [`docs/frontend.md`](docs/frontend.md) | Shell, plugin UI contract, live data. |
 | [`docs/modules/`](docs/modules/) | One spec per core module. |
+| [`docs/plugins/pagewatch.md`](docs/plugins/pagewatch.md) | Low-cost end-to-end confidence plugin. |
 | [`docs/plugins/bidrl.md`](docs/plugins/bidrl.md) | First real plugin. |
 
 Module specs: [storage](docs/modules/storage.md) · [events](docs/modules/events.md) ·
@@ -45,7 +46,7 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
   mutation, and browser-session admission points.
-- Two plugins: `hello` (validating) and `bidrl` (real).
+- Three plugins: `hello` (validating), `pagewatch` (operational confidence), and `bidrl` (real).
 
 ### Not in v1
 
@@ -89,7 +90,7 @@ There is one structural rule, and it replaces any dependency matrix:
 ```
   L6  web            HTTP, SSE, auth, static shell
        │
-  L5  plugins        hello · bidrl              (own Go modules)
+  L5  plugins        hello · pagewatch · bidrl  (own Go modules)
        │
   L4  pluginhost     registry · lifecycle · Host facade construction
        │
@@ -205,6 +206,7 @@ control-center/
   host/                     ← separate Go module: the plugin-facing library
   plugins/
     hello/  go.mod          ← separate module
+    pagewatch/  go.mod      ← separate module
     bidrl/  go.mod          ← separate module
   web/                      ← React/TS frontend; canonical plugin UI under src/plugins/
   config/
@@ -259,13 +261,15 @@ architectural test rather than a review convention.
 | 7 | `hello` | The [validating plugin](docs/plugin-api.md#8-the-hello-plugin) passes its acceptance test. |
 | 8 | `browser` | Host-managed sessions, allowlist, fake backend, and kill-switch close all pass. |
 | 9 | `notifications` | Channels use credential entries; rules and defaults deliver committed events. |
-| 10 | `bidrl` | The first real plugin. |
-| 11 | Future | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
+| 10 | `pagewatch` | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
+| 11 | `bidrl` | The first real plugin. |
+| 12 | Future | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
 
 Steps 2–6 are the ones worth getting right. Everything after is downstream of them.
 
 Step 7 is not optional. It is where the host API gets fixed while fixing it is still cheap.
-`browser` lands before `bidrl`; collection must not own Chromium.
+`browser` and `pagewatch` land before `bidrl`; collection must not own Chromium, and the
+complete capability pipeline gets exercised before the larger plugin depends on it.
 
 ---
 

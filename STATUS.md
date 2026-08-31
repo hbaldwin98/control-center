@@ -15,8 +15,9 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 7 | `hello` | ✅ | The validating plugin passes its acceptance test. |
 | 8 | `browser` | ✅ | Host-managed sessions, allowlist, fake backend, and kill-switch close all pass. |
 | 9 | `notifications` | ✅ | Channels use credential entries; rules and defaults deliver committed events. |
-| 10 | `bidrl` | ⬜ | The first real plugin. |
-| 11 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
+| 10 | `pagewatch` | ✅ | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
+| 11 | `bidrl` | ⬜ | The first real plugin. |
+| 12 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
 
 ---
 
@@ -152,7 +153,7 @@ Not a numbered milestone; it completes the Dashboard row of
 | `useStreamStatus` / `useActivity` on the one shared stream | ✅ | Connection state comes from the `EventSource`; activity holds timestamps, never payloads. |
 | Liveness needs both a declaration and a live connection | ✅ | Reconnecting turns every indicator off rather than leaving it pulsing. |
 | Jobs screen filters by plugin from the URL | ✅ | `/jobs?plugin=<id>`, so a detail screen can link to its own queue. |
-| `hello` contributes a tile and a detail panel | ✅ | Both fold `hello.ticked` into one snapshot; no polling, no refetch per tick. |
+| Plugin tiles and detail panels | ✅ | `hello` and `pagewatch` fold complete plugin events into snapshots; no polling or refetch per event. |
 
 ## Provider administration and subscription auth ✅
 
@@ -181,6 +182,18 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Throttle windows collapse same subject; ready after window close | ✅ | Structured uniqueness keys (JSON) |
 | External ntfy / webpush sends with leases, 8 attempts, credential tokens | ✅ | Inbox write never calls out |
 | Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen |
+
+## Milestone 10 — `pagewatch` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| Separate `plugins/pagewatch` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
+| Scheduled and manual public-page check | ✅ | Every six hours; HTTPS DNS target validation; fake and Playwright browser engines. |
+| Drift and expected-text results | ✅ | Baseline, unchanged, changed, and attention states; latest normalized snapshot stored as a blob. |
+| Bounded AI use | ✅ | 64 output tokens; changed/attention checks plus at most one summary per day while unchanged. |
+| Transactional signal path | ✅ | State and completion/alert events commit together; durable subscriber keeps 100 history rows. |
+| Operator UI | ✅ | Current result, target, timings, tokens, cost, history, snapshot download, and manual trigger. |
+| End-to-end acceptance test | ✅ | Real registry, policy, jobs, browser, AI accounting, blob, SQL, events, durable delivery, and HTTP. |
 
 ---
 

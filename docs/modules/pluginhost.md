@@ -72,7 +72,7 @@ Exactly one core file imports plugin packages:
 
 ```go
 func registerPlugins(r pluginhost.Registry) error {
-    return r.RegisterAll(hello.New(), bidrl.New())
+    return r.RegisterAll(hello.New(), pagewatch.New(), bidrl.New())
 }
 ```
 

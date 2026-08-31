@@ -6,6 +6,7 @@ require (
 	github.com/google/cel-go v0.26.1
 	github.com/hbaldwin98/control-center/host v0.0.0
 	github.com/hbaldwin98/control-center/plugins/hello v0.0.0
+	github.com/hbaldwin98/control-center/plugins/pagewatch v0.0.0
 	github.com/mxschmitt/playwright-go v0.6201.1
 	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.58.0
@@ -39,3 +40,5 @@ require (
 replace github.com/hbaldwin98/control-center/host => ./host
 
 replace github.com/hbaldwin98/control-center/plugins/hello => ./plugins/hello
+
+replace github.com/hbaldwin98/control-center/plugins/pagewatch => ./plugins/pagewatch

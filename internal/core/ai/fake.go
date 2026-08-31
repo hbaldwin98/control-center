@@ -21,6 +21,12 @@ func (Fake) Chat(_ context.Context, d Dispatch, req ChatRequest) (providerResult
 	prompt := lastText(req.Messages)
 	inTok := approxTokens(prompt)
 	reply := "echo: " + strings.TrimSpace(prompt)
+	if req.MaxTokens > 0 {
+		runes := []rune(reply)
+		if limit := req.MaxTokens * 4; len(runes) > limit {
+			reply = string(runes[:limit])
+		}
+	}
 	outTok := approxTokens(reply)
 	cost, err := d.charge(inTok, outTok)
 	if err != nil {
