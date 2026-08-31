@@ -360,7 +360,7 @@ function OAuthProviderBlock({
             </Button>
           ) : null}
         </Row>
-        {provider.manual && authUrl ? (
+        {provider.manual ? (
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -369,21 +369,22 @@ function OAuthProviderBlock({
           >
             <Stack>
               <Callout>
-                Sign in on the page that opened. Your browser finishes at{" "}
-                <code>{provider.redirectUri}</code>, which will not load — that address belongs to a
-                local command-line tool, not to this server. Copy the whole address out of the
-                address bar and paste it below.
+                Your browser finishes at <code>{provider.redirectUri}</code>, which will not load —
+                that address belongs to a local command-line tool, not to this server. That failed
+                page is the point: copy the whole address out of the address bar and paste it below.
               </Callout>
-              <Hint>
-                If no tab opened,{" "}
-                <a href={authUrl} target="_blank" rel="noreferrer">
-                  open the sign-in page
-                </a>
-                .
-              </Hint>
+              {authUrl ? (
+                <Hint>
+                  If no tab opened,{" "}
+                  <a href={authUrl} target="_blank" rel="noreferrer">
+                    open the sign-in page
+                  </a>
+                  .
+                </Hint>
+              ) : null}
               <Field
                 label="Address your browser landed on"
-                hint="Carries code and state. It works exactly once."
+                hint="Carries code and state. It works exactly once, within ten minutes of starting."
               >
                 <Textarea
                   mono
@@ -395,7 +396,7 @@ function OAuthProviderBlock({
               </Field>
               <Row>
                 <Button type="submit" variant="primary" disabled={busy}>
-                  Finish sign-in
+                  {busy ? "Finishing…" : "Finish sign-in"}
                 </Button>
               </Row>
             </Stack>

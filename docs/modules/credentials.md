@@ -194,7 +194,10 @@ Such a provider is configured with a `RedirectURI` of its own and reports `manua
 `OAuthProviderList`. `BeginOAuth` then builds the authorization URL against the pinned
 address instead of the caller's, and records it in the state row. The browser finishes on
 a page that fails to load; the administrator copies that address out of the address bar
-and posts it back, and `CompleteOAuthManual` reads the code and state out of it.
+and posts it back, and `CompleteOAuthManual` reads the code and state out of it. The
+pending flow lives in the state row rather than in the page that started it, so closing
+or reloading the tab mid-login does not lose it — the paste is offered for as long as a
+manual provider is configured, and the state itself decides what is still valid.
 
 Completion is gated the way the served callback is: a session, plus the one-time state
 only the browser that began the flow holds. The password is spent at the beginning, which
