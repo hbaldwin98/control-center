@@ -135,6 +135,24 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | Kill switch | ✅ | Disable rejects new I/O and closes admitted sessions; in-flight Goto fails. |
 | `core.browser.denied` | ✅ | Audit row on allowlist/private-network denial. |
 
+## Frontend — plugin dashboard ✅
+
+Not a numbered milestone; it completes the Dashboard row of
+[`docs/frontend.md`](docs/frontend.md) §"Core screens".
+
+| Feature | State | Notes |
+|---|---|---|
+| `PluginModule.dashboard`: `summary`, `live`, `tile`, `detail` | ✅ | All optional. A plugin that contributes nothing still gets a host-built tile. |
+| Registration rejects an unmatchable `live` pattern | ✅ | A silently wrong live indicator is worse than none. `web/src/shell/registry.ts` |
+| Dashboard grid: one live tile per plugin | ✅ | State, spend against daily budget, open and failed work, activity, plugin surface. |
+| Plugin surfaces render behind an error boundary | ✅ | A broken tile never costs the operator the page or the kill switch. |
+| Plugin detail at `/plugins/<id>` | ✅ | Live activity, plugin surface, jobs, event feed, spend, budget, config, kill switch. |
+| Controls shared by the list and detail screens | ✅ | `web/src/core/PluginControls.tsx`; one implementation of the kill switch. |
+| `useStreamStatus` / `useActivity` on the one shared stream | ✅ | Connection state comes from the `EventSource`; activity holds timestamps, never payloads. |
+| Liveness needs both a declaration and a live connection | ✅ | Reconnecting turns every indicator off rather than leaving it pulsing. |
+| Jobs screen filters by plugin from the URL | ✅ | `/jobs?plugin=<id>`, so a detail screen can link to its own queue. |
+| `hello` contributes a tile and a detail panel | ✅ | Both fold `hello.ticked` into one snapshot; no polling, no refetch per tick. |
+
 ## Deferred by design (not v1)
 
 Agentic harness sessions · terminal visibility in the browser · externally reachable

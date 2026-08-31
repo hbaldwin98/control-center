@@ -39,6 +39,12 @@ const bidrl: PluginModule = {
     { path: "/bidrl", element: <Feed /> },
     { path: "/bidrl/auction/:id", element: <Auction /> },
   ],
+  dashboard: {
+    summary: "Watches saved searches and scores what it finds.",
+    live: ["bidrl.**"],
+    tile: Tile,      // compact, on the dashboard grid
+    detail: Panel,   // full, on /plugins/bidrl
+  },
 };
 
 export default bidrl;
@@ -59,6 +65,26 @@ and navigation paths must stay below `/<plugin-id>`.
 At startup, before rendering plugin UI, the shell compares every `PluginModule.id` with
 the authenticated backend descriptors and fails closed on unknown, missing, or duplicate
 IDs. The frontend module owns its navigation, routes, and icons.
+
+### Dashboard contributions
+
+`dashboard` is optional and every field in it is optional. A plugin that contributes
+nothing still gets a dashboard tile, built from what the host knows: state, spend against
+budget, open and failed jobs, and the reason it is disabled. What the plugin adds is its
+own reading of its own data.
+
+`live` is the plugin declaring that its surfaces update themselves from the stream. The
+shell takes it at its word and shows a live indicator, the time of the last matching event,
+and a ten-minute activity history on the tile. It is a claim about behaviour, so the build
+rejects a pattern that could never match — a permanently, silently wrong indicator is worse
+than none. A tile only reads "live" when the plugin declared it **and** the one shared
+connection is actually up; while the browser is reconnecting, every tile says so.
+
+`tile` and `detail` are ordinary components, given `{ pluginId, enabled }` and rendered
+behind an error boundary. `enabled` is there so a surface can rest instead of firing
+requests the host will reject. A surface that throws is replaced by a note naming the
+plugin: the dashboard is the screen an operator reaches for the kill switch from, so one
+broken tile must never take the page — or the switch — with it.
 
 ### The rule that keeps this modular
 
@@ -132,7 +158,17 @@ snapshots and mutations; SSE applies later changes. There is no second realtime 
 and no polling.
 
 `useEvents` is provided by `@cc/ui`, so a plugin gets live data without knowing how the
-transport works.
+transport works. Two more hooks ride the same connection and open nothing of their own:
+
+```tsx
+const status   = useStreamStatus();          // idle | connecting | live | reconnecting | offline | reset
+const activity = useActivity("bidrl.**");    // { total, lastAt, last, buckets }
+```
+
+`useStreamStatus` reflects the actual `EventSource`, so nothing in the UI can claim to be
+live while the browser is retrying. `useActivity` keeps arrival timestamps only — never
+payloads — which is what lets a tile show that a plugin is working without the shell
+knowing what any of its events mean.
 
 The shell first loads `/api/bootstrap`, a `Snapshot` containing the initial core state,
 then opens the one shared stream after that boundary. SSE tails `core_events` directly
@@ -160,12 +196,21 @@ affected resource rather than reconstructing it from partial event payloads.
 
 | Screen | Shows |
 |---|---|
-| Dashboard | per-plugin name and state, spend today/hour, running jobs (linked), recent alerts |
+| Dashboard | one live tile per plugin in a grid, plus totals, running jobs, and recent alerts |
+| Plugin detail | one plugin in full: live activity, its own surface, jobs, spend, and every control |
 | Plugins | enable/disable toggles, budgets, health, last error, schema-backed config |
-| Jobs | queue, history, per-job progress and logs, cancel |
+| Jobs | queue, history, per-job progress and logs, cancel; filterable by plugin from the URL |
 | Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
 | Settings | credentials (with re-auth), read-only effective model routes |
+
+The dashboard is a grid of plugin tiles. Each tile carries the plugin's state, what it has
+spent today against its daily budget, its open and failed work, its live indicator and
+activity history, and whatever surface the plugin contributed. Clicking one opens
+`/plugins/<id>`: the same live view at full size, that plugin's jobs and event feed, its
+spend in every budget window, and the same controls the Plugins screen offers — kill
+switch, budgets, and config — because an operator who has drilled into a plugin should not
+have to navigate back to turn it off.
 
 The Plugins screen is where the host-capability kill switch lives. Disabled plugins are
 greyed with the reason and timestamp, never hidden. Disable rejects new host-managed jobs,

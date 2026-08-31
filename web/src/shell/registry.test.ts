@@ -48,6 +48,28 @@ describe("validateModules", () => {
     const bad: PluginModule = { id: "Hello", nav: [], routes: [] };
     expect(validateModules([bad]).some((p) => p.includes("must match"))).toBe(true);
   });
+
+  it("accepts a dashboard contribution with valid live patterns", () => {
+    const live: PluginModule = {
+      ...hello,
+      dashboard: { summary: "Ticks.", live: ["hello.ticked", "hello.**", "core.ai.usage"] },
+    };
+    expect(validateModules([live])).toEqual([]);
+  });
+
+  it("rejects a live pattern that can never match, so the indicator cannot lie", () => {
+    const broken: PluginModule = {
+      ...hello,
+      dashboard: { live: ["Hello.Ticked"] },
+    };
+    expect(
+      validateModules([broken]).some((p) => p.includes('invalid live pattern "Hello.Ticked"')),
+    ).toBe(true);
+  });
+
+  it("leaves a plugin that contributes no dashboard alone", () => {
+    expect(validateModules([{ ...hello, dashboard: {} }])).toEqual([]);
+  });
 });
 
 describe("reconcile", () => {

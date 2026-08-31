@@ -6,6 +6,7 @@
  * the shell compares each `PluginModule.id` against the authenticated backend descriptors
  * and fails closed on unknown, missing, or duplicate ids.
  */
+import { isValidPattern } from "@cc/ui";
 import type { PluginDescriptor, PluginModule } from "@cc/ui";
 
 export class PluginRegistrationError extends Error {
@@ -46,6 +47,15 @@ export function validateModules(modules: PluginModule[]): string[] {
         problems.push(`route "${r.path}" is claimed by both "${owner}" and "${m.id}"`);
       } else {
         claimedRoutes.set(r.path, m.id);
+      }
+    }
+
+    // A plugin that declares live patterns is telling the shell to show a live indicator
+    // for it. An unmatchable pattern would make that indicator permanently, silently
+    // wrong, so it is a registration failure like any other.
+    for (const pattern of m.dashboard?.live ?? []) {
+      if (!isValidPattern(pattern)) {
+        problems.push(`plugin "${m.id}" declares invalid live pattern "${pattern}"`);
       }
     }
 

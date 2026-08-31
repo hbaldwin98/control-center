@@ -9,6 +9,7 @@ import { Costs } from "../core/Costs";
 import { Dashboard } from "../core/Dashboard";
 import { Events } from "../core/Events";
 import { Jobs } from "../core/Jobs";
+import { PluginDetail } from "../core/PluginDetail";
 import { Plugins } from "../core/Plugins";
 import { Settings } from "../core/Settings";
 
@@ -69,8 +70,9 @@ function Shell({
     <BrowserRouter>
       <Routes>
         <Route element={<Layout plugins={plugins} descriptors={descriptors} />}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<Dashboard plugins={plugins} />} />
           <Route path="/plugins" element={<Plugins />} />
+          <Route path="/plugins/:id" element={<PluginDetail plugins={plugins} />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/events" element={<Events />} />
           <Route path="/costs" element={<Costs />} />

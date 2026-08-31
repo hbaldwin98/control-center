@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { idAbove, stream } from "./stream";
+import type { StreamStatus } from "./stream";
 import type { Event, Snapshot } from "./types";
 
 export type UseEventsOptions<T> = {
@@ -185,4 +186,125 @@ export function useStreamEpoch(): number {
   const [epoch, setEpoch] = useState(() => stream.epoch());
   useEffect(() => stream.onEpoch(() => setEpoch(stream.epoch())), []);
   return epoch;
+}
+
+/**
+ * The shared connection's health, for the one indicator that says whether anything on
+ * screen is still live. It reflects the actual `EventSource`, so it cannot claim "live"
+ * while the browser is retrying.
+ */
+export function useStreamStatus(): StreamStatus {
+  const [status, setStatus] = useState(() => stream.status());
+  useEffect(() => {
+    setStatus(stream.status());
+    return stream.onStatus(setStatus);
+  }, []);
+  return status;
+}
+
+/** A rolling count of matching events, for a live indicator and a small history. */
+export type Activity = {
+  /** Events seen in the window. */
+  total: number;
+  /** Epoch milliseconds of the most recent match, or null if none arrived yet. */
+  lastAt: number | null;
+  /** The most recent matching event, or null. */
+  last: Event | null;
+  /** Counts per equal time slice, oldest first, ending at now. */
+  buckets: number[];
+};
+
+export type UseActivityOptions = {
+  /** How far back the history reaches. Defaults to ten minutes. */
+  windowMs?: number;
+  /** How many slices that window is cut into. Defaults to 24. */
+  buckets?: number;
+};
+
+const EMPTY_ACTIVITY: Activity = { total: 0, lastAt: null, last: null, buckets: [] };
+
+/**
+ * Watches one or more patterns on the shared stream and reports arrival rate rather than
+ * content. This is what makes a tile look alive without the shell knowing what any
+ * plugin's events mean.
+ *
+ * It holds only timestamps, so the cost does not grow with payload size, and it slides the
+ * window on a timer of one bucket width — the only timer in the UI, and it touches no
+ * network.
+ */
+export function useActivity(
+  patterns: string | readonly string[],
+  options: UseActivityOptions = {},
+): Activity {
+  const { windowMs = 10 * 60_000, buckets = 24 } = options;
+  const patternKey = patternList(patterns).join("\n");
+  const stamps = useRef<number[]>([]);
+  const last = useRef<Event | null>(null);
+  const [activity, setActivity] = useState<Activity>(EMPTY_ACTIVITY);
+  const epoch = useStreamEpoch();
+
+  useEffect(() => {
+    const list = patternKey === "" ? [] : patternKey.split("\n");
+    stamps.current = [];
+    last.current = null;
+    setActivity(EMPTY_ACTIVITY);
+    if (list.length === 0) return;
+
+    const recompute = () => {
+      const now = Date.now();
+      const floor = now - windowMs;
+      const kept = stamps.current.filter((t) => t > floor);
+      stamps.current = kept;
+
+      const width = windowMs / buckets;
+      const counts = new Array<number>(buckets).fill(0);
+      for (const t of kept) {
+        const slot = Math.min(buckets - 1, Math.floor((t - floor) / width));
+        counts[slot] = (counts[slot] ?? 0) + 1;
+      }
+      setActivity({
+        total: kept.length,
+        lastAt: kept.at(-1) ?? null,
+        last: last.current,
+        buckets: counts,
+      });
+    };
+
+    // Two patterns can match the same event. Ids are monotonic and the stream delivers one
+    // event to every subscriber before the next, so a high-water mark deduplicates exactly
+    // — and, unlike a set of seen ids, does not grow without bound on a busy stream.
+    let highWater = "0";
+    const unsubs = list.map((p) =>
+      stream.subscribe(p, (event) => {
+        if (!idAbove(event.id, highWater)) return;
+        highWater = event.id;
+        stamps.current.push(Date.now());
+        last.current = event;
+        recompute();
+      }),
+    );
+
+    // Draw an empty history immediately rather than leaving a blank until the first tick.
+    recompute();
+    const timer = setInterval(recompute, Math.max(1_000, windowMs / buckets));
+    return () => {
+      clearInterval(timer);
+      for (const u of unsubs) u();
+    };
+  }, [patternKey, windowMs, buckets, epoch]);
+
+  return activity;
+}
+
+/**
+ * A clock that ticks only while something is rendering relative times. Returns epoch
+ * milliseconds, re-rendering on the given interval.
+ */
+export function useNow(intervalMs = 1_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
 }

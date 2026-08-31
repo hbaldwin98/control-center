@@ -39,20 +39,31 @@ const STATES = ["", "pending", "running", "retry_wait", "cancel_requested", "suc
 /** The queue and its history, with per-job progress, logs, and cancellation. */
 export function Jobs() {
   const [state, setState] = useState("");
+  const [params, setParams] = useSearchParams();
+  // The plugin filter lives in the URL so a plugin's detail screen can link straight to
+  // its own queue, and so that link stays shareable.
+  const plugin = params.get("plugin") ?? "";
   const load = useCallback(
     (signal: AbortSignal) => {
-      const q = state ? `?state=${encodeURIComponent(state)}` : "";
-      return api.snapshot<Job[]>(`/api/jobs${q}`, { signal });
+      const q = new URLSearchParams();
+      if (state) q.set("state", state);
+      if (plugin) q.set("plugin", plugin);
+      const query = q.toString();
+      return api.snapshot<Job[]>(`/api/jobs${query ? `?${query}` : ""}`, { signal });
     },
-    [state],
+    [state, plugin],
   );
   const list = useSnapshot<Job[]>(load, { events: "core.job.**" });
-  const [params, setParams] = useSearchParams();
   const openId = Number(params.get("id") || "") || null;
   const setOpenId = (id: number | null) => {
     const next = new URLSearchParams(params);
     if (id == null) next.delete("id");
     else next.set("id", String(id));
+    setParams(next, { replace: true });
+  };
+  const clearPlugin = () => {
+    const next = new URLSearchParams(params);
+    next.delete("plugin");
     setParams(next, { replace: true });
   };
 
@@ -80,13 +91,18 @@ export function Jobs() {
               ))}
             </select>
           </label>
+          {plugin ? (
+            <Button type="button" onClick={clearPlugin}>
+              Plugin: {plugin} ✕
+            </Button>
+          ) : null}
         </Row>
 
         {list.status === "error" ? <Callout tone="danger">{list.error.message}</Callout> : null}
         {list.status === "loading" ? (
           <EmptyState>Loading…</EmptyState>
         ) : list.status === "ready" && list.data.length === 0 ? (
-          <EmptyState>No jobs yet.</EmptyState>
+          <EmptyState>{plugin ? `No jobs for ${plugin}.` : "No jobs yet."}</EmptyState>
         ) : list.status === "ready" ? (
           <Card>
             <div style={{ overflowX: "auto" }}>

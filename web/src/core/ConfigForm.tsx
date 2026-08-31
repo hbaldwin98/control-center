@@ -16,7 +16,7 @@ export function ConfigForm({
   pluginId: string;
   schema: unknown;
   value: Record<string, unknown> | null | undefined;
-  disabled: boolean;
+  disabled?: boolean;
   onSaved: () => void;
   onError: (message: string | null) => void;
 }) {

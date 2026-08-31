@@ -498,3 +498,252 @@ kbd {
   vertical-align: bottom;
   color: var(--text-muted);
 }
+
+/* ---- dashboard ---- */
+
+.cc-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cc-card__head .cc-card__title {
+  margin-bottom: 0;
+}
+
+.cc-card__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.cc-row--tight {
+  gap: 6px;
+}
+
+/* A liveness dot. `live` pulses; the rest are steady, so a glance distinguishes them. */
+.cc-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+
+.cc-dot--live {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent);
+  animation: cc-pulse 2s ease-out infinite;
+}
+
+.cc-dot--idle {
+  background: color-mix(in srgb, var(--ok) 55%, var(--border-strong));
+}
+
+.cc-dot--stale {
+  background: var(--warn);
+}
+
+.cc-dot--off {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+@keyframes cc-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--ok) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-dot--live {
+    animation: none;
+  }
+}
+
+.cc-metric {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.cc-metric__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cc-metric__value {
+  margin-top: 2px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-metric__hint {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.cc-metric--warn .cc-metric__value {
+  color: var(--warn);
+}
+.cc-metric--danger .cc-metric__value {
+  color: var(--danger);
+}
+.cc-metric--ok .cc-metric__value {
+  color: var(--ok);
+}
+
+.cc-meter {
+  display: flex;
+  width: 100%;
+  min-width: 60px;
+  height: 5px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.cc-meter__fill--ok {
+  background: var(--ok);
+}
+.cc-meter__fill--warn {
+  background: var(--warn);
+}
+.cc-meter__fill--danger {
+  background: var(--danger);
+}
+
+/* The reserved-but-not-committed part: present, but visibly not yet spent. */
+.cc-meter__held {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--border-strong) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.cc-spark {
+  display: block;
+  width: 100%;
+}
+
+.cc-spark__bar {
+  fill: var(--accent);
+}
+
+.cc-spark__bar--empty {
+  fill: var(--border);
+}
+
+/* ---- plugin tiles ---- */
+
+.cc-tile {
+  display: flex;
+  flex-direction: column;
+}
+
+.cc-tile__link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cc-tile__link:hover {
+  color: var(--accent);
+}
+
+.cc-tile__lede {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.cc-tile__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.cc-tile__stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cc-tile__stat-value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-tile__activity {
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.cc-tile__foot {
+  display: flex;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* A plugin-supplied surface, fenced off so it reads as the plugin's own area. */
+.cc-surface {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.cc-surface--failed {
+  color: var(--danger);
+}
+
+/* ---- budget windows ---- */
+
+.cc-windows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cc-windows__row {
+  display: grid;
+  grid-template-columns: 7ch 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.cc-windows__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-top: 2px;
+}
+
+.cc-windows__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-meter__fill--accent {
+  background: var(--accent);
+}

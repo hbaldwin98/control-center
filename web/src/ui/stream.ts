@@ -16,6 +16,16 @@ type Subscriber = {
   listener: Listener;
 };
 
+/**
+ * How the one shared connection is doing right now.
+ *
+ * `idle` before the shell starts it, `connecting` until the server accepts, `live` while
+ * events can arrive, `reconnecting` while the browser retries after a drop, `offline` once
+ * the connection is closed for good, and `reset` between a reset signal and the shell
+ * reopening from a fresh bootstrap.
+ */
+export type StreamStatus = "idle" | "connecting" | "live" | "reconnecting" | "offline" | "reset";
+
 /** A pattern-filtered buffer held open across a snapshot request. */
 export type StreamBuffer = {
   /** Events seen since the buffer opened, in stream order. */
@@ -33,6 +43,9 @@ class EventStream {
   #lastId = 0n;
   /** True between a reset signal and the shell reopening after a fresh bootstrap. */
   #paused = false;
+  #status: StreamStatus = "idle";
+  #statusHandlers = new Set<(status: StreamStatus) => void>();
+  #lastEventAt: number | null = null;
 
   /**
    * Opens the stream at the boundary a snapshot established. Events at or below
@@ -42,11 +55,23 @@ class EventStream {
     this.stop();
     this.#paused = false;
     this.#lastId = toBigInt(afterEventId);
+    this.#setStatus("connecting");
 
     const source = new EventSource(`/api/stream?after=${encodeURIComponent(afterEventId)}`, {
       withCredentials: true,
     });
     this.#source = source;
+
+    source.addEventListener("open", () => {
+      if (this.#source === source && !this.#paused) this.#setStatus("live");
+    });
+
+    // EventSource retries on its own unless it has given up, in which case readyState is
+    // CLOSED. Report which of the two it is rather than a single vague "error".
+    source.addEventListener("error", () => {
+      if (this.#source !== source || this.#paused) return;
+      this.#setStatus(source.readyState === 2 ? "offline" : "reconnecting");
+    });
 
     source.addEventListener("event", (ev) => {
       if (this.#paused) return;
@@ -58,6 +83,8 @@ class EventStream {
       const id = toBigInt(event.id);
       if (id <= this.#lastId) return;
       this.#lastId = id;
+      this.#lastEventAt = Date.now();
+      if (this.#status !== "live") this.#setStatus("live");
 
       this.#deliver(event);
     });
@@ -67,6 +94,7 @@ class EventStream {
       // reload from a fresh bootstrap rather than showing a partial history.
       const data = safeParse<{ oldestRetainedId?: string }>((ev as MessageEvent<string>).data);
       this.#paused = true;
+      this.#setStatus("reset");
       for (const handler of [...this.#resetHandlers]) {
         handler(data?.oldestRetainedId ?? "0");
       }
@@ -76,6 +104,27 @@ class EventStream {
   stop(): void {
     this.#source?.close();
     this.#source = null;
+    if (this.#status !== "reset") this.#setStatus("idle");
+  }
+
+  status(): StreamStatus {
+    return this.#status;
+  }
+
+  onStatus(handler: (status: StreamStatus) => void): () => void {
+    this.#statusHandlers.add(handler);
+    return () => this.#statusHandlers.delete(handler);
+  }
+
+  /** When the last event was delivered, as epoch milliseconds, or null if none has been. */
+  lastEventAt(): number | null {
+    return this.#lastEventAt;
+  }
+
+  #setStatus(status: StreamStatus): void {
+    if (this.#status === status) return;
+    this.#status = status;
+    for (const handler of [...this.#statusHandlers]) handler(status);
   }
 
   /** The highest event id applied so far, as a decimal string. */
