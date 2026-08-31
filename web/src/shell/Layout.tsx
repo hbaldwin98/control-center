@@ -37,11 +37,12 @@ export function Layout({
 
   return (
     <div className="cc-shell">
-      <nav className="cc-nav">
+      <nav className="cc-nav" aria-label="Primary">
         <div className="cc-nav__brand">
           Control Center <small>v1</small>
         </div>
 
+        <div className="cc-nav__section">Core</div>
         {coreNav.map((item) => (
           <NavLink key={item.path} to={item.path} end={item.path === "/"} className="cc-nav__link">
             {item.label}
@@ -68,7 +69,11 @@ export function Layout({
         ) : null}
 
         <div className="cc-nav__spacer" />
-        <Button onClick={() => void logout()}>Sign out</Button>
+        <div className="cc-nav__footer">
+          <Button size="sm" onClick={() => void logout()}>
+            Sign out
+          </Button>
+        </div>
       </nav>
 
       <main className="cc-main">

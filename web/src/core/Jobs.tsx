@@ -1,17 +1,26 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ActionsHeader,
   ApiError,
+  Async,
   Badge,
   Button,
-  Callout,
   Card,
-  EmptyState,
+  Field,
+  Hint,
+  LogBlock,
   Page,
   PageHeader,
   Row,
+  Select,
   Stack,
+  Table,
+  Time,
+  Toolbar,
   api,
+  formatProgress,
+  formatTime,
   useSnapshot,
 } from "@cc/ui";
 
@@ -34,7 +43,16 @@ type Job = {
   logs?: { id: number; attempt: number; at: string; line: string }[];
 };
 
-const STATES = ["", "pending", "running", "retry_wait", "cancel_requested", "succeeded", "failed", "dead", "cancelled"];
+const STATES = [
+  "pending",
+  "running",
+  "retry_wait",
+  "cancel_requested",
+  "succeeded",
+  "failed",
+  "dead",
+  "cancelled",
+];
 
 /** The queue and its history, with per-job progress, logs, and cancellation. */
 export function Jobs() {
@@ -63,61 +81,53 @@ export function Jobs() {
         lede="The queue and its history. REST loads the snapshot; the shared stream refetches after every job event."
       />
       <Stack>
-        <Row>
-          <label className="cc-field" style={{ minWidth: 180 }}>
-            <span className="cc-field__label">State</span>
-            <select
-              className="cc-input"
+        <Toolbar>
+          <Field label="State">
+            <Select
               value={state}
               onChange={(e) => setState(e.target.value)}
               aria-label="Filter by job state"
             >
-              <option value="">All</option>
-              {STATES.filter(Boolean).map((s) => (
+              <option value="">All states</option>
+              {STATES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
-            </select>
-          </label>
-        </Row>
+            </Select>
+          </Field>
+        </Toolbar>
 
-        {list.status === "error" ? <Callout tone="danger">{list.error.message}</Callout> : null}
-        {list.status === "loading" ? (
-          <EmptyState>Loading…</EmptyState>
-        ) : list.status === "ready" && list.data.length === 0 ? (
-          <EmptyState>No jobs yet.</EmptyState>
-        ) : list.status === "ready" ? (
-          <Card>
-            <div style={{ overflowX: "auto" }}>
-              <table className="cc-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
+        <Async state={list} loading="Loading jobs…" empty={state ? `No ${state} jobs.` : "No jobs yet."}>
+          {(jobs) => (
+            <Card>
+              <Table
+                head={
+                  <>
+                    <th className="cc-num">ID</th>
                     <th>Plugin</th>
                     <th>Name</th>
                     <th>State</th>
-                    <th>Attempt</th>
+                    <th className="cc-num">Attempt</th>
                     <th>Progress</th>
                     <th>Created</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.data.map((j) => (
-                    <JobRow
-                      key={j.id}
-                      job={j}
-                      open={openId === j.id}
-                      onToggle={() => setOpenId(openId === j.id ? null : j.id)}
-                      onChanged={list.reload}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        ) : null}
+                    <ActionsHeader />
+                  </>
+                }
+              >
+                {jobs.map((j) => (
+                  <JobRow
+                    key={j.id}
+                    job={j}
+                    open={openId === j.id}
+                    onToggle={() => setOpenId(openId === j.id ? null : j.id)}
+                    onChanged={list.reload}
+                  />
+                ))}
+              </Table>
+            </Card>
+          )}
+        </Async>
       </Stack>
     </Page>
   );
@@ -147,19 +157,19 @@ function JobRow({
         </td>
         <td>
           <StateBadge state={job.state} />
-          {job.lastError ? <div className="cc-field__hint">{job.lastError}</div> : null}
-          {job.cancelReason ? <div className="cc-field__hint">{job.cancelReason}</div> : null}
+          {job.lastError ? <Hint>{job.lastError}</Hint> : null}
+          {job.cancelReason ? <Hint>{job.cancelReason}</Hint> : null}
         </td>
         <td className="cc-num">
           {job.attempt}/{job.maxAttempts}
         </td>
+        <td className="cc-nowrap">{formatProgress(job.progress, job.progressMessage)}</td>
         <td>
-          {Math.round(job.progress * 100)}%{job.progressMessage ? ` · ${job.progressMessage}` : ""}
+          <Time iso={job.createdAt} />
         </td>
-        <td title={job.createdAt}>{formatWhen(job.createdAt)}</td>
-        <td>
+        <td className="cc-table__actions">
           <Row>
-            <Button type="button" onClick={onToggle}>
+            <Button type="button" size="sm" pressed={open} onClick={onToggle}>
               {open ? "Hide" : "Logs"}
             </Button>
             {cancellable ? <CancelButton id={job.id} onChanged={onChanged} /> : null}
@@ -167,7 +177,7 @@ function JobRow({
         </td>
       </tr>
       {open ? (
-        <tr>
+        <tr className="cc-table__detail">
           <td colSpan={8}>
             <JobDetail id={job.id} />
           </td>
@@ -184,6 +194,7 @@ function CancelButton({ id, onChanged }: { id: number; onChanged: () => void }) 
     <>
       <Button
         type="button"
+        size="sm"
         variant="danger"
         disabled={busy}
         onClick={() => {
@@ -206,50 +217,41 @@ function CancelButton({ id, onChanged }: { id: number; onChanged: () => void }) 
 }
 
 function JobDetail({ id }: { id: number }) {
-  const load = useCallback(
-    (signal: AbortSignal) => api.snapshot<Job>(`/api/jobs/${id}`, { signal }),
-    [id],
-  );
+  const load = useCallback((signal: AbortSignal) => api.snapshot<Job>(`/api/jobs/${id}`, { signal }), [id]);
   const detail = useSnapshot<Job>(load, { events: "core.job.**" });
-  if (detail.status === "loading") return <div className="cc-field__hint">Loading logs…</div>;
-  if (detail.status === "error") return <Callout tone="danger">{detail.error.message}</Callout>;
-  const logs = detail.data.logs ?? [];
   return (
-    <Stack>
-      <div className="cc-field__hint">
-        {detail.data.startedAt ? `started ${formatWhen(detail.data.startedAt)}` : "not started"}
-        {detail.data.finishedAt ? ` · finished ${formatWhen(detail.data.finishedAt)}` : ""}
-      </div>
-      {logs.length === 0 ? (
-        <div className="cc-field__hint">No log lines.</div>
-      ) : (
-        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 12.5 }}>
-          {logs.map((l) => `${formatWhen(l.at)}  ${l.line}`).join("\n")}
-        </pre>
-      )}
-    </Stack>
+    <Async state={detail} loading="Loading logs…">
+      {(job) => {
+        const logs = job.logs ?? [];
+        return (
+          <Stack>
+            <Hint>
+              {job.startedAt ? `Started ${formatTime(job.startedAt)}` : "Not started"}
+              {job.finishedAt ? ` · finished ${formatTime(job.finishedAt)}` : ""}
+            </Hint>
+            {logs.length === 0 ? (
+              <Hint>No log lines.</Hint>
+            ) : (
+              <LogBlock>{logs.map((l) => `${formatTime(l.at)}  ${l.line}`).join("\n")}</LogBlock>
+            )}
+          </Stack>
+        );
+      }}
+    </Async>
   );
 }
 
 function StateBadge({ state }: { state: string }) {
-  const tone = useMemo(() => {
-    switch (state) {
-      case "succeeded":
-        return "ok" as const;
-      case "failed":
-      case "dead":
-        return "danger" as const;
-      case "running":
-      case "cancel_requested":
-        return "warn" as const;
-      default:
-        return "neutral" as const;
-    }
-  }, [state]);
-  return <Badge tone={tone}>{state}</Badge>;
-}
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  switch (state) {
+    case "succeeded":
+      return <Badge tone="ok">{state}</Badge>;
+    case "failed":
+    case "dead":
+      return <Badge tone="danger">{state}</Badge>;
+    case "running":
+    case "cancel_requested":
+      return <Badge tone="warn">{state}</Badge>;
+    default:
+      return <Badge>{state}</Badge>;
+  }
 }

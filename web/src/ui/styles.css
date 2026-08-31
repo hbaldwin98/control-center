@@ -5,6 +5,7 @@
   --bg: #fbfbfa;
   --bg-raised: #ffffff;
   --bg-sunken: #f2f1ee;
+  --bg-hover: #f6f5f2;
   --border: #e2e0db;
   --border-strong: #cbc8c1;
   --text: #1b1b1d;
@@ -16,7 +17,9 @@
   --accent-soft: #eaeeff;
 
   --ok: #2f7d4f;
+  --ok-soft: #e8f5ed;
   --warn: #9a6a12;
+  --warn-soft: #fdf3e0;
   --danger: #b5342c;
   --danger-soft: #fdecea;
 
@@ -28,13 +31,25 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 
   --nav-width: 208px;
+
+  /* One spacing scale. Screens compose these rather than inventing pixel values. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
 }
 
+/* The dark palette is declared once and applied both to the system preference and to an
+   explicit choice, so the two can never drift apart. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #17171a;
     --bg-raised: #1f1f23;
     --bg-sunken: #121214;
+    --bg-hover: #26262c;
     --border: #2e2e34;
     --border-strong: #43434b;
     --text: #ececef;
@@ -46,7 +61,9 @@
     --accent-soft: #23273d;
 
     --ok: #5cbe83;
+    --ok-soft: #17291f;
     --warn: #d5a24a;
+    --warn-soft: #2b2214;
     --danger: #ef6f66;
     --danger-soft: #331d1c;
 
@@ -55,9 +72,11 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #17171a;
   --bg-raised: #1f1f23;
   --bg-sunken: #121214;
+  --bg-hover: #26262c;
   --border: #2e2e34;
   --border-strong: #43434b;
   --text: #ececef;
@@ -69,7 +88,9 @@
   --accent-soft: #23273d;
 
   --ok: #5cbe83;
+  --ok-soft: #17291f;
   --warn: #d5a24a;
+  --warn-soft: #2b2214;
   --danger: #ef6f66;
   --danger-soft: #331d1c;
 
@@ -124,6 +145,24 @@ kbd {
   font-size: 0.92em;
 }
 
+/* One focus ring for every interactive element, so keyboard position is never lost. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+.cc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ---- layout ---- */
 
 .cc-shell {
@@ -136,7 +175,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 16px 10px;
+  padding: var(--space-4) 10px;
   background: var(--bg-sunken);
   border-right: 1px solid var(--border);
   overflow-y: auto;
@@ -146,7 +185,7 @@ kbd {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  padding: 0 8px 14px;
+  padding: 0 var(--space-2) 14px;
   font-weight: 650;
   letter-spacing: -0.02em;
 }
@@ -158,7 +197,7 @@ kbd {
 }
 
 .cc-nav__section {
-  padding: 14px 8px 5px;
+  padding: 14px var(--space-2) 5px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -169,8 +208,8 @@ kbd {
 .cc-nav__link {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   text-decoration: none;
@@ -178,7 +217,7 @@ kbd {
 }
 
 .cc-nav__link:hover {
-  background: var(--bg-raised);
+  background: var(--bg-hover);
   color: var(--text);
 }
 
@@ -188,11 +227,27 @@ kbd {
 }
 
 .cc-nav__link--off {
-  opacity: 0.55;
+  color: var(--text-faint);
+}
+
+.cc-nav__link--off::after {
+  content: "off";
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .cc-nav__spacer {
   flex: 1;
+  min-height: var(--space-4);
+}
+
+.cc-nav__footer {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
 }
 
 .cc-main {
@@ -211,33 +266,134 @@ kbd {
 .cc-page {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 32px 64px;
+  padding: 28px var(--space-6) 64px;
 }
 
 .cc-page__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
   margin-bottom: 20px;
 }
 
+.cc-page__heading {
+  min-width: 0;
+}
+
 .cc-page__lede {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--text-muted);
   max-width: 60ch;
 }
 
+/* Below the nav breakpoint the sidebar becomes a scrolling strip across the top. */
+@media (max-width: 720px) {
+  .cc-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .cc-nav {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding: 10px var(--space-3);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-y: visible;
+  }
+
+  .cc-nav__brand {
+    padding: 0 var(--space-2) 0 0;
+  }
+
+  /* The strip is short enough to read end to end; the group headings only muddle it. */
+  .cc-nav__section {
+    display: none;
+  }
+
+  .cc-nav__spacer {
+    min-height: 0;
+  }
+
+  .cc-nav__footer {
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .cc-page {
+    padding: 20px var(--space-4) 48px;
+  }
+
+  .cc-page__header {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+}
+
 /* ---- surfaces ---- */
 
+.cc-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
 .cc-card--muted {
-  opacity: 0.72;
+  background: var(--bg-sunken);
+}
+
+.cc-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+}
+
+.cc-card__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cc-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.cc-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cc-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Filter bars align their controls on the baseline of the control, not the label. */
+.cc-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.cc-toolbar .cc-field {
+  min-width: 180px;
 }
 
 .cc-stats {
   display: grid;
-  grid-template-columns: 6ch 1fr;
-  gap: 2px 16px;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -248,46 +404,18 @@ kbd {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  line-height: 22px;
 }
 
 .cc-stats dd {
   margin: 0;
-}
-
-.cc-card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-}
-
-.cc-card__title {
-  margin-bottom: 10px;
-}
-
-.cc-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-}
-
-.cc-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cc-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  overflow-wrap: anywhere;
 }
 
 .cc-check {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   font-size: 14px;
 }
 
@@ -305,6 +433,41 @@ kbd {
   font-size: 12.5px;
 }
 
+/* ---- typography ---- */
+
+.cc-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.cc-dash {
+  color: var(--text-faint);
+}
+
+.cc-log {
+  margin: 0;
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* A callout owns its own log block, so the border and background do not double up. */
+.cc-callout .cc-log {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
 /* ---- controls ---- */
 
 .cc-button {
@@ -319,16 +482,24 @@ kbd {
   color: var(--text);
   font: inherit;
   font-weight: 550;
+  line-height: 1.35;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .cc-button:hover:not(:disabled) {
   border-color: var(--text-faint);
+  background: var(--bg-hover);
 }
 
 .cc-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.cc-button--sm {
+  padding: 3px 9px;
+  font-size: 12.5px;
 }
 
 .cc-button--primary {
@@ -337,16 +508,39 @@ kbd {
   color: var(--accent-text);
 }
 
+.cc-button--primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
+
 .cc-button--danger {
   color: var(--danger);
   border-color: var(--danger);
   background: transparent;
 }
 
+.cc-button--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.cc-button--pressed {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cc-button--pressed:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
 .cc-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
 }
 
 .cc-field__label {
@@ -358,14 +552,29 @@ kbd {
   font-size: 12.5px;
 }
 
+/* A stacked field caps at a readable measure; one in a filter bar flexes with its row. */
+.cc-field > .cc-input {
+  max-width: 480px;
+}
+
+.cc-toolbar .cc-field > .cc-input {
+  max-width: none;
+}
+
 .cc-input {
-  padding: 8px 10px;
+  padding: 7px 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text);
   font: inherit;
+  line-height: 1.35;
   width: 100%;
+}
+
+.cc-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .cc-input:focus-visible {
@@ -378,13 +587,45 @@ kbd {
   font-family: var(--mono);
 }
 
+/* Two inputs that sit beside a button rather than filling their container. */
+.cc-input--pattern {
+  width: 22ch;
+}
+
+.cc-input--reason {
+  width: 30ch;
+}
+
+.cc-select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
 /* ---- feedback ---- */
 
 .cc-callout {
-  padding: 10px 12px;
+  padding: 10px var(--space-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-sunken);
+}
+
+.cc-callout--ok {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cc-callout--warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .cc-callout--danger {
@@ -402,6 +643,8 @@ kbd {
   border: 1px solid var(--border-strong);
   font-size: 12px;
   font-weight: 550;
+  line-height: 18px;
+  white-space: nowrap;
   color: var(--text-muted);
 }
 
@@ -419,11 +662,25 @@ kbd {
 }
 
 .cc-empty {
-  padding: 32px;
+  padding: var(--space-6);
   text-align: center;
   color: var(--text-muted);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
+}
+
+.cc-empty--loading {
+  color: var(--text-faint);
+}
+
+/* Inside a card the surrounding panel is already the placeholder, so the empty state is
+   a quiet line of text rather than a second box drawn within the first. */
+.cc-card .cc-empty {
+  padding: 2px 0;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  font-size: 12.5px;
 }
 
 /* ---- centred single-purpose screens (setup, login, fatal) ---- */
@@ -432,7 +689,7 @@ kbd {
   display: grid;
   place-items: center;
   min-height: 100%;
-  padding: 24px;
+  padding: var(--space-5);
 }
 
 .cc-gate__panel {
@@ -441,11 +698,11 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 24px;
+  padding: var(--space-5);
 }
 
 .cc-gate__title {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .cc-gate__lede {
@@ -454,6 +711,13 @@ kbd {
 }
 
 /* ---- tables ---- */
+
+/* Wide tables scroll inside their card; the page itself never scrolls sideways. */
+.cc-table-scroll {
+  overflow-x: auto;
+  margin: 0 calc(var(--space-4) * -1);
+  padding: 0 var(--space-4);
+}
 
 .cc-table {
   width: 100%;
@@ -479,13 +743,49 @@ kbd {
   vertical-align: top;
 }
 
-.cc-table tr:last-child td {
+.cc-table th:last-child,
+.cc-table td:last-child {
+  padding-right: 0;
+}
+
+/* A numeric column heads right too, so the header sits over its own digits. */
+.cc-table th.cc-num {
+  text-align: right;
+}
+
+.cc-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.cc-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+/* An expanded detail row belongs to the row above it, so it does not restripe on hover. */
+.cc-table tbody tr.cc-table__detail:hover td {
+  background: none;
+}
+
+.cc-table__detail > td {
+  padding-bottom: var(--space-3);
+}
+
+.cc-table__actions {
+  width: 1%;
 }
 
 .cc-num {
   text-align: right;
   color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* A timestamp reads as one token. The table scrolls, so it never has to wrap. */
+.cc-table time {
+  white-space: nowrap;
+}
+
+.cc-nowrap {
   white-space: nowrap;
 }
 

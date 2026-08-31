@@ -1,18 +1,22 @@
 import { useCallback, useState } from "react";
 import {
   ApiError,
+  Async,
   Badge,
   Button,
   Callout,
   Card,
-  EmptyState,
   Field,
+  Hint,
   Input,
   Page,
   PageHeader,
   Row,
+  Select,
   Stack,
+  Time,
   api,
+  formatUSD,
   useSnapshot,
 } from "@cc/ui";
 import { ConfigForm } from "./ConfigForm";
@@ -62,22 +66,15 @@ export function Plugins() {
         title="Plugins"
         lede="The kill switch, budgets, health, and schema-backed config. Disabled plugins stay listed with the reason."
       />
-
-      {plugins.status === "error" ? (
-        <Callout tone="danger">{plugins.error.message}</Callout>
-      ) : null}
-
-      {plugins.status === "loading" ? (
-        <EmptyState>Loading…</EmptyState>
-      ) : plugins.status === "ready" && plugins.data.length === 0 ? (
-        <EmptyState>No plugins are registered yet.</EmptyState>
-      ) : plugins.status === "ready" ? (
-        <Stack>
-          {plugins.data.map((st) => (
-            <PluginCard key={st.pluginId} state={st} onChanged={plugins.reload} />
-          ))}
-        </Stack>
-      ) : null}
+      <Async state={plugins} loading="Loading plugins…" empty="No plugins are registered yet.">
+        {(list) => (
+          <Stack>
+            {list.map((st) => (
+              <PluginCard key={st.pluginId} state={st} onChanged={plugins.reload} />
+            ))}
+          </Stack>
+        )}
+      </Async>
     </Page>
   );
 }
@@ -104,124 +101,131 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
   };
 
   return (
-    <Card title={state.name || state.pluginId} muted={!state.enabled}>
+    <Card
+      title={state.name || state.pluginId}
+      muted={!state.enabled}
+      actions={
+        <>
+          {state.accountingFailed ? (
+            <Badge tone="danger">accounting failed</Badge>
+          ) : state.enabled ? (
+            <Badge tone="ok">enabled</Badge>
+          ) : (
+            <Badge tone="danger">disabled</Badge>
+          )}
+          {state.automated ? <Badge>automated</Badge> : null}
+          {state.health?.runtime === "degraded" ? (
+            <Badge tone="warn">
+              degraded{state.health.errorKind ? ` · ${state.health.errorKind}` : ""}
+            </Badge>
+          ) : null}
+        </>
+      }
+    >
       <Stack>
-      <Row>
-        {state.accountingFailed ? (
-          <Badge tone="danger">accounting failed</Badge>
-        ) : state.enabled ? (
-          <Badge tone="ok">enabled</Badge>
-        ) : (
-          <Badge tone="danger">disabled</Badge>
-        )}
-        {state.automated ? <Badge>automated</Badge> : null}
-        {state.health?.runtime === "degraded" ? (
-          <Badge tone="warn">degraded{state.health.errorKind ? ` · ${state.health.errorKind}` : ""}</Badge>
-        ) : null}
-        <span className="cc-field__hint">
+        <Hint>
           <code>{state.pluginId}</code>
-        </span>
-      </Row>
+          {state.description ? ` — ${state.description}` : ""}
+        </Hint>
 
-        {state.description ? <p className="cc-field__hint">{state.description}</p> : null}
+        {state.health?.lastError ? <Callout tone="danger">{state.health.lastError}</Callout> : null}
 
-        {state.health?.lastError ? (
-          <Callout tone="danger">{state.health.lastError}</Callout>
+        {!state.enabled ? (
+          <Hint>
+            {state.disabledReason || "Disabled."}
+            {state.disabledBy ? ` · ${state.disabledBy}` : ""}
+            {state.disabledAt ? <> · <Time iso={state.disabledAt} /></> : null}
+          </Hint>
         ) : null}
 
-      {!state.enabled ? (
-        <div className="cc-field__hint">
-          {state.disabledReason || "disabled"}
-          {state.disabledBy ? ` · ${state.disabledBy}` : ""}
-          {state.disabledAt ? ` · ${formatWhen(state.disabledAt)}` : ""}
-        </div>
-      ) : null}
+        {state.accountingFailed ? (
+          <Callout tone="danger">
+            Settlement exceeded the reserved maximum at <Time iso={state.accountingFailed} />.
+            Re-enable after the AI route is healthy again.
+          </Callout>
+        ) : null}
 
-      {state.accountingFailed ? (
-        <Callout tone="danger">
-          Settlement exceeded the reserved maximum at {formatWhen(state.accountingFailed)}.
-          Re-enable after the AI route is healthy again.
-        </Callout>
-      ) : null}
+        {needsDailyBudget ? (
+          <Callout tone="warn">
+            An automated plugin needs a finite daily budget before it can be enabled.
+          </Callout>
+        ) : null}
 
-      {needsDailyBudget ? (
-        <Callout>An automated plugin needs a finite daily budget before it can be enabled.</Callout>
-      ) : null}
+        {error ? <Callout tone="danger">{error}</Callout> : null}
 
-      {error ? <Callout tone="danger">{error}</Callout> : null}
+        <dl className="cc-stats">
+          <dt>Hour</dt>
+          <dd>{formatWindow(state.reservedHour, state.committedHour, state.budget.hourly)}</dd>
+          <dt>Day</dt>
+          <dd>{formatWindow(state.reservedDay, state.committedDay, state.budget.daily)}</dd>
+          <dt>Month</dt>
+          <dd>{formatWindow(state.reservedMonth, state.committedMonth, state.budget.monthly)}</dd>
+        </dl>
 
-      <dl className="cc-stats">
-        <dt>Hour</dt>
-        <dd>{formatWindow(state.reservedHour, state.committedHour, state.budget.hourly)}</dd>
-        <dt>Day</dt>
-        <dd>{formatWindow(state.reservedDay, state.committedDay, state.budget.daily)}</dd>
-        <dt>Month</dt>
-        <dd>{formatWindow(state.reservedMonth, state.committedMonth, state.budget.monthly)}</dd>
-      </dl>
+        <BudgetForm
+          key={`${state.pluginId}:${state.budget.hourly}:${state.budget.daily}:${state.budget.monthly}:${state.budget.onExceed}`}
+          pluginId={state.pluginId}
+          budget={state.budget}
+          disabled={busy}
+          onSaved={onChanged}
+          onError={setError}
+        />
 
-      <BudgetForm
-        key={`${state.pluginId}:${state.budget.hourly}:${state.budget.daily}:${state.budget.monthly}:${state.budget.onExceed}`}
-        pluginId={state.pluginId}
-        budget={state.budget}
-        disabled={busy}
-        onSaved={onChanged}
-        onError={setError}
-      />
+        <ConfigForm
+          key={`${state.pluginId}:${JSON.stringify(state.config ?? null)}`}
+          pluginId={state.pluginId}
+          schema={state.configSchema}
+          value={state.config}
+          disabled={busy}
+          onSaved={onChanged}
+          onError={setError}
+        />
 
-      <ConfigForm
-        key={`${state.pluginId}:${JSON.stringify(state.config ?? null)}`}
-        pluginId={state.pluginId}
-        schema={state.configSchema}
-        value={state.config}
-        disabled={busy}
-        onSaved={onChanged}
-        onError={setError}
-      />
+        <div className="cc-group__title">Kill switch</div>
+        <Hint>
+          Disable rejects new jobs, AI calls, event handlers, plugin HTTP, publications, and storage
+          writes, and closes this plugin&rsquo;s browser sessions. In-process code that ignores
+          cancellation is not killed.
+        </Hint>
 
-      <p className="cc-field__hint">
-        Disable rejects new jobs, AI calls, event handlers, plugin HTTP, publications, and
-        storage writes, and closes this plugin's browser sessions. In-process code that
-        ignores cancellation is not killed.
-      </p>
-
-      <Row>
-        {state.enabled ? (
-          <>
-            <Input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Reason (optional)"
-              aria-label="Disable reason"
-              style={{ maxWidth: 280 }}
-            />
+        <Row>
+          {state.enabled ? (
+            <>
+              <Input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Reason (optional)"
+                aria-label="Disable reason"
+                className="cc-input--reason"
+              />
+              <Button
+                type="button"
+                variant="danger"
+                disabled={busy}
+                onClick={() =>
+                  void act(() =>
+                    api.post(`/api/admin/plugins/${encodeURIComponent(state.pluginId)}/disable`, {
+                      reason: reason.trim(),
+                    }),
+                  )
+                }
+              >
+                Disable
+              </Button>
+            </>
+          ) : (
             <Button
               type="button"
-              variant="danger"
-              disabled={busy}
+              variant="primary"
+              disabled={busy || !canEnable}
               onClick={() =>
-                void act(() =>
-                  api.post(`/api/admin/plugins/${encodeURIComponent(state.pluginId)}/disable`, {
-                    reason: reason.trim(),
-                  }),
-                )
+                void act(() => api.post(`/api/admin/plugins/${encodeURIComponent(state.pluginId)}/enable`))
               }
             >
-              Disable
+              Enable
             </Button>
-          </>
-        ) : (
-          <Button
-            type="button"
-            variant="primary"
-            disabled={busy || !canEnable}
-            onClick={() =>
-              void act(() => api.post(`/api/admin/plugins/${encodeURIComponent(state.pluginId)}/enable`))
-            }
-          >
-            Enable
-          </Button>
-        )}
-      </Row>
+          )}
+        </Row>
       </Stack>
     </Card>
   );
@@ -273,7 +277,8 @@ function BudgetForm({
         void save();
       }}
     >
-      <Row>
+      <div className="cc-group__title">Budget</div>
+      <div className="cc-toolbar">
         <Field label="Hourly $" hint="Empty is unlimited">
           <Input
             inputMode="decimal"
@@ -294,7 +299,7 @@ function BudgetForm({
             disabled={disabled || busy}
           />
         </Field>
-        <Field label="Monthly $">
+        <Field label="Monthly $" hint="Empty is unlimited">
           <Input
             inputMode="decimal"
             value={monthly}
@@ -304,9 +309,8 @@ function BudgetForm({
             disabled={disabled || busy}
           />
         </Field>
-        <Field label="On exceed">
-          <select
-            className="cc-input"
+        <Field label="On exceed" hint="When a window is spent">
+          <Select
             value={onExceed}
             onChange={(e) => setOnExceed(e.target.value as ExceedAction)}
             disabled={disabled || busy}
@@ -314,10 +318,12 @@ function BudgetForm({
           >
             <option value="reject">Reject the call</option>
             <option value="disable">Disable the plugin</option>
-          </select>
+          </Select>
         </Field>
+      </div>
+      <Row>
         <Button type="submit" disabled={disabled || busy}>
-          Save budget
+          {busy ? "Saving…" : "Save budget"}
         </Button>
       </Row>
     </form>
@@ -327,16 +333,6 @@ function BudgetForm({
 function formatWindow(reserved: number, committed: number, limit: number): string {
   const used = `${formatUSD(reserved)} reserved + ${formatUSD(committed)} committed`;
   return limit === 0 ? `${used} / unlimited` : `${used} / ${formatUSD(limit)}`;
-}
-
-function formatUSD(micro: number): string {
-  const dollars = micro / 1_000_000;
-  return dollars.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  });
 }
 
 function microToInput(micro: number): string {
@@ -353,9 +349,4 @@ function inputToMicro(raw: string): number {
     throw new Error("budget amounts must be non-negative numbers");
   }
   return Math.round(n * 1_000_000);
-}
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }

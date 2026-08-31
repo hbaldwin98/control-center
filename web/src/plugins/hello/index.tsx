@@ -8,11 +8,16 @@ import {
   Button,
   Callout,
   Card,
+  Dash,
   EmptyState,
+  Hint,
+  Loading,
   Page,
   PageHeader,
   PluginDisabledError,
   Stack,
+  Table,
+  Time,
   pluginApi,
   useSnapshot,
 } from "@cc/ui";
@@ -107,32 +112,33 @@ function History() {
         {snap.status === "error" && !disabled ? (
           <Callout tone="danger">{snap.error.message}</Callout>
         ) : null}
-        {note ? <div className="cc-field__hint">Config note: {note}</div> : null}
+        {note ? <Hint>Config note: {note}</Hint> : null}
 
         {snap.status === "loading" ? (
-          <EmptyState>Loading…</EmptyState>
+          <Loading label="Loading ticks…" />
         ) : ticks.length === 0 ? (
           <EmptyState>No ticks yet. Enable the plugin and press Tick now, or wait for the minute cron.</EmptyState>
         ) : (
           <Card title="History">
-            <table className="cc-table">
-              <thead>
-                <tr>
+            <Table
+              head={
+                <>
                   <th>When</th>
                   <th>Note</th>
                   <th>AI</th>
+                </>
+              }
+            >
+              {ticks.map((t) => (
+                <tr key={t.id}>
+                  <td>
+                    <Time iso={t.at} />
+                  </td>
+                  <td>{t.note}</td>
+                  <td>{t.aiText || <Dash />}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {ticks.map((t) => (
-                  <tr key={t.id}>
-                    <td className="cc-mono">{t.at}</td>
-                    <td>{t.note}</td>
-                    <td>{t.aiText || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </Table>
           </Card>
         )}
       </Stack>

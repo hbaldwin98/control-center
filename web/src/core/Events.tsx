@@ -1,14 +1,22 @@
 import { useCallback, useMemo, useState } from "react";
 import {
+  ActionsHeader,
   Badge,
   Button,
   Callout,
   Card,
+  Dash,
   EmptyState,
+  Field,
+  Hint,
   Input,
+  Loading,
   Page,
   PageHeader,
+  Row,
   Stack,
+  Table,
+  Time,
   api,
   isValidPattern,
   matchesPattern,
@@ -34,6 +42,16 @@ type SubscriberStatus = {
   healthy: boolean;
 };
 
+/** The named patterns an operator reaches for most, offered as one-click filters. */
+const PRESETS: readonly (readonly [string, string])[] = [
+  ["**", "All"],
+  ["core.plugin.**", "Plugins"],
+  ["core.job.**", "Jobs"],
+  ["core.ai.**", "AI"],
+  ["core.browser.**", "Browser"],
+  ["**.alert", "Alerts"],
+];
+
 /** The live event log, filterable by dot-segment pattern. */
 export function Events() {
   const [draft, setDraft] = useState("**");
@@ -42,10 +60,9 @@ export function Events() {
 
   const loadPage = useCallback(
     (signal: AbortSignal) =>
-      api.snapshot<EventsPage>(
-        `/api/events?pattern=${encodeURIComponent(pattern)}&limit=200`,
-        { signal },
-      ),
+      api.snapshot<EventsPage>(`/api/events?pattern=${encodeURIComponent(pattern)}&limit=200`, {
+        signal,
+      }),
     [pattern],
   );
 
@@ -72,6 +89,11 @@ export function Events() {
     return all.reverse();
   }, [history.data, live, pattern]);
 
+  const apply = (next: string) => {
+    setDraft(next);
+    setPattern(next);
+  };
+
   return (
     <Page>
       <PageHeader
@@ -81,95 +103,86 @@ export function Events() {
 
       <Stack>
         <form
-          className="cc-row"
           onSubmit={(e) => {
             e.preventDefault();
             if (draftValid) setPattern(draft);
           }}
         >
-          <Input
-            mono
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-label="Event pattern"
-            spellCheck={false}
-            style={{ maxWidth: 360 }}
-          />
-          <Button type="submit" variant="primary" disabled={!draftValid}>
-            Filter
-          </Button>
-          <span className="cc-field__hint">
-            <code>*</code> matches one segment, <code>**</code> matches zero or more.
-          </span>
+          <Field label="Pattern" hint="* matches one segment, ** matches zero or more.">
+            <Row>
+              <Input
+                mono
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                aria-label="Event pattern"
+                aria-invalid={!draftValid}
+                spellCheck={false}
+                className="cc-input--pattern"
+              />
+              <Button type="submit" variant="primary" disabled={!draftValid || draft === pattern}>
+                Filter
+              </Button>
+            </Row>
+          </Field>
         </form>
-
-        {!draftValid ? <Callout tone="danger">Not a valid pattern.</Callout> : null}
-
-        <div className="cc-row">
-          {(
-            [
-              ["**", "all"],
-              ["core.plugin.**", "plugins"],
-              ["core.job.**", "jobs"],
-              ["core.ai.**", "ai"],
-              ["core.browser.**", "browser"],
-              ["**.alert", "alerts"],
-            ] as const
-          ).map(([p, label]) => (
-            <Button
-              key={p}
-              type="button"
-              onClick={() => {
-                setDraft(p);
-                setPattern(p);
-              }}
-            >
+        <Row>
+          {PRESETS.map(([p, label]) => (
+            <Button key={p} type="button" size="sm" pressed={pattern === p} onClick={() => apply(p)}>
               {label}
             </Button>
           ))}
-        </div>
-        {history.status === "error" ? (
-          <Callout tone="danger">{history.error.message}</Callout>
+        </Row>
+
+        {!draftValid ? (
+          <Callout tone="danger">
+            <code>{draft}</code> is not a valid pattern. Use dot-separated segments, <code>*</code>,
+            or <code>**</code>.
+          </Callout>
         ) : null}
 
         <Subscribers />
 
-        {history.status === "loading" ? (
-          <EmptyState>Loading…</EmptyState>
+        {history.status === "error" ? (
+          <Callout tone="danger">{history.error.message}</Callout>
+        ) : history.status === "loading" ? (
+          <Loading label="Loading events…" />
         ) : rows.length === 0 ? (
-          <EmptyState>No events match this pattern yet.</EmptyState>
+          <EmptyState>
+            No events match <code>{pattern}</code> yet.
+          </EmptyState>
         ) : (
           <Card title={`${rows.length} event${rows.length === 1 ? "" : "s"}`}>
-            <div style={{ overflowX: "auto" }}>
-              <table className="cc-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Type</th>
-                    <th>Source</th>
-                    <th>Subject</th>
-                    <th>At</th>
-                    <th>Payload</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((e) => (
-                    <tr key={e.id}>
-                      <td className="cc-num">{e.id}</td>
-                      <td>
-                        <code>{e.type}</code>
-                      </td>
-                      <td>{e.source}</td>
-                      <td>{e.subject || "—"}</td>
-                      <td title={e.createdAt}>{formatTime(e.createdAt)}</td>
-                      <td>
-                        <code className="cc-truncate">{JSON.stringify(e.payload)}</code>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table
+              head={
+                <>
+                  <th className="cc-num">ID</th>
+                  <th>Type</th>
+                  <th>Source</th>
+                  <th>Subject</th>
+                  <th>At</th>
+                  <th>Payload</th>
+                </>
+              }
+            >
+              {rows.map((e) => (
+                <tr key={e.id}>
+                  <td className="cc-num">{e.id}</td>
+                  <td>
+                    <code>{e.type}</code>
+                  </td>
+                  <td>{e.source || <Dash />}</td>
+                  <td>{e.subject || <Dash />}</td>
+                  <td>
+                    <Time iso={e.createdAt} timeOnly />
+                  </td>
+                  <td>
+                    <code className="cc-truncate" title={JSON.stringify(e.payload)}>
+                      {JSON.stringify(e.payload)}
+                    </code>
+                  </td>
+                </tr>
+              ))}
+            </Table>
           </Card>
         )}
       </Stack>
@@ -203,63 +216,64 @@ function Subscribers() {
 
   if (subs.status !== "ready" || subs.data.length === 0) return null;
 
+  const unhealthy = subs.data.filter((s) => !s.healthy).length;
+
   return (
-    <Card title="Durable subscribers">
-      <div style={{ overflowX: "auto" }}>
-        <table className="cc-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Pattern</th>
-              <th>Position</th>
-              <th>State</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {subs.data.map((s) => (
-              <tr key={s.name}>
-                <td>
-                  <code>{s.name}</code>
-                </td>
-                <td>
-                  <code>{s.pattern}</code>
-                </td>
-                <td className="cc-num">{s.lastEventId}</td>
-                <td>
-                  {s.healthy ? (
-                    <Badge tone="ok">active</Badge>
-                  ) : (
-                    <Badge tone="danger">
-                      paused on {s.failedEventId}
-                    </Badge>
-                  )}
-                  {s.lastError ? (
-                    <div className="cc-field__hint">{s.lastError}</div>
-                  ) : null}
-                </td>
-                <td>
-                  {s.healthy ? null : (
-                    <div className="cc-row">
-                      <Button disabled={busy === s.name} onClick={() => void act(s.name, "retry")}>
-                        Retry
-                      </Button>
-                      <Button disabled={busy === s.name} onClick={() => void act(s.name, "skip")}>
-                        Skip
-                      </Button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <Card
+      title="Durable subscribers"
+      actions={
+        unhealthy > 0 ? (
+          <Badge tone="danger">
+            {unhealthy} paused
+          </Badge>
+        ) : (
+          <Badge tone="ok">all active</Badge>
+        )
+      }
+    >
+      <Table
+        head={
+          <>
+            <th>Name</th>
+            <th>Pattern</th>
+            <th className="cc-num">Position</th>
+            <th>State</th>
+            <ActionsHeader />
+          </>
+        }
+      >
+        {subs.data.map((s) => (
+          <tr key={s.name}>
+            <td>
+              <code>{s.name}</code>
+            </td>
+            <td>
+              <code>{s.pattern}</code>
+            </td>
+            <td className="cc-num">{s.lastEventId}</td>
+            <td>
+              {s.healthy ? (
+                <Badge tone="ok">active</Badge>
+              ) : (
+                <Badge tone="danger">paused on {s.failedEventId}</Badge>
+              )}
+              {s.lastError ? <Hint>{s.lastError}</Hint> : null}
+            </td>
+            <td className="cc-table__actions">
+              {s.healthy ? null : (
+                <Row>
+                  <Button size="sm" disabled={busy === s.name} onClick={() => void act(s.name, "retry")}>
+                    Retry
+                  </Button>
+                  <Button size="sm" disabled={busy === s.name} onClick={() => void act(s.name, "skip")}>
+                    Skip
+                  </Button>
+                </Row>
+              )}
+            </td>
+          </tr>
+        ))}
+      </Table>
     </Card>
   );
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString();
 }

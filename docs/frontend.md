@@ -181,6 +181,46 @@ reason shown inline — the UI half of the guardrail enforced in
 
 ---
 
+## Design system
+
+`@cc/ui` owns every visual decision. A screen composes its exports; it does not write
+inline styles, hand-roll a `<table>`, or borrow a class from another component. The core
+screens and the `hello` plugin are the worked examples.
+
+**Layout** — `Page`, `PageHeader`, `Card`, `Stack`, `Grid`, `Row`, `Toolbar`.
+`Toolbar` is the filter bar above a listing; its controls wrap rather than overflow.
+
+**Data** — `Table` renders the header row and its own horizontal scroll container, so a
+wide table scrolls inside its card and the page never scrolls sideways. `ActionsHeader`
+is the header cell for a column of buttons. `Time`, `Money`, and `Dash` render the three
+values that appear on every screen; `Time` shows local time and puts the exact instant in
+the tooltip.
+
+**States** — `Async` renders a snapshot's three outcomes so no two screens disagree about
+what "loading" looks like:
+
+```tsx
+<Async state={jobs} loading="Loading jobs…" empty="No jobs yet.">
+  {(list) => <Table head={…}>{list.map(row)}</Table>}
+</Async>
+```
+
+It falls back to `Loading` and a danger `Callout` on its own. Use `Loading`, `EmptyState`,
+and `Callout` directly only when a screen merges several sources, as `Events` does.
+
+**Text** — `Hint` is muted secondary text and `LogBlock` is a monospaced log or error
+body. `cc-field__hint` belongs to `Field` and is not a general muted-text class.
+
+**Formatters** — `formatUSD`, `formatDateTime`, `formatTime`, and `formatProgress` are
+exported for the cases that need a string rather than an element. Money is micro-USD
+everywhere; nothing divides by 1,000,000 in a screen.
+
+Tokens live in `ui/styles.css`: one spacing scale, one focus ring, and a palette declared
+once and applied to both the system preference and an explicit `data-theme`. The shell
+collapses its sidebar to a top strip below 720px.
+
+---
+
 ## Auth
 
 There is one administrator principal, with no user-management or password-reset flow.

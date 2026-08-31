@@ -1,6 +1,22 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Badge, Card, EmptyState, Field, Page, PageHeader, Stack, api, useSnapshot } from "@cc/ui";
+import {
+  Async,
+  Badge,
+  Card,
+  Dash,
+  Field,
+  Money,
+  Page,
+  PageHeader,
+  Select,
+  Stack,
+  Table,
+  Time,
+  Toolbar,
+  api,
+  useSnapshot,
+} from "@cc/ui";
 
 type CallRecord = {
   id: string;
@@ -42,130 +58,143 @@ export function Costs() {
     [plugin],
   );
   const page = useSnapshot<CallPage>(load, { events: "core.ai.usage" });
-
-  const calls = page.status === "ready" ? page.data.calls : [];
-  const groups = useMemo(() => groupCalls(calls), [calls]);
+  const known = plugins.status === "ready" ? plugins.data : [];
 
   return (
     <Page>
       <PageHeader title="Costs" lede="Spend by plugin, then job, then logical model, over time." />
       <Stack>
-        <Field label="Plugin">
-          <select
-            className="cc-input"
-            value={plugin}
-            onChange={(e) => setPlugin(e.target.value)}
-            aria-label="Filter by plugin"
-            style={{ maxWidth: 280 }}
-          >
-            <option value="">All plugins</option>
-            {plugins.status === "ready"
-              ? plugins.data.map((p) => (
-                  <option key={p.pluginId} value={p.pluginId}>
-                    {p.name || p.pluginId}
-                  </option>
-                ))
-              : null}
-          </select>
-        </Field>
+        <Toolbar>
+          <Field label="Plugin">
+            <Select
+              value={plugin}
+              onChange={(e) => setPlugin(e.target.value)}
+              aria-label="Filter by plugin"
+            >
+              <option value="">All plugins</option>
+              {known.map((p) => (
+                <option key={p.pluginId} value={p.pluginId}>
+                  {p.name || p.pluginId}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </Toolbar>
 
-        {page.status === "error" ? <EmptyState>{page.error.message}</EmptyState> : null}
-        {page.status === "loading" ? <EmptyState>Loading…</EmptyState> : null}
-        {page.status === "ready" && calls.length === 0 ? (
-          <EmptyState>No AI calls recorded yet.</EmptyState>
-        ) : null}
-        {page.status === "ready" && groups.length > 0
-          ? groups.map((g) => (
-              <Card key={g.pluginId} title={pluginName(plugins.status === "ready" ? plugins.data : [], g.pluginId)}>
-                <Stack>
-                  {g.jobs.map((job) => (
-                    <div key={job.jobId || "none"}>
-                      <div className="cc-group__title">
-                        {job.jobId ? (
-                          <>
-                            Job <Link to={`/jobs?id=${job.jobId}`}>{job.jobId}</Link>
-                          </>
-                        ) : (
-                          "No job"
-                        )}
-                      </div>
-                      <table className="cc-table">
-                        <thead>
-                          <tr>
-                            <th>Model</th>
-                            <th>Calls</th>
-                            <th>Reserved</th>
-                            <th>Settled</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {job.models.map((m) => (
-                            <tr key={m.logicalModel}>
-                              <td>
-                                <code>{m.logicalModel}</code>
-                              </td>
-                              <td className="cc-num">{m.n}</td>
-                              <td className="cc-num">{formatUSD(m.reserved)}</td>
-                              <td className="cc-num">{formatUSD(m.settled)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))}
-                </Stack>
-              </Card>
-            ))
-          : null}
-
-        {page.status === "ready" && calls.length > 0 ? (
-          <Card title="Calls">
-            <table className="cc-table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Plugin</th>
-                  <th>Job</th>
-                  <th>Model</th>
-                  <th>Status</th>
-                  <th>Reserved</th>
-                  <th>Settled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {calls.map((c) => (
-                  <tr key={c.id}>
-                    <td>{formatWhen(c.startedAt)}</td>
-                    <td>
-                      <code>{c.pluginId}</code>
-                    </td>
-                    <td>
-                      {c.jobId ? (
-                        <Link to={`/jobs?id=${c.jobId}`}>
-                          <code>{c.jobId}</code>
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>
-                      <code>{c.logicalModel}</code>
-                    </td>
-                    <td>
-                      <Badge tone={c.status === "succeeded" ? "ok" : c.status === "failed" ? "danger" : "neutral"}>
-                        {c.status}
-                      </Badge>
-                    </td>
-                    <td className="cc-num">{formatUSD(c.reservedMicroUsd)}</td>
-                    <td className="cc-num">{formatUSD(c.settledMicroUsd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        ) : null}
+        <Async
+          state={page}
+          loading="Loading AI calls…"
+          empty={
+            plugin ? "No AI calls recorded for this plugin yet." : "No AI calls recorded yet."
+          }
+          isEmpty={(p) => p.calls.length === 0}
+        >
+          {(data) => <Spend calls={data.calls} plugins={known} />}
+        </Async>
       </Stack>
     </Page>
+  );
+}
+
+function Spend({ calls, plugins }: { calls: CallRecord[]; plugins: PluginState[] }) {
+  const groups = useMemo(() => groupCalls(calls), [calls]);
+  return (
+    <Stack>
+      {groups.map((g) => (
+        <Card key={g.pluginId} title={pluginName(plugins, g.pluginId)}>
+          <Stack>
+            {g.jobs.map((job) => (
+              <div key={job.jobId || "none"}>
+                <div className="cc-group__title">
+                  {job.jobId ? (
+                    <>
+                      Job <Link to={`/jobs?id=${job.jobId}`}>{job.jobId}</Link>
+                    </>
+                  ) : (
+                    "No job"
+                  )}
+                </div>
+                <Table
+                  head={
+                    <>
+                      <th>Model</th>
+                      <th className="cc-num">Calls</th>
+                      <th className="cc-num">Reserved</th>
+                      <th className="cc-num">Settled</th>
+                    </>
+                  }
+                >
+                  {job.models.map((m) => (
+                    <tr key={m.logicalModel}>
+                      <td>
+                        <code>{m.logicalModel}</code>
+                      </td>
+                      <td className="cc-num">{m.n}</td>
+                      <td className="cc-num">
+                        <Money microUsd={m.reserved} />
+                      </td>
+                      <td className="cc-num">
+                        <Money microUsd={m.settled} />
+                      </td>
+                    </tr>
+                  ))}
+                </Table>
+              </div>
+            ))}
+          </Stack>
+        </Card>
+      ))}
+
+      <Card title="Calls">
+        <Table
+          head={
+            <>
+              <th>When</th>
+              <th>Plugin</th>
+              <th>Job</th>
+              <th>Model</th>
+              <th>Status</th>
+              <th className="cc-num">Reserved</th>
+              <th className="cc-num">Settled</th>
+            </>
+          }
+        >
+          {calls.map((c) => (
+            <tr key={c.id}>
+              <td>
+                <Time iso={c.startedAt} />
+              </td>
+              <td>
+                <code>{c.pluginId}</code>
+              </td>
+              <td>
+                {c.jobId ? (
+                  <Link to={`/jobs?id=${c.jobId}`}>
+                    <code>{c.jobId}</code>
+                  </Link>
+                ) : (
+                  <Dash />
+                )}
+              </td>
+              <td>
+                <code>{c.logicalModel}</code>
+              </td>
+              <td>
+                <Badge tone={c.status === "succeeded" ? "ok" : c.status === "failed" ? "danger" : "neutral"}>
+                  {c.status}
+                </Badge>
+              </td>
+              <td className="cc-num">
+                <Money microUsd={c.reservedMicroUsd} />
+              </td>
+              <td className="cc-num">
+                <Money microUsd={c.settledMicroUsd} />
+              </td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+    </Stack>
   );
 }
 
@@ -201,18 +230,4 @@ function groupCalls(calls: CallRecord[]): PluginSpend[] {
       })),
     };
   });
-}
-
-function formatUSD(micro: number): string {
-  return (micro / 1_000_000).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  });
-}
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }

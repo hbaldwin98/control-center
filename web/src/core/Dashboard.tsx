@@ -1,14 +1,21 @@
 import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
+  Async,
   Badge,
   Card,
+  Dash,
   EmptyState,
   Grid,
+  Hint,
+  Money,
   Page,
   PageHeader,
   Stack,
+  Table,
+  Time,
   api,
+  formatProgress,
   useEvents,
   useSnapshot,
   type Event,
@@ -62,47 +69,51 @@ export function Dashboard() {
         lede="Per-plugin state, spend today and this hour, work that is running now, and recent alerts."
       />
       <Stack>
-        {plugins.status === "ready" && plugins.data.length === 0 ? (
-          <EmptyState>No plugins are registered yet.</EmptyState>
-        ) : null}
-        {plugins.status === "ready" && plugins.data.length > 0 ? (
-          <Grid>
-            {plugins.data.map((p) => (
-              <Card key={p.pluginId} title={p.name || p.pluginId} muted={!p.enabled}>
-                <Badge tone={p.enabled ? "ok" : "danger"}>{p.enabled ? "enabled" : "disabled"}</Badge>
-                {!p.enabled && p.disabledReason ? (
-                  <div className="cc-field__hint">{p.disabledReason}</div>
-                ) : null}
-                <dl className="cc-stats" style={{ marginTop: 10 }}>
-                  <dt>Hour</dt>
-                  <dd>{formatUSD(p.reservedHour + p.committedHour)}</dd>
-                  <dt>Day</dt>
-                  <dd>{formatUSD(p.reservedDay + p.committedDay)}</dd>
-                </dl>
-                <div className="cc-field__hint" style={{ marginTop: 8 }}>
-                  <Link to="/plugins">{p.pluginId}</Link>
-                </div>
-              </Card>
-            ))}
-          </Grid>
-        ) : null}
+        <Async state={plugins} loading="Loading plugins…" empty="No plugins are registered yet.">
+          {(list) => (
+            <Grid>
+              {list.map((p) => (
+                <Card key={p.pluginId} title={p.name || p.pluginId} muted={!p.enabled}>
+                  <Stack>
+                    <div className="cc-row">
+                      <Badge tone={p.enabled ? "ok" : "danger"}>
+                        {p.enabled ? "enabled" : "disabled"}
+                      </Badge>
+                      <Link className="cc-mono" to="/plugins">
+                        {p.pluginId}
+                      </Link>
+                    </div>
+                    {!p.enabled && p.disabledReason ? <Hint>{p.disabledReason}</Hint> : null}
+                    <dl className="cc-stats">
+                      <dt>Hour</dt>
+                      <dd>
+                        <Money microUsd={p.reservedHour + p.committedHour} />
+                      </dd>
+                      <dt>Day</dt>
+                      <dd>
+                        <Money microUsd={p.reservedDay + p.committedDay} />
+                      </dd>
+                    </dl>
+                  </Stack>
+                </Card>
+              ))}
+            </Grid>
+          )}
+        </Async>
 
         <Card title="Running jobs">
-          {running.status === "loading" ? (
-            <div className="cc-field__hint">Loading…</div>
-          ) : running.status === "ready" && running.data.length === 0 ? (
-            <div className="cc-field__hint">Nothing is running.</div>
-          ) : running.status === "ready" ? (
-            <table className="cc-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Job</th>
-                  <th>Progress</th>
-                </tr>
-              </thead>
-              <tbody>
-                {running.data.map((j) => (
+          <Async state={running} loading="Loading jobs…" empty="Nothing is running.">
+            {(jobs) => (
+              <Table
+                head={
+                  <>
+                    <th className="cc-num">ID</th>
+                    <th>Job</th>
+                    <th>Progress</th>
+                  </>
+                }
+              >
+                {jobs.map((j) => (
                   <tr key={j.id}>
                     <td className="cc-num">
                       <Link to={`/jobs?id=${j.id}`}>{j.id}</Link>
@@ -112,57 +123,42 @@ export function Dashboard() {
                         {j.pluginId}.{j.name}
                       </code>
                     </td>
-                    <td>
-                      {Math.round(j.progress * 100)}%{j.progressMessage ? ` · ${j.progressMessage}` : ""}
-                    </td>
+                    <td className="cc-nowrap">{formatProgress(j.progress, j.progressMessage)}</td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          ) : null}
+              </Table>
+            )}
+          </Async>
         </Card>
 
         <Card title="Recent alerts">
           {alerts.length === 0 ? (
-            <div className="cc-field__hint">No alerts yet.</div>
+            <EmptyState>No alerts yet.</EmptyState>
           ) : (
-            <table className="cc-table">
-              <thead>
-                <tr>
+            <Table
+              head={
+                <>
                   <th>When</th>
                   <th>Type</th>
                   <th>Subject</th>
+                </>
+              }
+            >
+              {[...alerts].reverse().map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <Time iso={e.createdAt} timeOnly />
+                  </td>
+                  <td>
+                    <code>{e.type}</code>
+                  </td>
+                  <td>{e.subject || <Dash />}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {[...alerts].reverse().map((e) => (
-                  <tr key={e.id}>
-                    <td title={e.createdAt}>{formatWhen(e.createdAt)}</td>
-                    <td>
-                      <code>{e.type}</code>
-                    </td>
-                    <td>{e.subject || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </Table>
           )}
         </Card>
       </Stack>
     </Page>
   );
-}
-
-function formatUSD(micro: number): string {
-  return (micro / 1_000_000).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  });
-}
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString();
 }

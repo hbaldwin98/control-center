@@ -2,7 +2,7 @@
  * Schema-backed plugin config. The host validates the same subset on PUT.
  */
 import { useState } from "react";
-import { ApiError, Button, Field, Input, Row, api } from "@cc/ui";
+import { ApiError, Button, Checkbox, Field, Input, Row, Select, api } from "@cc/ui";
 import { documentFromDraft, draftFromConfig, fieldsFromSchema } from "./configSchema";
 
 export function ConfigForm({
@@ -52,31 +52,27 @@ export function ConfigForm({
         void save();
       }}
     >
+      <div className="cc-group__title">Config</div>
       {fields.map((f) => {
         const hint = [f.description, f.maxLength ? `max ${f.maxLength}` : ""].filter(Boolean).join(" · ");
         const raw = draft[f.name];
         const text = typeof raw === "string" ? raw : "";
         if (f.type === "boolean") {
           return (
-            <label key={f.name} className="cc-check">
-              <input
-                type="checkbox"
-                checked={draft[f.name] === true}
-                onChange={(e) => set(f.name, e.target.checked)}
-                disabled={disabled || busy}
-              />
-              <span>
-                {f.title}
-                {hint ? <span className="cc-field__hint"> {hint}</span> : null}
-              </span>
-            </label>
+            <Checkbox
+              key={f.name}
+              label={f.title}
+              hint={hint || undefined}
+              checked={draft[f.name] === true}
+              onChange={(e) => set(f.name, e.target.checked)}
+              disabled={disabled || busy}
+            />
           );
         }
         if (f.enumValues) {
           return (
-            <Field key={f.name} label={f.title} hint={hint || ""}>
-              <select
-                className="cc-input"
+            <Field key={f.name} label={f.title} hint={hint || undefined}>
+              <Select
                 value={text}
                 onChange={(e) => set(f.name, e.target.value)}
                 disabled={disabled || busy}
@@ -88,12 +84,12 @@ export function ConfigForm({
                     {opt}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           );
         }
         return (
-          <Field key={f.name} label={f.title} hint={hint || ""}>
+          <Field key={f.name} label={f.title} hint={hint || undefined}>
             <Input
               value={text}
               onChange={(e) => set(f.name, e.target.value)}
@@ -107,7 +103,7 @@ export function ConfigForm({
       })}
       <Row>
         <Button type="submit" disabled={disabled || busy}>
-          Save config
+          {busy ? "Saving…" : "Save config"}
         </Button>
       </Row>
     </form>
