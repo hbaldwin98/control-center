@@ -50,10 +50,16 @@ function Authenticated({ descriptors }: { descriptors: { id: string; name: strin
   } catch (err) {
     return <FatalScreen error={err instanceof Error ? err : new Error(String(err))} />;
   }
-  return <Shell plugins={plugins} />;
+  return <Shell plugins={plugins} descriptors={descriptors} />;
 }
 
-function Shell({ plugins }: { plugins: PluginModule[] }) {
+function Shell({
+  plugins,
+  descriptors,
+}: {
+  plugins: PluginModule[];
+  descriptors: { id: string; name: string; enabled: boolean }[];
+}) {
   const pluginRoutes = useMemo(
     () => plugins.flatMap((p) => p.routes.map((r) => ({ ...r, key: `${p.id}:${r.path}` }))),
     [plugins],
@@ -62,7 +68,7 @@ function Shell({ plugins }: { plugins: PluginModule[] }) {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout plugins={plugins} />}>
+        <Route element={<Layout plugins={plugins} descriptors={descriptors} />}>
           <Route index element={<Dashboard />} />
           <Route path="/plugins" element={<Plugins />} />
           <Route path="/jobs" element={<Jobs />} />

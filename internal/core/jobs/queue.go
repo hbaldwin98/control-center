@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -168,6 +169,19 @@ func (q *Queue) Register(pluginID string, def Def) error {
 	q.defs[defKey(pluginID, def.Name)] = def
 	q.mu.Unlock()
 	return nil
+}
+
+// UnregisterAll drops in-memory handlers for pluginID. Schedule rows stay so a later
+// CatchUpSchedules can skip slots that passed while the plugin was down.
+func (q *Queue) UnregisterAll(pluginID string) {
+	prefix := defKey(pluginID, "")
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for k := range q.defs {
+		if strings.HasPrefix(k, prefix) {
+			delete(q.defs, k)
+		}
+	}
 }
 
 func (q *Queue) lookupDef(pluginID, name string) (Def, bool) {

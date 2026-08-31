@@ -187,12 +187,25 @@ kbd {
   color: var(--accent);
 }
 
+.cc-nav__link--off {
+  opacity: 0.55;
+}
+
 .cc-nav__spacer {
   flex: 1;
 }
 
 .cc-main {
   overflow-y: auto;
+}
+
+.cc-main a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.cc-main a:hover {
+  text-decoration: underline;
 }
 
 .cc-page {
@@ -269,6 +282,27 @@ kbd {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.cc-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.cc-group__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.cc-mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
 }
 
 /* ---- controls ---- */

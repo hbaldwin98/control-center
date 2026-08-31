@@ -160,19 +160,20 @@ affected resource rather than reconstructing it from partial event payloads.
 
 | Screen | Shows |
 |---|---|
-| Dashboard | per-plugin state, spend today/hour, running jobs, recent alerts |
-| Plugins | enable/disable toggles, budgets, health, last error |
+| Dashboard | per-plugin name and state, spend today/hour, running jobs (linked), recent alerts |
+| Plugins | enable/disable toggles, budgets, health, last error, schema-backed config |
 | Jobs | queue, history, per-job progress and logs, cancel |
-| Events | live event log, filterable by pattern |
+| Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
-| Settings | credentials (with re-auth), read-only effective model routes, notification rules, channels |
+| Settings | credentials (with re-auth), read-only effective model routes |
 
 The Plugins screen is where the host-capability kill switch lives. Disabled plugins are
 greyed with the reason and timestamp, never hidden. Disable rejects new host-managed jobs,
 AI dispatches, event handlers, plugin HTTP requests, event publications, and storage/blob
-mutations and cancels admitted contexts. Reads and logs remain available. It does not
-claim to terminate trusted in-process code that ignores cancellation or uses direct
-networking. An already-admitted paid call may finish and remains accounted.
+mutations, closes that plugin's browser sessions, and cancels admitted contexts. Reads and
+logs remain available. It does not claim to terminate trusted in-process code that ignores
+cancellation or uses direct networking. An already-admitted paid call may finish and
+remains accounted. Schema-backed plugin config is edited on the same screen.
 
 For `Automated: true` plugins, the toggle is disabled until a daily budget is set, with the
 reason shown inline — the UI half of the guardrail enforced in

@@ -53,8 +53,8 @@ export function useEvents<T = unknown>(
 export type ApplyEvent<T> = (current: T, event: Event) => T;
 
 export type UseSnapshotOptions<T> = {
-  /** The stream pattern whose events update this snapshot. */
-  events?: string;
+  /** Stream pattern, or patterns, whose events update this snapshot. */
+  events?: string | readonly string[];
   /** Folds one later event into the current state. Omit to refetch instead. */
   apply?: ApplyEvent<T>;
 };
@@ -69,6 +69,11 @@ export type UseSnapshotResult<T> = SnapshotState<T> & {
   reload: () => void;
 };
 
+function patternList(events: string | readonly string[] | undefined): string[] {
+  if (!events) return [];
+  return typeof events === "string" ? [events] : [...events];
+}
+
 /**
  * Loads a state snapshot and keeps it live.
  *
@@ -81,7 +86,8 @@ export function useSnapshot<T>(
   loader: (signal: AbortSignal) => Promise<Snapshot<T>>,
   options: UseSnapshotOptions<T> = {},
 ): UseSnapshotResult<T> {
-  const { events: pattern, apply } = options;
+  const { events, apply } = options;
+  const patternKey = patternList(events).join("\n");
   const [state, setState] = useState<SnapshotState<T>>({
     status: "loading",
     data: null,
@@ -100,11 +106,12 @@ export function useSnapshot<T>(
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    const patterns = patternKey === "" ? [] : patternKey.split("\n");
 
-    // Open the buffer first: anything committed between the server's read and the
+    // Open buffers first: anything committed between the server's read and the
     // install below is held here rather than lost.
-    const buffer = pattern ? stream.openBuffer(pattern) : null;
-    let unsubscribe: (() => void) | undefined;
+    const buffers = patterns.map((p) => stream.openBuffer(p));
+    const unsubs: (() => void)[] = [];
 
     (async () => {
       try {
@@ -113,23 +120,26 @@ export function useSnapshot<T>(
 
         let current = snap.data;
 
-        // Apply only what the snapshot does not already reflect.
-        if (buffer) {
-          for (const event of buffer.drain()) {
-            if (!idAbove(event.id, snap.asOfEventId)) continue;
-            if (applyRef.current) current = applyRef.current(current, event);
-            else {
-              // No reducer: the event is an invalidation. Refetch instead of guessing.
-              buffer.close();
-              if (!cancelled) reload();
-              return;
-            }
+        // Apply only what the snapshot does not already reflect, in stream order.
+        const pending = buffers
+          .flatMap((b) => b.drain())
+          .sort((a, b) => (idAbove(a.id, b.id) ? 1 : idAbove(b.id, a.id) ? -1 : 0));
+        const seen = new Set<string>();
+        for (const event of pending) {
+          if (!idAbove(event.id, snap.asOfEventId) || seen.has(event.id)) continue;
+          seen.add(event.id);
+          if (applyRef.current) current = applyRef.current(current, event);
+          else {
+            // No reducer: the event is an invalidation. Refetch instead of guessing.
+            for (const b of buffers) b.close();
+            if (!cancelled) reload();
+            return;
           }
         }
         setState({ status: "ready", data: current, error: null });
 
-        if (pattern) {
-          unsubscribe = stream.subscribe(pattern, (event) => {
+        if (patterns.length > 0) {
+          const onEvent = (event: Event) => {
             if (!idAbove(event.id, snap.asOfEventId)) return;
             const fold = applyRef.current;
             if (!fold) {
@@ -141,7 +151,8 @@ export function useSnapshot<T>(
                 ? { status: "ready", data: fold(prev.data, event), error: null }
                 : prev,
             );
-          });
+          };
+          for (const p of patterns) unsubs.push(stream.subscribe(p, onEvent));
         }
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
@@ -151,17 +162,17 @@ export function useSnapshot<T>(
           error: err instanceof Error ? err : new Error(String(err)),
         });
       } finally {
-        buffer?.close();
+        for (const b of buffers) b.close();
       }
     })();
 
     return () => {
       cancelled = true;
       controller.abort();
-      buffer?.close();
-      unsubscribe?.();
+      for (const b of buffers) b.close();
+      for (const u of unsubs) u();
     };
-  }, [pattern, generation, epoch, reload]);
+  }, [patternKey, generation, epoch, reload]);
 
   return { ...state, reload };
 }

@@ -1,0 +1,14 @@
+# One command: docker compose up --build
+# Open https://localhost:8443 (self-signed cert). First-run password is
+# in the volume at /data/admin.password:
+#   docker compose exec control-center cat /data/admin.password
+services:
+  control-center:
+    build: .
+    ports:
+      - "8443:8443"
+    volumes:
+      - cc-data:/data
+
+volumes:
+  cc-data:

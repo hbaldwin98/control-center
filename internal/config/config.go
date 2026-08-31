@@ -23,6 +23,7 @@ type Config struct {
 	Session Session `yaml:"session"`
 	Blobs   Blobs   `yaml:"blobs"`
 	AI      AI      `yaml:"ai"`
+	Browser Browser `yaml:"browser"`
 }
 
 // Server describes the HTTP listener.
@@ -67,6 +68,12 @@ type AI struct {
 	Models string `yaml:"models"`
 }
 
+// Browser selects the headless engine. Plugins never choose this.
+type Browser struct {
+	// Engine is "fake" (in-process, no sockets) or empty (defaults to fake).
+	Engine string `yaml:"engine"`
+}
+
 // Blobs bounds filesystem blob storage. Limits must be finite.
 type Blobs struct {
 	MaxObjectBytes int64 `yaml:"maxObjectBytes"`
@@ -91,7 +98,8 @@ func Default() Config {
 			MaxObjectBytes: 64 << 20, // 64 MiB
 			MaxScopeBytes:  2 << 30,  // 2 GiB
 		},
-		AI: AI{Models: "config/models.yaml"},
+		AI:      AI{Models: "config/models.yaml"},
+		Browser: Browser{Engine: "fake"},
 	}
 }
 
@@ -169,6 +177,9 @@ func (c *Config) derive() {
 	if c.AI.Models == "" {
 		c.AI.Models = "config/models.yaml"
 	}
+	if c.Browser.Engine == "" {
+		c.Browser.Engine = "fake"
+	}
 }
 
 // Validate enforces the invariants the rest of the system relies on.
@@ -188,6 +199,11 @@ func (c Config) Validate() error {
 	}
 	if c.Blobs.MaxObjectBytes > c.Blobs.MaxScopeBytes {
 		return errors.New("config: blobs.maxObjectBytes exceeds blobs.maxScopeBytes")
+	}
+	switch strings.ToLower(c.Browser.Engine) {
+	case "fake":
+	default:
+		return fmt.Errorf("config: browser.engine %q is not supported (v1 is fake)", c.Browser.Engine)
 	}
 	return nil
 }

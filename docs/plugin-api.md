@@ -28,11 +28,11 @@ rejects imports from `internal/core`, another plugin, or the application module 
 out-of-process plugins as a compatible direction, but that move will require protocols,
 adapters, supervision, and capability proxies; it is not just a transport or build swap.
 
-The public module contains `host` plus `host/ai`, `host/events`, `host/jobs`,
-`host/policy`, and `host/storage`. Those packages contain only the interfaces, DTOs,
-options, and sentinel errors shown here; they do not import `internal/core`. Core modules
-adapt their internal implementations to these public contracts. Plugin code never imports
-an `internal/` package.
+The public module contains `host` plus `host/ai`, `host/browser`, `host/events`,
+`host/jobs`, `host/policy`, and `host/storage`. Those packages contain only the
+interfaces, DTOs, options, and sentinel errors shown here; they do not import
+`internal/core`. Core modules adapt their internal implementations to these public
+contracts. Plugin code never imports an `internal/` package.
 
 ---
 
@@ -140,6 +140,7 @@ type Host interface {
     PluginID() string
 
     AI() ai.AI               // the only host-managed paid provider path
+    Browser() browser.Browser // headless sessions; the host owns the engine
     Jobs() jobs.Jobs         // enqueue, cancel, inspect
     Events() Events          // publish; Source is forced to your plugin ID
     Store() storage.DB       // SQL, restricted to your table prefix
@@ -154,7 +155,7 @@ type Host interface {
 numbers, integers, booleans, `enum`, bounds, patterns, required properties, descriptions,
 and defaults. Remote references, custom code, and secret-valued fields are forbidden.
 The host validates defaults and every update, stores one JSON document per plugin, and
-renders the supported controls in Settings. Secrets are credential references, never
+renders the supported controls on the Plugins screen. Secrets are credential references, never
 config values.
 
 ```go
@@ -178,20 +179,21 @@ but invoke no plugin code.
 | Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
+| Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). |
 | Anything belonging to another plugin | Plugins compose through events, not imports. | Subscribe to their events. |
 
-Network access, HTTP clients, and browser automation are **not** provided and **not**
-restricted. If your plugin needs Playwright, it owns that dependency. One consumer is not
-enough information to design a shared API against; when a second plugin wants a browser,
-it becomes a capability.
+Ordinary `net/http` for APIs is still the plugin's own. The host-managed browser is the
+path for JavaScript-rendered pages and for fetches that must share a cookie jar and an
+HTTPS host allowlist.
 
 The plugin switch is a **host-capability kill switch**. Once disabled, the host rejects
-new managed jobs, AI dispatches, event-handler invocations, and requests to the plugin's
-HTTP routes, plus new event publications and storage/blob mutations through the facade.
-Reads and diagnostic logging remain available. The host cancels contexts it already
-admitted, but an admitted transaction may commit. In-process trusted code can ignore
-cancellation or use direct networking. Hard termination and network containment require
-out-of-process isolation.
+new managed jobs, AI dispatches, browser sessions, event-handler invocations, and requests
+to the plugin's HTTP routes, plus new event publications and storage/blob mutations
+through the facade. Admitted browser sessions are closed, not asked to finish. Reads and
+diagnostic logging remain available. The host cancels contexts it already admitted, but
+an admitted transaction may commit. In-process trusted code can ignore cancellation or
+use direct networking. Hard termination and network containment require out-of-process
+isolation.
 
 The host authenticates every request under `/api/plugins/<id>/`, checks plugin admission,
 and enforces `Origin` plus synchronizer-token CSRF checks before invoking a mutating route.
@@ -419,6 +421,7 @@ It exercises every host capability and nothing else:
 | Store | one table recording ticks |
 | Blobs | writes and reads one small blob |
 | Config | reads one declared setting and observes an update |
+| Browser | one `Open` + `Goto` of in-process `hello.test` |
 | Log / Clock | writes an attributed log and uses the injected time source |
 | UI | one page listing its history |
 
@@ -437,6 +440,7 @@ Disabling `hello` while its job is mid-flight must:
 7. reject new event publications, SQL/blob mutations, and subscription handler entry;
    leave reads and diagnostic logging available
 8. cancel the handler context without claiming to terminate a goroutine that ignores it
+9. close admitted browser sessions rather than letting navigation finish
 
 Every row of the enforcement matrix, tested by something that is not your real plugin.
 

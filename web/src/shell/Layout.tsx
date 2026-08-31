@@ -1,7 +1,8 @@
 /** The authenticated frame: navigation, and the outlet core and plugin routes render into. */
+import { useCallback } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Button } from "@cc/ui";
-import type { PluginModule } from "@cc/ui";
+import { Button, api, useSnapshot } from "@cc/ui";
+import type { PluginDescriptor, PluginModule } from "@cc/ui";
 import { useSession } from "./session";
 
 const coreNav = [
@@ -13,8 +14,25 @@ const coreNav = [
   { path: "/settings", label: "Settings" },
 ];
 
-export function Layout({ plugins }: { plugins: PluginModule[] }) {
+type PluginState = { pluginId: string; enabled: boolean };
+
+export function Layout({
+  plugins,
+  descriptors,
+}: {
+  plugins: PluginModule[];
+  descriptors: PluginDescriptor[];
+}) {
   const { logout } = useSession();
+  const live = useSnapshot<PluginState[]>(
+    useCallback((signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }), []),
+    { events: "core.plugin.**" },
+  );
+  const enabled = new Map(
+    live.status === "ready"
+      ? live.data.map((p) => [p.pluginId, p.enabled] as const)
+      : descriptors.map((d) => [d.id, d.enabled] as const),
+  );
   const pluginNav = plugins.flatMap((p) => p.nav.map((n) => ({ ...n, pluginId: p.id })));
 
   return (
@@ -33,11 +51,19 @@ export function Layout({ plugins }: { plugins: PluginModule[] }) {
         {pluginNav.length > 0 ? (
           <>
             <div className="cc-nav__section">Plugins</div>
-            {pluginNav.map((item) => (
-              <NavLink key={`${item.pluginId}:${item.path}`} to={item.path} className="cc-nav__link">
-                {item.label}
-              </NavLink>
-            ))}
+            {pluginNav.map((item) => {
+              const off = enabled.get(item.pluginId) === false;
+              return (
+                <NavLink
+                  key={`${item.pluginId}:${item.path}`}
+                  to={item.path}
+                  className={off ? "cc-nav__link cc-nav__link--off" : "cc-nav__link"}
+                  title={off ? `${item.label} is disabled` : undefined}
+                >
+                  {item.label}
+                </NavLink>
+              );
+            })}
           </>
         ) : null}
 

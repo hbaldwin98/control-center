@@ -148,6 +148,9 @@ func TestDeriveFillsZeroDurationsAndPool(t *testing.T) {
 	if cfg.AI.Models != "config/models.yaml" {
 		t.Fatalf("ai.models = %q", cfg.AI.Models)
 	}
+	if cfg.Browser.Engine != "fake" {
+		t.Fatalf("browser.engine = %q", cfg.Browser.Engine)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}

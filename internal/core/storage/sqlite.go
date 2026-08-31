@@ -57,6 +57,10 @@ type Store struct {
 	txOwner   map[uint64]struct{}
 
 	migrateMu sync.Mutex
+
+	// currentWriter is the checked-out writer connection during Tx. pluginhost sets a
+	// SQLite authorizer on it for plugin SQL, then clears it before writing core rows.
+	currentWriter *sql.Conn
 }
 
 var _ DB = (*Store)(nil)
@@ -177,22 +181,33 @@ func (s *Store) Tx(ctx context.Context, fn func(Tx) error) (err error) {
 		return err
 	}
 
-	tx, err := s.writer.BeginTx(ctx, nil)
+	conn, err := s.writer.Conn(ctx)
 	if err != nil {
+		s.release()
+		return fmt.Errorf("storage: writer conn: %w", err)
+	}
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		_ = conn.Close()
 		s.release()
 		return fmt.Errorf("storage: begin: %w", err)
 	}
 
+	s.currentWriter = conn
 	handle := &sqlTx{tx: tx}
 	committed := false
 	defer func() {
+		s.currentWriter = nil
 		if p := recover(); p != nil {
 			_ = tx.Rollback()
+			_ = conn.Close()
 			s.release()
 			panic(p)
 		}
 		if !committed {
 			_ = tx.Rollback()
+			_ = conn.Close()
 			s.release()
 		}
 	}()
@@ -207,6 +222,7 @@ func (s *Store) Tx(ctx context.Context, fn func(Tx) error) (err error) {
 		return fmt.Errorf("storage: commit: %w", err)
 	}
 	committed = true
+	_ = conn.Close()
 	s.release()
 	for _, fn := range handle.after {
 		fn()

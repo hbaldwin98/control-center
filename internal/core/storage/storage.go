@@ -87,4 +87,7 @@ var (
 
 	// ErrQuotaExceeded is returned when a blob write would exceed the scope quota.
 	ErrQuotaExceeded = errors.New("storage: scope quota exceeded")
+
+	// ErrSQLDenied is returned when the plugin prefix authorizer rejects a statement.
+	ErrSQLDenied = errors.New("storage: SQL is outside the plugin namespace")
 )

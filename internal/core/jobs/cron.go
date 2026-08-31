@@ -61,14 +61,12 @@ func (q *Queue) considerSlot(ctx context.Context, pluginID string, def Def, now 
 	if err != nil {
 		return err
 	}
-	local := now.In(loc)
-	slot := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), local.Minute(), 0, 0, loc)
+	slot, slotKey := scheduleSlot(now, loc)
 	if !cr.matches(slot) {
 		return nil
 	}
-	// Local wall fields identify the slot, so a repeated autumn hour runs once.
-	slotKey := slot.Format("2006-01-02T15:04")
 
+	enqueued := false
 	err = q.db.Tx(ctx, func(tx storage.Tx) error {
 		var last string
 		err := tx.QueryRow(ctx,
@@ -107,12 +105,66 @@ func (q *Queue) considerSlot(ctx context.Context, pluginID string, def Def, now 
 		_, err = q.enqueueTx(ctx, tx, pluginID, def, []byte("{}"), enqueueOpts{
 			idempotencyKey: "cron:" + slotKey,
 		})
+		if err == nil {
+			enqueued = true
+		}
 		return err
 	})
-	if err == nil {
+	if err == nil && enqueued {
 		q.signal()
 	}
 	return err
+}
+
+func scheduleSlot(now time.Time, loc *time.Location) (time.Time, string) {
+	local := now.In(loc)
+	slot := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), local.Minute(), 0, 0, loc)
+	// Local wall fields identify the slot, so a repeated autumn hour runs once.
+	return slot, slot.Format("2006-01-02T15:04")
+}
+
+// CatchUpSchedules records the current minute as considered for every stored schedule
+// of pluginID, without enqueueing. Enable uses it so slots that passed while the
+// plugin was down are not fired.
+func (q *Queue) CatchUpSchedules(ctx context.Context, pluginID string) error {
+	return q.db.Tx(ctx, func(tx storage.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT job_name, timezone FROM core_job_schedules WHERE plugin_id = ?`, pluginID)
+		if err != nil {
+			return err
+		}
+		type schedRow struct{ name, tz string }
+		var list []schedRow
+		for rows.Next() {
+			var r schedRow
+			if err := rows.Scan(&r.name, &r.tz); err != nil {
+				rows.Close()
+				return err
+			}
+			list = append(list, r)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+
+		now := q.now()
+		stamp := rfc(now)
+		for _, r := range list {
+			loc, err := time.LoadLocation(r.tz)
+			if err != nil {
+				return err
+			}
+			_, slotKey := scheduleSlot(now, loc)
+			if _, err := tx.Exec(ctx,
+				`UPDATE core_job_schedules SET last_slot = ?, updated_at = ? WHERE plugin_id = ? AND job_name = ?`,
+				slotKey, stamp, pluginID, r.name); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (q *Queue) enqueueTx(ctx context.Context, tx storage.Tx, pluginID string, def Def, payload []byte, o enqueueOpts) (int64, error) {

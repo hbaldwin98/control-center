@@ -252,9 +252,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	var usage events.Event
-	err = s.db.Tx(ctx, func(tx storage.Tx) error {
+	// Accounting must complete even if the caller was cancelled after admission.
+	// A paid provider call that already ran still has to settle its reservation.
+	settleCtx := context.WithoutCancel(ctx)
+	err = s.db.Tx(settleCtx, func(tx storage.Tx) error {
 		now := rfc(s.now())
-		if _, err := tx.Exec(ctx,
+		if _, err := tx.Exec(settleCtx,
 			`UPDATE core_ai_calls SET status = ?, error_class = ?, settled_micro_usd = ?, finalized_at = ? WHERE id = ?`,
 			status, errClass, int64(settled), now, callID); err != nil {
 			return err
@@ -271,7 +274,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 			if oc.errClass != "" {
 				st = "failed"
 			}
-			if _, err := tx.Exec(ctx,
+			if _, err := tx.Exec(settleCtx,
 				`UPDATE core_ai_attempts SET status = ?, error_class = ?, billing_state = ?,
 				        input_tokens = ?, output_tokens = ?, cost_micro_usd = ?, latency_ms = ?
 				  WHERE call_id = ? AND ordinal = ?`,
@@ -281,17 +284,17 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 			}
 		}
 		if release {
-			if err := s.gate.ReleaseSpendTx(ctx, tx, reservation.ID); err != nil {
+			if err := s.gate.ReleaseSpendTx(settleCtx, tx, reservation.ID); err != nil {
 				return err
 			}
 			settled = 0
-			_, _ = tx.Exec(ctx, `UPDATE core_ai_calls SET settled_micro_usd = 0 WHERE id = ?`, callID)
+			_, _ = tx.Exec(settleCtx, `UPDATE core_ai_calls SET settled_micro_usd = 0 WHERE id = ?`, callID)
 		} else {
-			if err := s.gate.SettleSpendTx(ctx, tx, reservation.ID, settled); err != nil {
+			if err := s.gate.SettleSpendTx(settleCtx, tx, reservation.ID, settled); err != nil {
 				return err
 			}
 		}
-		eid, err := s.bus.PublishTx(ctx, tx, events.Input{
+		eid, err := s.bus.PublishTx(settleCtx, tx, events.Input{
 			Type:    events.TypeAIUsage,
 			Source:  events.SourceAI,
 			Subject: callID,
@@ -305,7 +308,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE core_ai_calls SET usage_event_id = ? WHERE id = ?`, eid, callID)
+		_, err = tx.Exec(settleCtx, `UPDATE core_ai_calls SET usage_event_id = ? WHERE id = ?`, eid, callID)
 		_ = usage
 		return err
 	})

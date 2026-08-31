@@ -1,0 +1,10 @@
+.git
+.cursor
+**/node_modules
+web/dist
+data
+docs
+target
+.vscode
+.idea
+**/.DS_Store

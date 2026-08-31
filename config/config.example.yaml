@@ -38,3 +38,7 @@ blobs:
 ai:
   # Logical model routes. Secrets are credential ids, not values.
   models: "config/models.yaml"
+
+browser:
+  # v1 is the in-process Fake. Plugins never select an engine.
+  engine: fake

@@ -13,7 +13,7 @@ surfaces lots that are anomalously cheap relative to what the pictures actually 
 ```
 plugins/bidrl/
   plugin.go        manifest, wiring
-  collect/         Playwright: auction enumeration, lot pages, images
+  collect/         host.Browser(): auction enumeration, lot pages, images
   analyze/         one vision call per lot, all photos together, schema-enforced
   price/           grounded pricing with stored citations
   score/           deal score + mislabel score
@@ -49,9 +49,11 @@ selected auction
 
 ## Decisions carried from design
 
-**Playwright lives inside this plugin, not in core.** One consumer is not enough
-information to design a shared browser API. When a second plugin wants a browser, it
-becomes a capability.
+**Collection goes through `Host.Browser()`, not a plugin-owned engine.** Playwright
+(or anything else) is an implementation detail of [`browser`](../modules/browser.md).
+The plugin passes the BIDRL/CDN DNS names it intends to touch; the host enforces HTTPS,
+the allowlist, private-network rejection, and teardown on disable. CI rejects a plugin
+that imports an automation library.
 
 **Every v1 action is user-triggered.** Collection starts only from "add auction", a scan
 starts only from "scan", pricing starts only inside that requested scan or from "reprice",
@@ -69,10 +71,10 @@ continuous crawling.
 
 **Browser targets use a fixed HTTPS host allowlist.** The plugin accepts BIDRL auction and
 lot URLs only when their parsed host is in the compiled allowlist and their scheme is
-`https`. Browser request interception applies the same rule to redirects and subresources,
-with only the fixed BIDRL/CDN hosts required by collection. Userinfo, alternate ports, IP
-literals, and all other origins are rejected. This prevents supplied URLs from turning
-Playwright into a browser SSRF primitive.
+`https`. It passes that list to `Browser().Open`. The host applies the same rule to
+redirects and subresources. Userinfo, alternate ports, IP literals, and all other origins
+are rejected. This prevents supplied URLs from turning a browser session into an SSRF
+primitive.
 
 **Identification basis gates valuation.** The vision call must report *why* it identified
 something:
@@ -110,6 +112,7 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 
 | Host capability | Use |
 |---|---|
+| `Browser()` allowlisted sessions | collection: auction pages, lot pages, images |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` grounding options and citations | the price stage |
 | `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, and bid refreshes |
@@ -160,6 +163,7 @@ Every row shows the BIDRL title beside what the photos suggest, and links back t
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
   fails.
-- Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs and AI
-  dispatches, and cancels running job contexts. A paid call admitted before disable may
-  finish; its usage is stored and its budget reservation is settled.
+- Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs, AI
+  dispatches, and browser sessions, closes admitted browser sessions, and cancels running
+  job contexts. A paid call admitted before disable may finish; its usage is stored and
+  its budget reservation is settled.

@@ -62,7 +62,7 @@ export function Settings() {
     <Page>
       <PageHeader
         title="Settings"
-        lede="Credentials, effective model routes, notification rules, and channels."
+        lede="Credentials, reauthentication, and the effective model routes."
       />
       <Stack>
         {oauthFlash ? (

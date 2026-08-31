@@ -15,6 +15,7 @@ import {
   api,
   useSnapshot,
 } from "@cc/ui";
+import { ConfigForm } from "./ConfigForm";
 
 type ExceedAction = "reject" | "disable";
 
@@ -40,21 +41,26 @@ type PluginState = {
   reservedMonth: number;
   committedMonth: number;
   accountingFailed: string | null;
+  name?: string;
+  description?: string;
+  health?: { desiredEnabled: boolean; runtime: string; lastError: string; errorKind?: string };
+  config?: Record<string, unknown>;
+  configSchema?: unknown;
 };
 
-/** Enable/disable, budgets, health. The host-capability kill switch lives here. */
+/** Enable/disable, budgets, health, and schema-backed config. The kill switch lives here. */
 export function Plugins() {
   const load = useCallback(
     (signal: AbortSignal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }),
     [],
   );
-  const plugins = useSnapshot<PluginState[]>(load, { events: "core.plugin.**" });
+  const plugins = useSnapshot<PluginState[]>(load, { events: ["core.plugin.**", "core.ai.usage"] });
 
   return (
     <Page>
       <PageHeader
         title="Plugins"
-        lede="The kill switch, budgets, and health. Disabled plugins stay listed with the reason."
+        lede="The kill switch, budgets, health, and schema-backed config. Disabled plugins stay listed with the reason."
       />
 
       {plugins.status === "error" ? (
@@ -98,7 +104,7 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
   };
 
   return (
-    <Card title={state.pluginId} muted={!state.enabled}>
+    <Card title={state.name || state.pluginId} muted={!state.enabled}>
       <Stack>
       <Row>
         {state.accountingFailed ? (
@@ -109,7 +115,19 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
           <Badge tone="danger">disabled</Badge>
         )}
         {state.automated ? <Badge>automated</Badge> : null}
+        {state.health?.runtime === "degraded" ? (
+          <Badge tone="warn">degraded{state.health.errorKind ? ` · ${state.health.errorKind}` : ""}</Badge>
+        ) : null}
+        <span className="cc-field__hint">
+          <code>{state.pluginId}</code>
+        </span>
       </Row>
+
+        {state.description ? <p className="cc-field__hint">{state.description}</p> : null}
+
+        {state.health?.lastError ? (
+          <Callout tone="danger">{state.health.lastError}</Callout>
+        ) : null}
 
       {!state.enabled ? (
         <div className="cc-field__hint">
@@ -149,6 +167,22 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
         onSaved={onChanged}
         onError={setError}
       />
+
+      <ConfigForm
+        key={`${state.pluginId}:${JSON.stringify(state.config ?? null)}`}
+        pluginId={state.pluginId}
+        schema={state.configSchema}
+        value={state.config}
+        disabled={busy}
+        onSaved={onChanged}
+        onError={setError}
+      />
+
+      <p className="cc-field__hint">
+        Disable rejects new jobs, AI calls, event handlers, plugin HTTP, publications, and
+        storage writes, and closes this plugin's browser sessions. In-process code that
+        ignores cancellation is not killed.
+      </p>
 
       <Row>
         {state.enabled ? (

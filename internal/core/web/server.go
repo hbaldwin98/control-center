@@ -16,6 +16,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
@@ -54,13 +55,20 @@ type Deps struct {
 	// AI is host-managed model routing and usage. Query returns no credentials.
 	AI *ai.Service
 
-	// Plugins reports the registered plugins the shell reconciles against. pluginhost
-	// supplies it at milestone 6; until then the registry is empty.
+	// Plugins reports the registered plugins the shell reconciles against.
 	Plugins func(context.Context) []PluginDescriptor
+
+	// PluginHost owns plugin lifecycle, scoped facades, and /api/plugins/ routes.
+	PluginHost *pluginhost.Registry
 
 	// StaticDir holds the built frontend. When it is missing, the server serves a small
 	// built-in placeholder so the API is still usable.
 	StaticDir string
+
+	// BootstrapPassword, when set and no administrator exists yet, completes first-run
+	// setup without the loopback token. The container entrypoint uses this so Docker
+	// Desktop (where the browser is not a loopback peer) can start in one command.
+	BootstrapPassword string
 
 	// Now is injectable for tests.
 	Now func() time.Time
@@ -101,6 +109,16 @@ func New(ctx context.Context, m storage.Migrator, deps Deps) (*Server, error) {
 	if err := s.auth.purgeExpired(ctx); err != nil {
 		return nil, err
 	}
+	if deps.BootstrapPassword != "" {
+		created, err := s.auth.createAdminIfAbsent(ctx, deps.BootstrapPassword)
+		if err != nil {
+			return nil, err
+		}
+		if created {
+			slog.Info("administrator created from CC_BOOTSTRAP_PASSWORD")
+		}
+		return s, nil
+	}
 	token, err := s.auth.ensureBootstrapToken(ctx)
 	if err != nil {
 		return nil, err
@@ -130,6 +148,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/admin/plugins/{id}/enable", s.authenticated(s.handlePluginEnable))
 	s.mux.HandleFunc("POST /api/admin/plugins/{id}/disable", s.authenticated(s.handlePluginDisable))
 	s.mux.HandleFunc("PUT /api/admin/plugins/{id}/budget", s.authenticated(s.handlePluginBudget))
+	s.mux.HandleFunc("GET /api/admin/plugins/{id}/config", s.authenticated(s.handlePluginConfigGet))
+	s.mux.HandleFunc("PUT /api/admin/plugins/{id}/config", s.authenticated(s.handlePluginConfigPut))
+
+	s.mux.Handle("/api/plugins/", s.authenticated(s.handlePluginAPI))
 
 	s.mux.HandleFunc("GET /api/jobs", s.authenticated(s.handleJobList))
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.authenticated(s.handleJobGet))

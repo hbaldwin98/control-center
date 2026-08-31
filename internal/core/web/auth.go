@@ -175,6 +175,38 @@ func (a *authStore) bootstrap(ctx context.Context, token, password string) error
 	})
 }
 
+// createAdminIfAbsent sets the administrator password when none exists. It is the
+// container first-run path: the peer is not loopback, so the one-time token cannot be
+// posted from the browser. Returns true when a row was inserted.
+func (a *authStore) createAdminIfAbsent(ctx context.Context, password string) (bool, error) {
+	if len(password) < minPasswordLen {
+		return false, fmt.Errorf("web: bootstrap password must be at least %d characters", minPasswordLen)
+	}
+	exists, err := a.adminExists(ctx)
+	if err != nil || exists {
+		return false, err
+	}
+	hash, err := hashPassword(password, defaultArgon2id)
+	if err != nil {
+		return false, err
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	err = a.db.Tx(ctx, func(tx storage.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO core_admin(id, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+			adminRowID, hash, now, now); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx,
+			`UPDATE core_bootstrap_token SET used_at = ? WHERE id = ? AND used_at IS NULL`, now, adminRowID)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (a *authStore) checkPassword(ctx context.Context, password string) error {
 	hash, err := a.adminHash(ctx)
 	if err != nil {

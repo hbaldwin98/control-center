@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ApiError,
   Badge,
@@ -46,7 +47,14 @@ export function Jobs() {
     [state],
   );
   const list = useSnapshot<Job[]>(load, { events: "core.job.**" });
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [params, setParams] = useSearchParams();
+  const openId = Number(params.get("id") || "") || null;
+  const setOpenId = (id: number | null) => {
+    const next = new URLSearchParams(params);
+    if (id == null) next.delete("id");
+    else next.set("id", String(id));
+    setParams(next, { replace: true });
+  };
 
   return (
     <Page>
@@ -91,6 +99,7 @@ export function Jobs() {
                     <th>State</th>
                     <th>Attempt</th>
                     <th>Progress</th>
+                    <th>Created</th>
                     <th />
                   </tr>
                 </thead>
@@ -147,6 +156,7 @@ function JobRow({
         <td>
           {Math.round(job.progress * 100)}%{job.progressMessage ? ` · ${job.progressMessage}` : ""}
         </td>
+        <td title={job.createdAt}>{formatWhen(job.createdAt)}</td>
         <td>
           <Row>
             <Button type="button" onClick={onToggle}>
@@ -158,7 +168,7 @@ function JobRow({
       </tr>
       {open ? (
         <tr>
-          <td colSpan={7}>
+          <td colSpan={8}>
             <JobDetail id={job.id} />
           </td>
         </tr>
@@ -204,11 +214,20 @@ function JobDetail({ id }: { id: number }) {
   if (detail.status === "loading") return <div className="cc-field__hint">Loading logs…</div>;
   if (detail.status === "error") return <Callout tone="danger">{detail.error.message}</Callout>;
   const logs = detail.data.logs ?? [];
-  if (logs.length === 0) return <div className="cc-field__hint">No log lines.</div>;
   return (
-    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 12.5 }}>
-      {logs.map((l) => l.line).join("\n")}
-    </pre>
+    <Stack>
+      <div className="cc-field__hint">
+        {detail.data.startedAt ? `started ${formatWhen(detail.data.startedAt)}` : "not started"}
+        {detail.data.finishedAt ? ` · finished ${formatWhen(detail.data.finishedAt)}` : ""}
+      </div>
+      {logs.length === 0 ? (
+        <div className="cc-field__hint">No log lines.</div>
+      ) : (
+        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 12.5 }}>
+          {logs.map((l) => `${formatWhen(l.at)}  ${l.line}`).join("\n")}
+        </pre>
+      )}
+    </Stack>
   );
 }
 
@@ -228,4 +247,9 @@ function StateBadge({ state }: { state: string }) {
     }
   }, [state]);
   return <Badge tone={tone}>{state}</Badge>;
+}
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -15,9 +16,11 @@ import (
 
 	"github.com/hbaldwin98/control-center/internal/config"
 	"github.com/hbaldwin98/control-center/internal/core/ai"
+	"github.com/hbaldwin98/control-center/internal/core/browser"
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/internal/core/web"
@@ -122,6 +125,16 @@ func run() error {
 	jq.Start(ctx)
 	defer jq.Stop()
 
+	br, err := browser.New(bus, pol, browser.Options{
+		Engine: browser.NewFake(map[string]http.Handler{
+			"hello.test": browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
+		}),
+	})
+	if err != nil {
+		return err
+	}
+	defer br.Close()
+
 	routes, err := ai.LoadRoutes(cfg.AI.Models)
 	if err != nil {
 		return err
@@ -140,6 +153,20 @@ func run() error {
 		*staticDir = ""
 	}
 
+	ph, err := pluginhost.New(ctx, store, pluginhost.Options{
+		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: jq, AI: aisvc, Browser: br,
+	})
+	if err != nil {
+		return err
+	}
+	if err := registerPlugins(ph); err != nil {
+		return err
+	}
+	if err := ph.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = ph.Stop(context.Background()) }()
+
 	srv, err := web.New(ctx, store, web.Deps{
 		DB:          store,
 		Config:      cfg,
@@ -149,13 +176,19 @@ func run() error {
 		Jobs:        jq,
 		Credentials: creds,
 		AI:          aisvc,
-		StaticDir:   *staticDir,
+		PluginHost:  ph,
+		Plugins: func(ctx context.Context) []web.PluginDescriptor {
+			ps := ph.ShellPlugins(ctx)
+			out := make([]web.PluginDescriptor, 0, len(ps))
+			for _, p := range ps {
+				out = append(out, web.PluginDescriptor{ID: p.ID, Name: p.Name, Enabled: p.Enabled})
+			}
+			return out
+		},
+		StaticDir:         *staticDir,
+		BootstrapPassword: os.Getenv("CC_BOOTSTRAP_PASSWORD"),
 	})
 	if err != nil {
-		return err
-	}
-
-	if err := registerPlugins(ctx); err != nil {
 		return err
 	}
 

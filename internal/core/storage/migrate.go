@@ -104,6 +104,79 @@ func (s *Store) Apply(namespace string, migrations []Migration) error {
 	return nil
 }
 
+func (s *Store) applyPrefixed(namespace, prefix string, migrations []Migration) error {
+	if namespace == "" {
+		return errors.New("storage: empty migration namespace")
+	}
+	s.migrateMu.Lock()
+	defer s.migrateMu.Unlock()
+
+	ctx := context.Background()
+	if _, err := s.Exec(ctx, migrationTable); err != nil {
+		return fmt.Errorf("storage: create migration table: %w", err)
+	}
+	if err := validateOrder(namespace, migrations); err != nil {
+		return err
+	}
+	applied, err := s.appliedMigrations(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	highestApplied := 0
+	for v := range applied {
+		if v > highestApplied {
+			highestApplied = v
+		}
+	}
+	seen := 0
+	for _, m := range migrations {
+		sum := checksum(m)
+		if prev, ok := applied[m.Version]; ok {
+			if prev.name != m.Name || prev.checksum != sum {
+				return fmt.Errorf(
+					"storage: migration %s/%d already applied as %q (%s) but declared as %q (%s)",
+					namespace, m.Version, prev.name, prev.checksum[:12], m.Name, sum[:12])
+			}
+			seen++
+			continue
+		}
+		if m.Version < highestApplied {
+			return fmt.Errorf(
+				"storage: migration %s/%d is unapplied but version %d already ran; migrations may not be inserted below the high-water mark",
+				namespace, m.Version, highestApplied)
+		}
+		if err := s.applyOnePrefixed(ctx, namespace, prefix, m, sum); err != nil {
+			return err
+		}
+	}
+	if seen != len(applied) {
+		return fmt.Errorf(
+			"storage: namespace %s has %d applied migrations but only %d are declared; a previously applied migration was removed",
+			namespace, len(applied), seen)
+	}
+	return nil
+}
+
+func (s *Store) applyOnePrefixed(ctx context.Context, namespace, prefix string, m Migration, sum string) error {
+	return s.Tx(ctx, func(tx Tx) error {
+		if err := s.SetPluginAuthorizer(prefix); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, m.Up); err != nil {
+			_ = s.SetPluginAuthorizer("")
+			return wrapSQLDenied(fmt.Errorf("storage: migration %s/%d %q: %w", namespace, m.Version, m.Name, err))
+		}
+		if err := s.SetPluginAuthorizer(""); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx,
+			`INSERT INTO core_migrations(namespace, version, name, checksum, applied_at)
+			 VALUES (?, ?, ?, ?, ?)`,
+			namespace, m.Version, m.Name, sum, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	})
+}
+
 func (s *Store) applyOne(ctx context.Context, namespace string, m Migration, sum string) error {
 	err := s.Tx(ctx, func(tx Tx) error {
 		if _, err := tx.Exec(ctx, m.Up); err != nil {

@@ -104,6 +104,30 @@ export function Events() {
         </form>
 
         {!draftValid ? <Callout tone="danger">Not a valid pattern.</Callout> : null}
+
+        <div className="cc-row">
+          {(
+            [
+              ["**", "all"],
+              ["core.plugin.**", "plugins"],
+              ["core.job.**", "jobs"],
+              ["core.ai.**", "ai"],
+              ["core.browser.**", "browser"],
+              ["**.alert", "alerts"],
+            ] as const
+          ).map(([p, label]) => (
+            <Button
+              key={p}
+              type="button"
+              onClick={() => {
+                setDraft(p);
+                setPattern(p);
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
         {history.status === "error" ? (
           <Callout tone="danger">{history.error.message}</Callout>
         ) : null}

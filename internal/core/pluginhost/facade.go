@@ -1,0 +1,529 @@
+package pluginhost
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"strconv"
+	"time"
+
+	"github.com/hbaldwin98/control-center/host"
+	hostai "github.com/hbaldwin98/control-center/host/ai"
+	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
+	hostevents "github.com/hbaldwin98/control-center/host/events"
+	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
+	hostpolicy "github.com/hbaldwin98/control-center/host/policy"
+	hoststorage "github.com/hbaldwin98/control-center/host/storage"
+	"github.com/hbaldwin98/control-center/internal/core/ai"
+	"github.com/hbaldwin98/control-center/internal/core/browser"
+	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/jobs"
+	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/storage"
+)
+
+type scopedHost struct {
+	pluginID string
+	ai       hostai.AI
+	browser  hostbrowser.Browser
+	jobs     hostjobs.Jobs
+	events   host.Events
+	store    hoststorage.DB
+	blobs    hoststorage.Blobs
+	config   *pluginConfig
+	log      host.Logger
+	clock    host.Clock
+}
+
+func (h *scopedHost) PluginID() string          { return h.pluginID }
+func (h *scopedHost) AI() hostai.AI             { return h.ai }
+func (h *scopedHost) Browser() hostbrowser.Browser { return h.browser }
+func (h *scopedHost) Jobs() hostjobs.Jobs       { return h.jobs }
+func (h *scopedHost) Events() host.Events    { return h.events }
+func (h *scopedHost) Store() hoststorage.DB  { return h.store }
+func (h *scopedHost) Blobs() hoststorage.Blobs { return h.blobs }
+func (h *scopedHost) Config() host.Config    { return h.config }
+func (h *scopedHost) Log() host.Logger       { return h.log }
+func (h *scopedHost) Clock() host.Clock { return h.clock }
+
+type browserAdapter struct{ inner browser.Browser }
+
+func (a *browserAdapter) Open(ctx context.Context, opts hostbrowser.OpenOptions) (hostbrowser.Session, error) {
+	sess, err := a.inner.Open(ctx, browser.OpenOptions{AllowedHosts: opts.AllowedHosts})
+	if err != nil {
+		return nil, mapBrowserErr(err)
+	}
+	return browserSessionAdapter{inner: sess}, nil
+}
+
+type browserSessionAdapter struct{ inner browser.Session }
+
+func (s browserSessionAdapter) NewPage(ctx context.Context) (hostbrowser.Page, error) {
+	p, err := s.inner.NewPage(ctx)
+	if err != nil {
+		return nil, mapBrowserErr(err)
+	}
+	return browserPageAdapter{inner: p}, nil
+}
+
+func (s browserSessionAdapter) Close(ctx context.Context) error {
+	return mapBrowserErr(s.inner.Close(ctx))
+}
+
+type browserPageAdapter struct{ inner browser.Page }
+
+func (p browserPageAdapter) Goto(ctx context.Context, url string) error {
+	return mapBrowserErr(p.inner.Goto(ctx, url))
+}
+
+func (p browserPageAdapter) WaitFor(ctx context.Context, selector string, d time.Duration) error {
+	return mapBrowserErr(p.inner.WaitFor(ctx, selector, d))
+}
+
+func (p browserPageAdapter) Content(ctx context.Context) (string, error) {
+	s, err := p.inner.Content(ctx)
+	return s, mapBrowserErr(err)
+}
+
+func (p browserPageAdapter) Get(ctx context.Context, url string) (hostbrowser.Resource, error) {
+	r, err := p.inner.Get(ctx, url)
+	if err != nil {
+		return hostbrowser.Resource{}, mapBrowserErr(err)
+	}
+	return hostbrowser.Resource{URL: r.URL, MIME: r.MIME, Body: r.Body, Status: r.Status}, nil
+}
+
+func (p browserPageAdapter) Close(ctx context.Context) error {
+	return mapBrowserErr(p.inner.Close(ctx))
+}
+
+func mapBrowserErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	err = mapPolicyErr(err)
+	switch {
+	case errors.Is(err, browser.ErrDenied):
+		return errors.Join(hostbrowser.ErrDenied, err)
+	case errors.Is(err, browser.ErrInvalidAllowlist):
+		return errors.Join(hostbrowser.ErrInvalidAllowlist, err)
+	case errors.Is(err, browser.ErrLimit):
+		return errors.Join(hostbrowser.ErrLimit, err)
+	case errors.Is(err, browser.ErrEngine), errors.Is(err, browser.ErrClosed):
+		return errors.Join(hostbrowser.ErrEngine, err)
+	}
+	return err
+}
+
+type disabledBrowser struct{}
+
+func (disabledBrowser) Open(context.Context, hostbrowser.OpenOptions) (hostbrowser.Session, error) {
+	return nil, hostpolicy.ErrPluginDisabled
+}
+
+func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
+	id := m.ID
+	var aiHandle hostai.AI
+	if r.opts.AI != nil {
+		aiHandle = &aiAdapter{inner: ai.Scoped(r.opts.AI, id)}
+	} else {
+		aiHandle = disabledAI{}
+	}
+	var browserHandle hostbrowser.Browser
+	if r.opts.Browser != nil {
+		browserHandle = &browserAdapter{inner: browser.Scoped(r.opts.Browser, id)}
+	} else {
+		browserHandle = disabledBrowser{}
+	}
+	return &scopedHost{
+		pluginID: id,
+		ai:       aiHandle,
+		browser:  browserHandle,
+		jobs:     &jobsAdapter{inner: jobs.Scoped(r.opts.Jobs, id)},
+		events:   &gatedEvents{inner: events.Scoped(r.opts.Events, id), db: r.opts.DB, gate: r.opts.Policy, pluginID: id},
+		store:    &gatedStore{db: r.opts.DB, inner: storage.Prefixed(r.opts.DB, id), gate: r.opts.Policy, pluginID: id},
+		blobs:    &blobAdapter{inner: storage.WithMutationAdmission(r.opts.Blobs.Scoped(id), func(ctx context.Context, tx storage.Tx) error {
+			return r.opts.Policy.CheckWorkTx(ctx, tx, id)
+		})},
+		config: cfg,
+		log:    slogLogger{l: r.opts.Log.With("plugin", id)},
+		clock:  clockFunc(r.opts.Now),
+	}
+}
+
+type clockFunc func() time.Time
+
+func (c clockFunc) Now() time.Time { return c().UTC() }
+
+type slogLogger struct{ l *slog.Logger }
+
+func (s slogLogger) Debug(msg string, args ...any) { s.l.Debug(msg, args...) }
+func (s slogLogger) Info(msg string, args ...any)  { s.l.Info(msg, args...) }
+func (s slogLogger) Warn(msg string, args ...any)  { s.l.Warn(msg, args...) }
+func (s slogLogger) Error(msg string, args ...any) { s.l.Error(msg, args...) }
+func (s slogLogger) With(args ...any) host.Logger  { return slogLogger{l: s.l.With(args...)} }
+
+func mapPolicyErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, policy.ErrPluginDisabled) {
+		return errors.Join(hostpolicy.ErrPluginDisabled, err)
+	}
+	if errors.Is(err, policy.ErrBudgetExceeded) {
+		return errors.Join(hostpolicy.ErrBudgetExceeded, err)
+	}
+	return err
+}
+
+type gatedEvents struct {
+	inner    *events.ScopedBus
+	db       *storage.Store
+	gate     policy.Gate
+	pluginID string
+}
+
+func (g *gatedEvents) Publish(ctx context.Context, eventType, subject string, payload any) error {
+	return g.db.Tx(ctx, func(tx storage.Tx) error {
+		return g.PublishTx(ctx, &txAdapter{tx: tx, db: g.db, pluginID: g.pluginID}, eventType, subject, payload)
+	})
+}
+
+func (g *gatedEvents) PublishTx(ctx context.Context, tx hoststorage.Tx, eventType, subject string, payload any) error {
+	itx, ok := unwrapTx(tx)
+	if !ok {
+		return fmt.Errorf("pluginhost: PublishTx needs a host transaction from Store().Tx")
+	}
+	if err := g.gate.CheckWorkTx(ctx, itx, g.pluginID); err != nil {
+		return mapPolicyErr(err)
+	}
+	return g.inner.PublishTx(ctx, itx, eventType, subject, payload)
+}
+
+type gatedStore struct {
+	db       *storage.Store
+	inner    *storage.PrefixDB
+	gate     policy.Gate
+	pluginID string
+}
+
+func (g *gatedStore) Query(ctx context.Context, q string, args ...any) (hoststorage.Rows, error) {
+	return g.inner.Query(ctx, q, args...)
+}
+
+func (g *gatedStore) QueryRow(ctx context.Context, q string, args ...any) hoststorage.Row {
+	return g.inner.QueryRow(ctx, q, args...)
+}
+
+func (g *gatedStore) Exec(ctx context.Context, q string, args ...any) (hoststorage.Result, error) {
+	var res sql.Result
+	err := g.Tx(ctx, func(tx hoststorage.Tx) error {
+		var err error
+		res, err = tx.Exec(ctx, q, args...)
+		return err
+	})
+	return res, err
+}
+
+func (g *gatedStore) Tx(ctx context.Context, fn func(hoststorage.Tx) error) error {
+	return g.db.Tx(ctx, func(tx storage.Tx) error {
+		if err := g.gate.CheckWorkTx(ctx, tx, g.pluginID); err != nil {
+			return mapPolicyErr(err)
+		}
+		return fn(&txAdapter{tx: tx, db: g.db, pluginID: g.pluginID})
+	})
+}
+
+type txAdapter struct {
+	tx       storage.Tx
+	db       *storage.Store
+	pluginID string
+}
+
+func unwrapTx(tx hoststorage.Tx) (storage.Tx, bool) {
+	a, ok := tx.(*txAdapter)
+	if !ok {
+		return nil, false
+	}
+	return a.tx, true
+}
+
+func (t *txAdapter) withAuth(fn func() error) error {
+	prefix := t.pluginID + "_"
+	if err := t.db.SetPluginAuthorizer(prefix); err != nil {
+		return err
+	}
+	defer func() { _ = t.db.SetPluginAuthorizer("") }()
+	return fn()
+}
+
+func (t *txAdapter) Query(ctx context.Context, q string, args ...any) (hoststorage.Rows, error) {
+	var rows *sql.Rows
+	err := t.withAuth(func() error {
+		var err error
+		rows, err = t.tx.Query(ctx, q, args...)
+		return storageWrapDenied(err)
+	})
+	return rows, err
+}
+
+func (t *txAdapter) QueryRow(ctx context.Context, q string, args ...any) hoststorage.Row {
+	_ = t.db.SetPluginAuthorizer(t.pluginID + "_")
+	defer func() { _ = t.db.SetPluginAuthorizer("") }()
+	return t.tx.QueryRow(ctx, q, args...)
+}
+
+func (t *txAdapter) Exec(ctx context.Context, q string, args ...any) (hoststorage.Result, error) {
+	var res sql.Result
+	err := t.withAuth(func() error {
+		var err error
+		res, err = t.tx.Exec(ctx, q, args...)
+		return storageWrapDenied(err)
+	})
+	return res, err
+}
+
+func (t *txAdapter) AfterCommit(fn func()) { t.tx.AfterCommit(fn) }
+
+func storageWrapDenied(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, storage.ErrSQLDenied) {
+		return err
+	}
+	return err
+}
+
+type blobAdapter struct{ inner storage.Blobs }
+
+func (b *blobAdapter) Put(ctx context.Context, key string, r io.Reader, mime string) (hoststorage.BlobRef, error) {
+	ref, err := b.inner.Put(ctx, key, r, mime)
+	if err != nil {
+		return hoststorage.BlobRef{}, mapPolicyErr(err)
+	}
+	return hoststorage.BlobRef{Key: ref.Key, MIME: ref.MIME, Size: ref.Size, SHA256: ref.SHA256}, nil
+}
+
+func (b *blobAdapter) Get(ctx context.Context, key string) (io.ReadCloser, hoststorage.BlobMeta, error) {
+	rc, meta, err := b.inner.Get(ctx, key)
+	if err != nil {
+		return nil, hoststorage.BlobMeta{}, err
+	}
+	return rc, hoststorage.BlobMeta{
+		BlobRef:   hoststorage.BlobRef{Key: meta.Key, MIME: meta.MIME, Size: meta.Size, SHA256: meta.SHA256},
+		CreatedAt: meta.CreatedAt,
+		UpdatedAt: meta.UpdatedAt,
+	}, nil
+}
+
+func (b *blobAdapter) Delete(ctx context.Context, key string) error {
+	return mapPolicyErr(b.inner.Delete(ctx, key))
+}
+
+func (b *blobAdapter) URL(key string) string { return b.inner.URL(key) }
+
+type jobsAdapter struct{ inner jobs.Jobs }
+
+func (a *jobsAdapter) Enqueue(ctx context.Context, name string, args any, opts ...hostjobs.Opt) (int64, error) {
+	o := hostjobs.ApplyOpts(opts)
+	var jopts []jobs.Opt
+	if o.HasRunAt {
+		jopts = append(jopts, jobs.WithRunAt(o.RunAt))
+	}
+	if o.IdempotencyKey != "" {
+		jopts = append(jopts, jobs.WithIdempotencyKey(o.IdempotencyKey))
+	}
+	if o.Priority != 0 {
+		jopts = append(jopts, jobs.WithPriority(o.Priority))
+	}
+	id, err := a.inner.Enqueue(ctx, name, args, jopts...)
+	return id, mapPolicyErr(err)
+}
+
+func (a *jobsAdapter) Cancel(ctx context.Context, id int64) error {
+	return a.inner.Cancel(ctx, id)
+}
+
+func (a *jobsAdapter) Get(ctx context.Context, id int64) (*hostjobs.Job, error) {
+	j, err := a.inner.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mapJob(j), nil
+}
+
+func (a *jobsAdapter) List(ctx context.Context, f hostjobs.Filter) ([]hostjobs.Job, error) {
+	list, err := a.inner.List(ctx, jobs.Filter{Name: f.Name, State: jobs.State(f.State), Limit: f.Limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hostjobs.Job, 0, len(list))
+	for i := range list {
+		out = append(out, *mapJob(&list[i]))
+	}
+	return out, nil
+}
+
+func mapJob(j *jobs.Job) *hostjobs.Job {
+	out := &hostjobs.Job{
+		ID: j.ID, Name: j.Name, Args: j.Args, State: string(j.State),
+		Attempt: j.Attempt, MaxAttempts: j.MaxAttempts, Progress: j.Progress,
+		ProgressMessage: j.ProgressMessage, LastError: j.LastError,
+		CancelReason: j.CancelReason, CreatedAt: j.CreatedAt,
+		StartedAt: j.StartedAt, FinishedAt: j.FinishedAt,
+	}
+	for _, l := range j.Logs {
+		out.Logs = append(out.Logs, hostjobs.LogLine{Attempt: l.Attempt, At: l.At, Line: l.Line})
+	}
+	return out
+}
+
+// hostJobCtx is the plugin-facing job context. It carries the core job handle
+// plus a context stamped with the job ID so AI usage attributes to this run.
+type hostJobCtx struct {
+	ctx   context.Context
+	inner jobs.Context
+}
+
+func (c hostJobCtx) Deadline() (time.Time, bool) { return c.ctx.Deadline() }
+func (c hostJobCtx) Done() <-chan struct{}       { return c.ctx.Done() }
+func (c hostJobCtx) Err() error                  { return c.ctx.Err() }
+func (c hostJobCtx) Value(key any) any           { return c.ctx.Value(key) }
+func (c hostJobCtx) JobID() int64                { return c.inner.JobID() }
+func (c hostJobCtx) Attempt() int                { return c.inner.Attempt() }
+func (c hostJobCtx) Args(into any) error         { return c.inner.Args(into) }
+func (c hostJobCtx) Progress(fraction float64, message string) error {
+	return c.inner.Progress(fraction, message)
+}
+func (c hostJobCtx) Logf(format string, args ...any) error {
+	return c.inner.Logf(format, args...)
+}
+
+type aiAdapter struct{ inner ai.AI }
+
+func (a *aiAdapter) Chat(ctx context.Context, req hostai.ChatRequest) (*hostai.ChatResponse, error) {
+	resp, err := a.inner.Chat(ctx, mapChatReq(req))
+	if err != nil {
+		return nil, mapPolicyErr(err)
+	}
+	return mapChatResp(resp), nil
+}
+
+func (a *aiAdapter) ChatStream(ctx context.Context, req hostai.ChatRequest) (hostai.Stream, error) {
+	s, err := a.inner.ChatStream(ctx, mapChatReq(req))
+	if err != nil {
+		return nil, mapPolicyErr(err)
+	}
+	return streamAdapter{s}, nil
+}
+
+func (a *aiAdapter) Embed(ctx context.Context, req hostai.EmbedRequest) (*hostai.EmbedResponse, error) {
+	resp, err := a.inner.Embed(ctx, ai.EmbedRequest{Model: req.Model, Inputs: req.Inputs})
+	if err != nil {
+		return nil, mapPolicyErr(err)
+	}
+	return &hostai.EmbedResponse{
+		Vectors: resp.Vectors,
+		Usage: hostai.Usage{
+			InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
+			CostMicroUSD: hostpolicy.MicroUSD(resp.Usage.CostMicroUSD),
+			Latency: resp.Usage.Latency, Attempts: resp.Usage.Attempts,
+		},
+	}, nil
+}
+
+func mapChatReq(req hostai.ChatRequest) ai.ChatRequest {
+	out := ai.ChatRequest{Model: req.Model, MaxTokens: req.MaxTokens}
+	for _, m := range req.Messages {
+		out.Messages = append(out.Messages, ai.Message{Role: m.Role, Text: m.Text})
+	}
+	return out
+}
+
+func mapChatResp(resp *ai.ChatResponse) *hostai.ChatResponse {
+	if resp == nil {
+		return nil
+	}
+	return &hostai.ChatResponse{
+		Text: resp.Text,
+		Usage: hostai.Usage{
+			InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
+			CostMicroUSD: hostpolicy.MicroUSD(resp.Usage.CostMicroUSD),
+			Latency: resp.Usage.Latency, Attempts: resp.Usage.Attempts,
+		},
+		Finish: resp.Finish,
+	}
+}
+
+type streamAdapter struct{ inner ai.Stream }
+
+func (s streamAdapter) Recv() (hostai.Chunk, error) {
+	c, err := s.inner.Recv()
+	if err != nil {
+		return hostai.Chunk{}, err
+	}
+	out := hostai.Chunk{Text: c.Text, Finish: c.Finish}
+	if c.Usage != nil {
+		u := hostai.Usage{
+			InputTokens: c.Usage.InputTokens, OutputTokens: c.Usage.OutputTokens,
+			CostMicroUSD: hostpolicy.MicroUSD(c.Usage.CostMicroUSD),
+			Latency: c.Usage.Latency, Attempts: c.Usage.Attempts,
+		}
+		out.Usage = &u
+	}
+	return out, nil
+}
+
+func (s streamAdapter) Close() error { return s.inner.Close() }
+
+type disabledAI struct{}
+
+func (disabledAI) Chat(context.Context, hostai.ChatRequest) (*hostai.ChatResponse, error) {
+	return nil, hostpolicy.ErrPluginDisabled
+}
+func (disabledAI) ChatStream(context.Context, hostai.ChatRequest) (hostai.Stream, error) {
+	return nil, hostpolicy.ErrPluginDisabled
+}
+func (disabledAI) Embed(context.Context, hostai.EmbedRequest) (*hostai.EmbedResponse, error) {
+	return nil, hostpolicy.ErrPluginDisabled
+}
+
+type hostMigrator struct {
+	inner    storage.Migrator
+	pluginID string
+}
+
+func (m hostMigrator) Apply(ms []host.Migration) error {
+	out := make([]storage.Migration, 0, len(ms))
+	for _, x := range ms {
+		out = append(out, storage.Migration{Version: x.Version, Name: x.Name, Up: x.Up})
+	}
+	return m.inner.Apply(m.pluginID, out)
+}
+
+func wrapJobHandler(h hostjobs.Handler) jobs.Handler {
+	return func(jc jobs.Context) error {
+		err := h(hostJobCtx{
+			ctx:   browser.WithJob(ai.WithJob(jc, strconv.FormatInt(jc.JobID(), 10)), strconv.FormatInt(jc.JobID(), 10)),
+			inner: jc,
+		})
+		if hostjobs.IsPermanent(err) {
+			return jobs.Permanent(err)
+		}
+		if d, ok := hostjobs.RetryAfterDelay(err); ok {
+			return jobs.RetryAfter(err, d)
+		}
+		return err
+	}
+}
+
+func mapHostEvent(e events.Event) hostevents.Event {
+	return hostevents.Event{
+		ID: e.ID, Type: e.Type, Source: e.Source, Subject: e.Subject,
+		Payload: e.Payload, CreatedAt: e.CreatedAt,
+	}
+}

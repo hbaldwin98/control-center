@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/hbaldwin98/control-center/internal/core/storage"
@@ -55,7 +56,7 @@ func (l *Log) subscribeDurable(cfg DurableConfig, h Handler, txh TxHandler) (Sub
 	if cfg.Name == "" {
 		return nil, errors.New("events: durable subscription needs a name")
 	}
-	if !validSegment(cfg.Name) && !isDottedName(cfg.Name) {
+	if !validDurableName(cfg.Name) {
 		return nil, fmt.Errorf("events: durable name %q must use the [a-z][a-z0-9_]* segment grammar", cfg.Name)
 	}
 	p, err := CompilePattern(cfg.Pattern)
@@ -87,6 +88,20 @@ func (l *Log) subscribeDurable(cfg DurableConfig, h Handler, txh TxHandler) (Sub
 	sub.cancel = cancel
 	go sub.run(runCtx)
 	return sub, nil
+}
+
+func validDurableName(name string) bool {
+	if validSegment(name) || isDottedName(name) {
+		return true
+	}
+	// Plugin durable names are registered globally as plugin:<id>:<name>.
+	const prefix = "plugin:"
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(name, prefix)
+	id, local, ok := strings.Cut(rest, ":")
+	return ok && validSegment(id) && validSegment(local) && !strings.Contains(local, ":")
 }
 
 // isDottedName allows subscriber names such as "core.notifications.deliver".

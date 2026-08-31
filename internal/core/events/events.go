@@ -183,6 +183,8 @@ const (
 
 	TypeAIUsage = "core.ai.usage"
 
+	TypeBrowserDenied = "core.browser.denied"
+
 	TypePluginEnabled                   = "core.plugin.enabled"
 	TypePluginDisabled                  = "core.plugin.disabled"
 	TypePluginBudgetExceeded            = "core.plugin.budget_exceeded"
@@ -202,6 +204,7 @@ const (
 	SourceEvents        = "core.events"
 	SourceJobs          = "core.jobs"
 	SourceAI            = "core.ai"
+	SourceBrowser       = "core.browser"
 	SourcePolicy        = "core.policy"
 	SourceCredentials   = "core.credentials"
 	SourceNotifications = "core.notifications"

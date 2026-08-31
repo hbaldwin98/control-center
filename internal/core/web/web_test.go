@@ -147,6 +147,35 @@ func (h *harness) bootstrapAdmin() {
 
 const testPassword = "correct horse battery staple"
 
+func TestBootstrapPasswordCreatesAdmin(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "web.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	cfg := config.Default()
+	cfg.Server.Addr = "127.0.0.1:8080"
+	srv, err := New(ctx, store, Deps{DB: store, Config: cfg, BootstrapPassword: testPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exists, err := srv.auth.adminExists(ctx)
+	if err != nil || !exists {
+		t.Fatalf("admin exists=%v err=%v", exists, err)
+	}
+	if rec := httptest.NewRecorder(); true {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(
+			`{"password":"correct horse battery staple"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://127.0.0.1:8080")
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("login: %d %s", rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestFirstRunBootstrapAndLogin(t *testing.T) {
 	h := newHarness(t)
 

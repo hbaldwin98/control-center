@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
@@ -151,5 +152,86 @@ func TestRoutesHideCredentials(t *testing.T) {
 	}
 	if routes[0].AttemptPlan[0].Provider != "fake" || routes[0].AttemptPlan[0].Model != "echo" {
 		t.Fatalf("%+v", routes[0])
+	}
+}
+
+func TestChatAdmittedBeforeDisableStillSettles(t *testing.T) {
+	ctx := context.Background()
+	st, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "ai.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	bus, err := events.New(st, st, events.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, err := policy.New(st, st, bus, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	creds, err := credentials.New(st, st, bus, credentials.Options{Keys: map[int][]byte{1: key}, Active: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actx := credentials.WithActor(ctx, "admin")
+	if _, err := creds.CreateAPIKey(actx, credentials.APIKeyInput{
+		ID: "fake-key", Provider: "fake", Secret: credentials.SecretInput{Value: "test-token"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pol.Register(ctx, "hello", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := pol.Enable(ctx, "hello", "test", "setup"); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := compileRoutes(File{Routes: map[string]RouteYAML{
+		"cheap-chat": {
+			Capabilities: []string{"chat"}, MaxInputTokens: 128, MaxOutputTokens: 64,
+			Attempts: []AttemptYAML{{
+				Provider: "fake", Model: "echo", Credential: "fake-key",
+				InputMicroUSDPerMillion: 1_000_000, OutputMicroUSDPerMillion: 2_000_000,
+			}},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold := NewHoldFake()
+	svc, err := New(st, st, bus, pol, creds, Options{Routes: routes, Providers: []Provider{hold}, Refs: creds})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.Chat(WithPlugin(context.Background(), "hello"), ChatRequest{
+			Model: "cheap-chat", Messages: []Message{{Role: "user", Text: "hi"}},
+		})
+		done <- err
+	}()
+	select {
+	case <-hold.Started():
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider did not start")
+	}
+	if err := pol.Disable(ctx, "hello", "test", "mid"); err != nil {
+		t.Fatal(err)
+	}
+	hold.Release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("chat did not finish")
+	}
+	page, err := svc.Calls(ctx, CallQuery{PluginID: "hello"})
+	if err != nil || len(page.Calls) != 1 || page.Calls[0].Status != "succeeded" || page.Calls[0].SettledMicroUSD <= 0 {
+		t.Fatalf("%+v %v", page, err)
 	}
 }

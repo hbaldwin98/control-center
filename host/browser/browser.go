@@ -1,0 +1,52 @@
+// Package browser is the plugin-facing host-managed headless session surface.
+// Plugins pass the DNS names they intend to touch; they never import an engine.
+package browser
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+// Browser opens allowlisted sessions. The host owns the engine and teardown.
+type Browser interface {
+	Open(ctx context.Context, opts OpenOptions) (Session, error)
+}
+
+// OpenOptions names the hosts this session may touch. The list is required.
+type OpenOptions struct {
+	// AllowedHosts is required and nonempty. Every navigation, redirect, subresource,
+	// and Get is checked against it. Hosts are lowercase DNS names, no ports, no IPs.
+	AllowedHosts []string
+}
+
+// Session is one isolated browser context: cookies, pages, and cache.
+type Session interface {
+	NewPage(ctx context.Context) (Page, error)
+	Close(ctx context.Context) error
+}
+
+// Page is one document. Conversation and DOM state belong here.
+type Page interface {
+	Goto(ctx context.Context, url string) error
+	WaitFor(ctx context.Context, selector string, d time.Duration) error
+	Content(ctx context.Context) (string, error)
+	Get(ctx context.Context, url string) (Resource, error)
+	Close(ctx context.Context) error
+}
+
+// Resource is one allowlisted fetch (image, static file).
+type Resource struct {
+	URL    string
+	MIME   string
+	Body   []byte
+	Status int
+}
+
+// Errors a plugin must handle. Disabled means stop; Denied means fix the URL.
+var (
+	ErrInvalidAllowlist = errors.New("browser: allowlist is empty or invalid")
+	ErrDenied           = errors.New("browser: url denied")
+	ErrLimit            = errors.New("browser: session or page limit")
+	ErrEngine           = errors.New("browser: engine failed")
+)

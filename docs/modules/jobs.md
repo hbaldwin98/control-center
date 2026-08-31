@@ -146,7 +146,8 @@ be reused after that job reaches a terminal state.
 Cron accepts standard five-field `minute hour day-of-month month day-of-week` syntax,
 with no seconds or aliases. `TimeZone` must be an explicit IANA zone. The scheduler stores
 the last considered schedule slot and never catches up missed slots after downtime or
-disable. A nonexistent local time during the spring DST jump is skipped; a repeated local
+disable. Enable calls `CatchUpSchedules` before re-registering handlers so the current
+minute is marked considered without enqueueing. A nonexistent local time during the spring DST jump is skipped; a repeated local
 time during the autumn fallback runs once, identified by its local schedule fields and
 zone.
 
