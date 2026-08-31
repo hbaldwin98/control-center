@@ -18,6 +18,7 @@ import {
   api,
   useSnapshot,
 } from "@cc/ui";
+import { NotificationSettings } from "./NotificationSettings";
 
 type Credential = {
   id: string;
@@ -76,6 +77,7 @@ export function Settings() {
         <ReauthCard />
         <OAuthCard onChanged={creds.reload} />
         <CreateKeyCard onChanged={creds.reload} />
+        <NotificationSettings />
 
         <div className="cc-group__title">Credentials</div>
         <Async

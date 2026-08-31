@@ -1,0 +1,332 @@
+import { useCallback, useState, type FormEvent } from "react";
+import {
+  ApiError,
+  Async,
+  Badge,
+  Button,
+  Callout,
+  Card,
+  Checkbox,
+  Field,
+  Hint,
+  Input,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+  api,
+  useSnapshot,
+} from "@cc/ui";
+
+type Rule = {
+  id: string;
+  enabled: boolean;
+  match: string;
+  where: string;
+  channels: string[];
+  title: string;
+  body: string;
+  url: string;
+  throttleSeconds: number;
+};
+
+type Channel = {
+  id: string;
+  kind: string;
+  credentialId: string;
+  enabled: boolean;
+  settings: Record<string, string>;
+};
+
+type Health = {
+  channelId: string;
+  state: string;
+  lastError: string;
+  lastAttemptAt: string | null;
+};
+
+export function NotificationSettings() {
+  const rules = useSnapshot<Rule[]>(
+    useCallback((signal) => api.snapshot<Rule[]>("/api/admin/notifications/rules", { signal }), []),
+    { events: "core.notification.config_changed" },
+  );
+  const channels = useSnapshot<Channel[]>(
+    useCallback((signal) => api.snapshot<Channel[]>("/api/admin/notifications/channels", { signal }), []),
+    { events: "core.notification.config_changed" },
+  );
+  const health = useSnapshot<Health[]>(
+    useCallback((signal) => api.snapshot<Health[]>("/api/admin/notifications/health", { signal }), []),
+    { events: "core.notification.delivery_changed" },
+  );
+
+  return (
+    <Stack>
+      <div className="cc-group__title">Notification channels</div>
+      <Hint>Secrets live in credentials. A channel stores a credential id, never the token.</Hint>
+      <ChannelForm onChanged={channels.reload} />
+      <Async state={channels} loading="Loading channels…" empty="No channels.">
+        {(list) => (
+          <Stack>
+            {list.map((c) => (
+              <ChannelCard
+                key={c.id}
+                channel={c}
+                health={health.status === "ready" ? health.data.find((h) => h.channelId === c.id) : undefined}
+                onChanged={() => {
+                  channels.reload();
+                  health.reload();
+                }}
+              />
+            ))}
+          </Stack>
+        )}
+      </Async>
+
+      <div className="cc-group__title">Notification rules</div>
+      <RuleForm onChanged={rules.reload} />
+      <Async state={rules} loading="Loading rules…" empty="No rules.">
+        {(list) => (
+          <Stack>
+            {list.map((r) => (
+              <RuleCard key={r.id} rule={r} onChanged={rules.reload} />
+            ))}
+          </Stack>
+        )}
+      </Async>
+    </Stack>
+  );
+}
+
+function formatErr(err: unknown): string {
+  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+}
+
+function ChannelForm({ onChanged }: { onChanged: () => void }) {
+  const [id, setId] = useState("");
+  const [kind, setKind] = useState("ntfy");
+  const [topic, setTopic] = useState("");
+  const [server, setServer] = useState("");
+  const [endpoint, setEndpoint] = useState("");
+  const [credentialId, setCredentialId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const settings: Record<string, string> = {};
+    if (kind === "ntfy") {
+      settings.topic = topic;
+      if (server) settings.server = server;
+    }
+    if (kind === "webpush") settings.endpoint = endpoint;
+    void api
+      .put(`/api/admin/notifications/channels/${encodeURIComponent(id)}`, {
+        kind,
+        enabled: true,
+        credentialId,
+        settings,
+      })
+      .then(() => {
+        setId("");
+        setTopic("");
+        setServer("");
+        setEndpoint("");
+        setCredentialId("");
+        onChanged();
+      })
+      .catch((err) => setError(formatErr(err)));
+  };
+
+  return (
+    <Card title="Add channel">
+      <form onSubmit={submit}>
+        <Stack>
+          {error ? <Callout tone="danger">{error}</Callout> : null}
+          <Field label="Id">
+            <Input value={id} onChange={(e) => setId(e.target.value)} required pattern="[a-z][a-z0-9_.]*" />
+          </Field>
+          <Field label="Kind">
+            <Select value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="ntfy">ntfy</option>
+              <option value="webpush">webpush</option>
+            </Select>
+          </Field>
+          {kind === "ntfy" ? (
+            <>
+              <Field label="Topic">
+                <Input value={topic} onChange={(e) => setTopic(e.target.value)} required />
+              </Field>
+              <Field label="Server" hint="Defaults to https://ntfy.sh">
+                <Input value={server} onChange={(e) => setServer(e.target.value)} />
+              </Field>
+            </>
+          ) : (
+            <Field label="Push endpoint">
+              <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} required />
+            </Field>
+          )}
+          <Field label="Credential id" hint="Optional API key for the channel.">
+            <Input value={credentialId} onChange={(e) => setCredentialId(e.target.value)} />
+          </Field>
+          <Button type="submit">Save channel</Button>
+        </Stack>
+      </form>
+    </Card>
+  );
+}
+
+function ChannelCard({
+  channel,
+  health,
+  onChanged,
+}: {
+  channel: Channel;
+  health?: Health | undefined;
+  onChanged: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <Card
+      title={channel.id}
+      actions={
+        <>
+          <Badge>{channel.kind}</Badge>
+          <Badge tone={channel.enabled ? "ok" : "warn"}>{channel.enabled ? "on" : "off"}</Badge>
+          {health ? <Badge tone={health.state === "failed" ? "danger" : "ok"}>{health.state}</Badge> : null}
+        </>
+      }
+    >
+      <Stack>
+        {channel.credentialId ? <Hint>Credential {channel.credentialId}</Hint> : null}
+        {health?.lastError ? <Callout tone="danger">{health.lastError}</Callout> : null}
+        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {channel.id !== "inbox" ? (
+          <Button
+            size="sm"
+            onClick={() => {
+              void api
+                .del(`/api/admin/notifications/channels/${encodeURIComponent(channel.id)}`)
+                .then(onChanged)
+                .catch((err) => setError(formatErr(err)));
+            }}
+          >
+            Delete
+          </Button>
+        ) : (
+          <Hint>Built-in inbox channel.</Hint>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
+function RuleForm({ onChanged }: { onChanged: () => void }) {
+  const [id, setId] = useState("");
+  const [match, setMatch] = useState("*.alert");
+  const [title, setTitle] = useState("{event.type}");
+  const [body, setBody] = useState("{event.subject}");
+  const [channels, setChannels] = useState("inbox");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    void api
+      .put(`/api/admin/notifications/rules/${encodeURIComponent(id)}`, {
+        enabled: true,
+        match,
+        where: "",
+        channels: channels.split(",").map((s) => s.trim()).filter(Boolean),
+        title,
+        body,
+        url: "",
+        throttleSeconds: 0,
+      })
+      .then(() => {
+        setId("");
+        onChanged();
+      })
+      .catch((err) => setError(formatErr(err)));
+  };
+
+  return (
+    <Card title="Add rule">
+      <form onSubmit={submit}>
+        <Stack>
+          {error ? <Callout tone="danger">{error}</Callout> : null}
+          <Field label="Id">
+            <Input value={id} onChange={(e) => setId(e.target.value)} required />
+          </Field>
+          <Field label="Match">
+            <Input value={match} onChange={(e) => setMatch(e.target.value)} required />
+          </Field>
+          <Field label="Title">
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+          </Field>
+          <Field label="Body">
+            <Textarea value={body} onChange={(e) => setBody(e.target.value)} />
+          </Field>
+          <Field label="Channels" hint="Comma-separated channel ids.">
+            <Input value={channels} onChange={(e) => setChannels(e.target.value)} required />
+          </Field>
+          <Button type="submit">Save rule</Button>
+        </Stack>
+      </form>
+    </Card>
+  );
+}
+
+function RuleCard({ rule, onChanged }: { rule: Rule; onChanged: () => void }) {
+  const [enabled, setEnabled] = useState(rule.enabled);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <Card
+      title={rule.id}
+      actions={
+        <>
+          <Badge>{rule.match}</Badge>
+          <Badge tone={enabled ? "ok" : "warn"}>{enabled ? "on" : "off"}</Badge>
+        </>
+      }
+    >
+      <Stack>
+        <Hint>
+          {rule.title} → {rule.channels.join(", ")}
+          {rule.throttleSeconds > 0 ? ` · throttle ${rule.throttleSeconds}s` : ""}
+        </Hint>
+        {error ? <Callout tone="danger">{error}</Callout> : null}
+        <Row>
+          <Checkbox
+            label="Enabled"
+            checked={enabled}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setEnabled(next);
+              void api
+                .put(`/api/admin/notifications/rules/${encodeURIComponent(rule.id)}`, {
+                  ...rule,
+                  enabled: next,
+                })
+                .then(onChanged)
+                .catch((err) => {
+                  setEnabled(rule.enabled);
+                  setError(formatErr(err));
+                });
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={() => {
+              void api
+                .del(`/api/admin/notifications/rules/${encodeURIComponent(rule.id)}`)
+                .then(onChanged)
+                .catch((err) => setError(formatErr(err)));
+            }}
+          >
+            Delete
+          </Button>
+        </Row>
+      </Stack>
+    </Card>
+  );
+}

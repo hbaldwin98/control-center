@@ -20,6 +20,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
+	"github.com/hbaldwin98/control-center/internal/core/notifications"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
@@ -149,6 +150,13 @@ func run() error {
 		return err
 	}
 
+	notes, err := notifications.New(ctx, store, store, bus, creds, creds, notifications.Options{})
+	if err != nil {
+		return err
+	}
+	notes.Start(ctx)
+	defer notes.Stop()
+
 	if _, err := os.Stat(*staticDir); err != nil {
 		slog.Warn("no frontend build found; serving placeholder", "dir", *staticDir)
 		*staticDir = ""
@@ -169,15 +177,16 @@ func run() error {
 	defer func() { _ = ph.Stop(context.Background()) }()
 
 	srv, err := web.New(ctx, store, web.Deps{
-		DB:          store,
-		Config:      cfg,
-		Events:      bus,
-		Blobs:       blobs,
-		Policy:      pol,
-		Jobs:        jq,
-		Credentials: creds,
-		AI:          aisvc,
-		PluginHost:  ph,
+		DB:            store,
+		Config:        cfg,
+		Events:        bus,
+		Blobs:         blobs,
+		Policy:        pol,
+		Jobs:          jq,
+		Credentials:   creds,
+		AI:            aisvc,
+		Notifications: notes,
+		PluginHost:    ph,
 		Plugins: func(ctx context.Context) []web.PluginDescriptor {
 			ps := ph.ShellPlugins(ctx)
 			out := make([]web.PluginDescriptor, 0, len(ps))

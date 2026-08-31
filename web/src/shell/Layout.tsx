@@ -10,6 +10,7 @@ const coreNav = [
   { path: "/plugins", label: "Plugins" },
   { path: "/jobs", label: "Jobs" },
   { path: "/events", label: "Events" },
+  { path: "/inbox", label: "Inbox" },
   { path: "/costs", label: "Costs" },
   { path: "/models", label: "Models" },
   { path: "/settings", label: "Settings" },

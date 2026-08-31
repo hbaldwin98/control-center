@@ -50,6 +50,7 @@ const PRESETS: readonly (readonly [string, string])[] = [
   ["core.ai.**", "AI"],
   ["core.browser.**", "Browser"],
   ["**.alert", "Alerts"],
+  ["core.notification.**", "Notifications"],
 ];
 
 /** The live event log, filterable by dot-segment pattern. */

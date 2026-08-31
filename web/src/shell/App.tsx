@@ -13,6 +13,7 @@ import { Models } from "../core/Models";
 import { PluginDetail } from "../core/PluginDetail";
 import { Plugins } from "../core/Plugins";
 import { Settings } from "../core/Settings";
+import { Inbox } from "../core/Inbox";
 
 import { FatalScreen, LoadingScreen, LoginScreen, SetupScreen } from "./Gate";
 import { Layout } from "./Layout";
@@ -78,6 +79,7 @@ function Shell({
           <Route path="/events" element={<Events />} />
           <Route path="/costs" element={<Costs />} />
           <Route path="/models" element={<Models />} />
+          <Route path="/inbox" element={<Inbox />} />
           <Route path="/settings" element={<Settings />} />
           {pluginRoutes.map((r) => (
             <Route key={r.key} path={r.path} element={r.element} />

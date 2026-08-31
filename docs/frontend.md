@@ -203,7 +203,8 @@ affected resource rather than reconstructing it from partial event payloads.
 | Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
 | Models | AI providers, the model catalogs they publish, and the routes plugins name |
-| Settings | credentials (with re-auth), API keys, and OAuth logins |
+| Inbox | rule-matched notifications, mark-read, links into the rest of the shell |
+| Settings | credentials (with re-auth), API keys, OAuth logins, notification rules and channels |
 
 The dashboard is a grid of plugin tiles. Each tile carries the plugin's state, what it has
 spent today against its daily budget, its open and failed work, its live indicator and

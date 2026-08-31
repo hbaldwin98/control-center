@@ -27,31 +27,30 @@ import {
   Sparkline,
   Stack,
   Table,
-  Time,
   api,
   formatProgress,
   useActivity,
-  useEvents,
   useSnapshot,
   useStreamStatus,
 } from "@cc/ui";
-import type { Event, PluginModule, StreamStatus } from "@cc/ui";
+import type { PluginModule, StreamStatus } from "@cc/ui";
 import { PluginSurface } from "./PluginSurface";
 import { liveLabel, liveState } from "./live";
 import { isFailure, isOpen, verdictOf } from "./types";
 import type { Job, PluginState, Verdict } from "./types";
 
-/** Events an operator should not have to go looking for. */
-function isAlert(e: Event): boolean {
-  return (
-    e.type.endsWith(".alert") ||
-    e.type === "core.browser.denied" ||
-    e.type === "core.plugin.disabled" ||
-    e.type === "core.plugin.budget_exceeded" ||
-    e.type === "core.events.subscription_paused" ||
-    e.type === "core.job.dead"
-  );
-}
+type InboxPage = {
+  notifications: {
+    id: string;
+    title: string;
+    body: string;
+    subject: string;
+    collapsed: number;
+    createdAt: string;
+    url: string;
+  }[];
+  nextAfter: string;
+};
 
 const VERDICTS: Record<Verdict, { tone: "ok" | "warn" | "danger"; label: string }> = {
   accounting: { tone: "danger", label: "accounting failed" },
@@ -72,7 +71,10 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
     useCallback((signal) => api.snapshot<Job[]>("/api/jobs?limit=200", { signal }), []),
     { events: "core.job.**" },
   );
-  const alerts = useEvents("**", { filter: isAlert, limit: 20 });
+  const inbox = useSnapshot<InboxPage>(
+    useCallback((signal) => api.snapshot<InboxPage>("/api/notifications?limit=20", { signal }), []),
+    { events: "core.notification.**" },
+  );
 
   const modules = useMemo(() => new Map(plugins.map((m) => [m.id, m])), [plugins]);
   const rows = states.status === "ready" ? states.data : [];
@@ -93,7 +95,8 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   const spentToday = rows.reduce((sum, p) => sum + p.committedDay, 0);
   const heldToday = rows.reduce((sum, p) => sum + p.reservedDay, 0);
   const enabledCount = rows.filter((p) => p.enabled).length;
-  const lastAlert = alerts.at(-1);
+  const alerts = inbox.status === "ready" ? inbox.data.notifications : [];
+  const lastAlert = alerts[0];
   const attention = rows.filter(
     (p) => verdictOf(p, byPlugin.failed.get(p.pluginId) ?? 0) !== "ok",
   ).length;
@@ -138,8 +141,8 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
               lastAlert ? (
                 <RelativeTime at={lastAlert.createdAt} prefix="last" />
               ) : (
-                "since this page opened"
-              )
+              "in the inbox"
+            )
             }
             tone={alerts.length > 0 ? "warn" : "neutral"}
           />
@@ -202,36 +205,31 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
           </Async>
         </Card>
 
-        <Card title="Recent alerts" actions={<Hint>live, since this page opened</Hint>}>
-          {alerts.length === 0 ? (
+        <Card title="Recent alerts" actions={<Hint><Link to="/inbox">inbox</Link></Hint>}>
+          {inbox.status !== "ready" ? (
+            <EmptyState>Loading inbox…</EmptyState>
+          ) : alerts.length === 0 ? (
             <EmptyState>No alerts yet.</EmptyState>
           ) : (
             <Table
               head={
                 <>
                   <th>When</th>
-                  <th>Type</th>
-                  <th>Source</th>
+                  <th>Title</th>
                   <th>Subject</th>
                 </>
               }
             >
-              {[...alerts].reverse().map((e) => (
-                <tr key={e.id}>
+              {alerts.map((n) => (
+                <tr key={n.id}>
                   <td>
-                    <Time iso={e.createdAt} timeOnly />
+                    <RelativeTime at={n.createdAt} />
                   </td>
                   <td>
-                    <code>{e.type}</code>
+                    {n.url ? <Link to={n.url}>{n.title}</Link> : n.title}
+                    {n.body ? <div className="cc-hint">{n.body}</div> : null}
                   </td>
-                  <td>
-                    {modules.has(e.source) ? (
-                      <Link to={`/plugins/${encodeURIComponent(e.source)}`}>{e.source}</Link>
-                    ) : (
-                      <code>{e.source}</code>
-                    )}
-                  </td>
-                  <td>{e.subject || <Dash />}</td>
+                  <td>{n.subject || <Dash />}</td>
                 </tr>
               ))}
             </Table>

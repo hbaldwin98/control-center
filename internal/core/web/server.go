@@ -16,6 +16,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
+	"github.com/hbaldwin98/control-center/internal/core/notifications"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
@@ -54,6 +55,9 @@ type Deps struct {
 
 	// AI is host-managed model routing and usage. Query returns no credentials.
 	AI *ai.Service
+
+	// Notifications turns committed events into inbox rows and channel deliveries.
+	Notifications *notifications.Service
 
 	// Plugins reports the registered plugins the shell reconciles against.
 	Plugins func(context.Context) []PluginDescriptor
@@ -189,6 +193,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRoutePut))
 	s.mux.HandleFunc("DELETE /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRouteDelete))
 	s.mux.HandleFunc("GET /api/ai/calls", s.authenticated(s.handleAICalls))
+
+	s.mux.HandleFunc("GET /api/notifications", s.authenticated(s.handleInboxList))
+	s.mux.HandleFunc("GET /api/notifications/{id}", s.authenticated(s.handleInboxGet))
+	s.mux.HandleFunc("POST /api/notifications/{id}/read", s.authenticated(s.handleInboxRead))
+
+	s.mux.HandleFunc("GET /api/admin/notifications/rules", s.authenticated(s.handleNotifRules))
+	s.mux.HandleFunc("PUT /api/admin/notifications/rules/{id}", s.authenticated(s.handleNotifRulePut))
+	s.mux.HandleFunc("DELETE /api/admin/notifications/rules/{id}", s.authenticated(s.handleNotifRuleDelete))
+	s.mux.HandleFunc("GET /api/admin/notifications/channels", s.authenticated(s.handleNotifChannels))
+	s.mux.HandleFunc("PUT /api/admin/notifications/channels/{id}", s.authenticated(s.handleNotifChannelPut))
+	s.mux.HandleFunc("DELETE /api/admin/notifications/channels/{id}", s.authenticated(s.handleNotifChannelDelete))
+	s.mux.HandleFunc("GET /api/admin/notifications/health", s.authenticated(s.handleNotifHealth))
 
 	s.mux.HandleFunc("/", s.serveStatic)
 }

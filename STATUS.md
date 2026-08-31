@@ -14,7 +14,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 6 | `pluginhost` + `host` | ✅ | Registry, facade, lifecycle, enforcement matrix all pass. |
 | 7 | `hello` | ✅ | The validating plugin passes its acceptance test. |
 | 8 | `browser` | ✅ | Host-managed sessions, allowlist, fake backend, and kill-switch close all pass. |
-| 9 | `notifications` | ⬜ | Channels use credential entries; rules and defaults deliver committed events. |
+| 9 | `notifications` | ✅ | Channels use credential entries; rules and defaults deliver committed events. |
 | 10 | `bidrl` | ⬜ | The first real plugin. |
 | 11 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
 
@@ -170,6 +170,18 @@ administrator-owned providers, live model discovery, and a second way to authori
 | The pinned path completes itself when this server answers there | ✅ | Only when the request's own address is the pinned one; anywhere else it is a frontend route and the state is untouched. |
 | Token import from an existing local `codex login` | ✅ | Refresh token required; the shared-rotation caveat is stated in the UI. |
 | Models screen: providers, catalogs, route editor | ✅ | Attempts pick a discovered model, prices prefill, the reservation is shown before saving. |
+
+## Milestone 9 — `notifications` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| Durable `core.notifications` subscriber, `FromNow` after defaults | ✅ | `SubscribeDurableTx`; `core.notification.*` never re-evaluated |
+| Default rules for alerts, dead jobs, budget, accounting, reauth, paused subscribers | ✅ | Inbox channel seeded |
+| Throttle windows collapse same subject; ready after window close | ✅ | Structured uniqueness keys (JSON) |
+| External ntfy / webpush sends with leases, 8 attempts, credential tokens | ✅ | Inbox write never calls out |
+| Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen |
+
+---
 
 ## Deferred by design (not v1)
 
