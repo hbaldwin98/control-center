@@ -126,12 +126,15 @@ func run() error {
 	jq.Start(ctx)
 	defer jq.Stop()
 
-	br, err := browser.New(bus, pol, browser.Options{
-		Engine: browser.NewFake(map[string]http.Handler{
-			"hello.test": browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
-		}),
-	})
+	engine, err := newBrowserEngine(cfg)
 	if err != nil {
+		return err
+	}
+	br, err := browser.New(bus, pol, browser.Options{Engine: engine})
+	if err != nil {
+		if c, ok := engine.(interface{ Close() error }); ok {
+			_ = c.Close()
+		}
 		return err
 	}
 	defer br.Close()
@@ -203,6 +206,19 @@ func run() error {
 	}
 
 	return srv.ListenAndServe(ctx)
+}
+
+func newBrowserEngine(cfg config.Config) (browser.Engine, error) {
+	switch strings.ToLower(cfg.Browser.Engine) {
+	case "playwright":
+		slog.Info("browser engine playwright")
+		return browser.NewPlaywright()
+	default:
+		slog.Info("browser engine fake")
+		return browser.NewFake(map[string]http.Handler{
+			"hello.test": browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
+		}), nil
+	}
 }
 
 func parseLevel(s string) (slog.Level, error) {

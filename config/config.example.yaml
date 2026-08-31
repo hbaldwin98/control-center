@@ -56,5 +56,6 @@ ai:
   models: "config/models.yaml"
 
 browser:
-  # v1 is the in-process Fake. Plugins never select an engine.
+  # fake: in-process, no sockets (default, tests, hello).
+  # playwright: host-owned Chromium. Plugins never select an engine.
   engine: fake

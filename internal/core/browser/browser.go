@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -127,6 +128,9 @@ func (s *Service) Close() {
 	s.mu.Unlock()
 	for _, id := range ids {
 		_ = s.ClosePlugin(context.Background(), id)
+	}
+	if c, ok := s.opts.Engine.(io.Closer); ok {
+		_ = c.Close()
 	}
 }
 

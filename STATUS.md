@@ -130,6 +130,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 |---|---|---|
 | `host/browser` SDK: Open, Session, Page, allowlist, sentinels | ✅ | Plugins never import Playwright/chromedp/rod. |
 | Fake engine | ✅ | In-process `http.Handler` per DNS name; no sockets, no Chromium. |
+| Playwright engine | ✅ | `browser.engine: playwright`; Chromium + connect-time SSRF proxy. |
 | URL policy | ✅ | HTTPS only; plugin allowlist; no userinfo/IPs/ports; fail-closed. |
 | Limits | ✅ | 1 session/plugin, 4 pages/session, 5 MiB document, 10 MiB resource. |
 | Kill switch | ✅ | Disable rejects new I/O and closes admitted sessions; in-flight Goto fails. |

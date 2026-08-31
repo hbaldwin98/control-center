@@ -234,11 +234,22 @@ func (p *page) checkSubresources(ctx context.Context, pageURL *url.URL, doc stri
 		if abs.Scheme == "" {
 			abs.Scheme = "https"
 		}
+		if !networkFetch(abs) {
+			continue
+		}
 		if err := p.gateURL(ctx, abs); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func networkFetch(u *url.URL) bool {
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "ws", "wss", "ftp", "file":
+		return true
+	}
+	return false
 }
 
 func (p *page) WaitFor(ctx context.Context, selector string, d time.Duration) error {
@@ -254,9 +265,10 @@ func (p *page) WaitFor(ctx context.Context, selector string, d time.Duration) er
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		p.mu.Lock()
-		doc := p.html
-		p.mu.Unlock()
+		doc, err := p.document(op)
+		if err != nil {
+			return err
+		}
 		ok, err := htmlMatches(doc, selector)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrEngine, err)
@@ -276,13 +288,38 @@ func (p *page) Content(ctx context.Context) (string, error) {
 	if err := p.admit(ctx); err != nil {
 		return "", err
 	}
-	p.mu.Lock()
-	doc := p.html
-	p.mu.Unlock()
+	doc, err := p.document(ctx)
+	if err != nil {
+		return "", err
+	}
 	if len(doc) > p.sess.svc.opts.MaxDocumentBytes {
 		return "", ErrLimit
 	}
 	return doc, nil
+}
+
+// liveHTML is implemented by engines that keep a live document (Playwright).
+type liveHTML interface {
+	Content(ctx context.Context) (string, error)
+}
+
+func (p *page) document(ctx context.Context) (string, error) {
+	if live, ok := p.engine.(liveHTML); ok {
+		doc, err := live.Content(ctx)
+		if err != nil {
+			if p.sess.ctx.Err() != nil {
+				return "", ErrClosed
+			}
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("%w: %v", ErrEngine, err)
+		}
+		return doc, nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.html, nil
 }
 
 func (p *page) Get(ctx context.Context, raw string) (Resource, error) {

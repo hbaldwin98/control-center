@@ -26,6 +26,11 @@ type harness struct {
 
 func newHarness(t *testing.T, routes map[string]http.Handler) *harness {
 	t.Helper()
+	return newHarnessWithEngine(t, NewFake(routes))
+}
+
+func newHarnessWithEngine(t *testing.T, eng Engine) *harness {
+	t.Helper()
 	ctx := context.Background()
 	store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "cc.db")})
 	if err != nil {
@@ -48,7 +53,7 @@ func newHarness(t *testing.T, routes map[string]http.Handler) *harness {
 	if err := pol.Enable(ctx, "hello", "test", "go"); err != nil {
 		t.Fatal(err)
 	}
-	svc, err := New(bus, pol, Options{Engine: NewFake(routes)})
+	svc, err := New(bus, pol, Options{Engine: eng})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +159,24 @@ func TestSubresourceOffAllowlistIsDenied(t *testing.T) {
 	}
 	if err := page.Goto(h.ctxHello(), "https://hello.test/"); !errors.Is(err, ErrDenied) {
 		t.Fatalf("subresource: %v", err)
+	}
+}
+
+func TestInlineDataSubresourceIsAllowed(t *testing.T) {
+	h := newHarness(t, map[string]http.Handler{
+		"hello.test": HTMLHandler(`<html><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></html>`),
+	})
+	sess, err := h.svc.Open(h.ctxHello(), OpenOptions{AllowedHosts: []string{"hello.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close(h.ctxHello())
+	page, err := sess.NewPage(h.ctxHello())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Goto(h.ctxHello(), "https://hello.test/"); err != nil {
+		t.Fatal(err)
 	}
 }
 

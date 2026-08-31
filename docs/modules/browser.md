@@ -124,7 +124,7 @@ subresource — is checked before the request leaves the host:
 
 | Rule | Why |
 |---|---|
-| Scheme `https` only | Cleartext and `file:`, `javascript:`, `data:` are not fetch targets. |
+| Scheme `https` only | Cleartext and `file:`, `javascript:`, `data:` are not fetch targets. Inline `data:` / `blob:` in HTML are not network fetches and are not gated. |
 | Host is in `AllowedHosts` | Plugin-supplied allowlist; the host does not hard-code any site. |
 | No userinfo, no IP literals, no brackets | Stops `https://user@evil/` and literal-address bypasses. |
 | Port omitted or `443` | Alternate ports are a common allowlist escape. |
@@ -183,9 +183,19 @@ browser profile and no credential-backed login jar.
 Tests and local development use an in-process `Fake` that never launches Chromium and
 never opens a real socket. The test supplies an `http.Handler` and the DNS names that map
 to it; `Goto("https://hello.test/…")` is allowlist-checked and then served from that
-handler. There is no loopback or `http://` exception in the production engine. `hello`
-and the module tests use `Fake`; the production engine is selected in host config, not by
-the plugin. Fake still honours disable and context cancel.
+handler. `hello` and the module tests use `Fake`. Fake still honours disable and context
+cancel.
+
+## Production engine
+
+Host config `browser.engine: playwright` launches one Chromium for the process. Sessions
+are isolated browser contexts; cookies, storage, and cache die with `Close`. Every
+navigation, redirect, subresource, and `Get` still goes through the allowlist interceptor.
+At connect time the engine resolves DNS and rejects private, loopback, link-local, and
+CGNAT addresses — there is no loopback or `http://` exception. Missing Chromium is
+installed on first start (`chromium` only), or ahead of time with
+`go run github.com/mxschmitt/playwright-go/cmd/playwright@v0.6201.1 install chromium`.
+Plugins never select this; CI still rejects a plugin that imports Playwright.
 
 ---
 

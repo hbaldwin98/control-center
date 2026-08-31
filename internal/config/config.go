@@ -70,7 +70,8 @@ type AI struct {
 
 // Browser selects the headless engine. Plugins never choose this.
 type Browser struct {
-	// Engine is "fake" (in-process, no sockets) or empty (defaults to fake).
+	// Engine is "fake" (in-process, no sockets) or "playwright" (Chromium). Empty
+	// defaults to fake.
 	Engine string `yaml:"engine"`
 }
 
@@ -201,9 +202,9 @@ func (c Config) Validate() error {
 		return errors.New("config: blobs.maxObjectBytes exceeds blobs.maxScopeBytes")
 	}
 	switch strings.ToLower(c.Browser.Engine) {
-	case "fake":
+	case "fake", "playwright":
 	default:
-		return fmt.Errorf("config: browser.engine %q is not supported (v1 is fake)", c.Browser.Engine)
+		return fmt.Errorf("config: browser.engine %q is not supported (fake or playwright)", c.Browser.Engine)
 	}
 	return nil
 }

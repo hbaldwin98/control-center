@@ -39,8 +39,9 @@ type Resource struct {
 	Status int
 }
 
-// Engine creates isolated sessions. Fake never opens a socket; a production engine
-// would launch Chromium and call checkResolvedIP at connect time.
+// Engine creates isolated sessions. Fake never opens a socket. Playwright launches
+// Chromium and calls checkResolvedIP at connect time. An Engine that also implements
+// io.Closer is shut down with the Service.
 type Engine interface {
 	NewSession(ctx context.Context, pluginID string) (EngineSession, error)
 }

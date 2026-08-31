@@ -155,3 +155,15 @@ func TestDeriveFillsZeroDurationsAndPool(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBrowserEnginePlaywrightAndUnknown(t *testing.T) {
+	cfg := Default()
+	cfg.Browser.Engine = "playwright"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Browser.Engine = "chromedp"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unknown engine must fail")
+	}
+}
