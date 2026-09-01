@@ -200,6 +200,176 @@ func TestOAuthBeginAndCallback(t *testing.T) {
 	}
 }
 
+// A pinned-redirect sign-in is a trip through the provider's own login page, which can
+// easily outlast the five-minute reauthentication window. Spending the password at the
+// beginning and finishing on the one-time state matches how the served callback already
+// works; requiring it again at the end would strand the administrator mid-flow.
+func TestOAuthManualCompletionSurvivesTheReauthWindow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "tok-live", "refresh_token": "ref-live", "expires_in": 3600,
+		})
+	}))
+	t.Cleanup(ts.Close)
+
+	const pinned = "http://localhost:1455/auth/callback"
+	h, creds := newCredsHarness(t, map[string]credentials.OAuthProvider{
+		"codex": {
+			AuthURL: ts.URL + "/auth", TokenURL: ts.URL, ClientID: "cid",
+			RedirectURI: pinned, Scopes: []string{"openid"},
+		},
+	})
+	h.bootstrapAdmin()
+
+	// Beginning still costs a password: it is the step that will create a credential.
+	if rec := h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/begin", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("begin without reauth: %d %s", rec.Code, rec.Body)
+	}
+	h.reauth()
+	rec := h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/begin", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("begin: %d %s", rec.Code, rec.Body)
+	}
+	var begin struct {
+		AuthURL string `json:"authUrl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &begin); err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(begin.AuthURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := u.Query().Get("state")
+	if got := u.Query().Get("redirect_uri"); got != pinned {
+		t.Fatalf("redirect_uri = %q, want the provider's pinned address", got)
+	}
+
+	// The administrator signs in, which takes longer than the window allows.
+	if _, err := h.store.Exec(context.Background(), `UPDATE core_sessions SET reauth_at = NULL`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/manual",
+		map[string]string{"callbackUrl": pinned + "?code=auth-code&state=" + url.QueryEscape(state)})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manual completion: %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "tok-live") || strings.Contains(rec.Body.String(), "ref-live") {
+		t.Fatalf("completion leaked tokens: %s", rec.Body)
+	}
+	if tok, err := creds.Token(context.Background(), "oauth-codex"); err != nil || tok != "tok-live" {
+		t.Fatalf("token = %q %v", tok, err)
+	}
+
+	// The state is spent, so a replayed paste is refused even from the same session.
+	rec = h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/manual",
+		map[string]string{"callbackUrl": pinned + "?code=auth-code&state=" + url.QueryEscape(state)})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("replayed paste: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// getFrom sends a top-level GET as the browser would after a provider redirect: this
+// server's session cookie, and whatever host the address bar was pointed at.
+func (h *harness) getFrom(host, path string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = host
+	if h.cookie != "" {
+		req.Header.Set("Cookie", sessionCookie+"="+h.cookie)
+	}
+	rec := httptest.NewRecorder()
+	h.http.ServeHTTP(rec, req)
+	h.captureSession(rec)
+	return rec
+}
+
+func pinnedHarness(t *testing.T, tokenURL string) (*harness, *credentials.Store) {
+	t.Helper()
+	h, creds := newCredsHarness(t, map[string]credentials.OAuthProvider{
+		"codex": {
+			AuthURL: tokenURL + "/auth", TokenURL: tokenURL, ClientID: "cid",
+			RedirectURI: pinnedRedirect, Scopes: []string{"openid"},
+		},
+	})
+	h.bootstrapAdmin()
+	h.reauth()
+	return h, creds
+}
+
+const pinnedRedirect = "http://localhost:1455/auth/callback"
+
+func beginPinned(t *testing.T, h *harness) string {
+	t.Helper()
+	rec := h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/begin", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("begin: %d %s", rec.Code, rec.Body)
+	}
+	var begin struct {
+		AuthURL string `json:"authUrl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &begin); err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(begin.AuthURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Query().Get("state")
+}
+
+// A deployment the browser can reach at the provider's pinned address finishes the flow
+// on its own: the redirect lands here, and there is nothing to paste.
+func TestPinnedCallbackCompletesWhenThisServerAnswersThere(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "tok-live", "refresh_token": "ref-live", "expires_in": 3600,
+		})
+	}))
+	t.Cleanup(ts.Close)
+
+	h, creds := pinnedHarness(t, ts.URL)
+	state := beginPinned(t, h)
+
+	rec := h.getFrom("localhost:1455", "/auth/callback?code=auth-code&state="+url.QueryEscape(state))
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("pinned callback: %d %s", rec.Code, rec.Body)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/settings?oauth=ok" {
+		t.Fatalf("location = %q", loc)
+	}
+	if tok, err := creds.Token(context.Background(), "oauth-codex"); err != nil || tok != "tok-live" {
+		t.Fatalf("token = %q %v", tok, err)
+	}
+}
+
+// Reached at any other address, the path is not ours. A deployment on another host must
+// finish by pasting, and quietly consuming the state here would be a lie either way.
+func TestPinnedCallbackIsInertAtAnyOtherAddress(t *testing.T) {
+	h, creds := pinnedHarness(t, "https://provider.invalid")
+	state := beginPinned(t, h)
+
+	rec := h.getFrom("127.0.0.1:8080", "/auth/callback?code=auth-code&state="+url.QueryEscape(state))
+	if rec.Code == http.StatusSeeOther {
+		t.Fatalf("a server that is not the pinned address completed the flow: %s", rec.Header().Get("Location"))
+	}
+	list, err := creds.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("a credential was created from a callback this server should not have honored: %+v", list)
+	}
+
+	// The state is untouched, so the paste still works.
+	if rec := h.do(http.MethodPost, "/api/admin/credentials/oauth/codex/manual",
+		map[string]string{"callbackUrl": pinnedRedirect + "?code=c&state=" + url.QueryEscape(state)}); rec.Code == http.StatusBadRequest {
+		t.Fatalf("the pending flow was consumed: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestAIRoutesAndCalls(t *testing.T) {
 	h, creds := newCredsHarness(t, nil)
 	h.bootstrapAdmin()
@@ -236,12 +406,12 @@ routes:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := ai.LoadRoutes(path)
+	seed, err := ai.LoadSeed(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc, err := ai.New(h.store, h.store, h.server.deps.Events, pol, creds, ai.Options{
-		Routes: compiled, Providers: []ai.Provider{ai.Fake{}}, Refs: creds,
+		Seed: seed, Refs: creds,
 	})
 	if err != nil {
 		t.Fatal(err)

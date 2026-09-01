@@ -1,0 +1,44 @@
+# Private SearXNG sidecar for Control Center. JSON format is enabled so the host
+# can query it; this file is not served on the public internet.
+#
+# keep_only drops Tor engines (ahmia, torch), Google/Bing (CAPTCHA from a
+# datacenter IP), and Wikipedia/Wikidata (no street prices, extra timeouts).
+# The host queries Brave, then DuckDuckGo, one engine at a time.
+
+use_default_settings:
+  engines:
+    keep_only:
+      - brave
+      - duckduckgo
+
+server:
+  limiter: false
+  image_proxy: false
+  public_instance: false
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "control-center-searxng"
+  method: GET
+
+search:
+  safe_search: 0
+  default_lang: en
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 60
+  suspended_times:
+    SearxEngineCaptcha: 120
+    SearxEngineTooManyRequests: 180
+    SearxEngineAccessDenied: 600
+    cf_SearxEngineCaptcha: 600
+    recaptcha_SearxEngineCaptcha: 600
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  # HTTP/2 keep-alives are a common "Server disconnected" from DDG/Brave.
+  enable_http2: false
+  pool_connections: 20
+  pool_maxsize: 10

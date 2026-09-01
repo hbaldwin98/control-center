@@ -5,19 +5,31 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
 
+// File is the optional seed for a database with no providers or routes yet.
+//
+// Routes are administrator-owned state now: they are created and edited from Settings
+// against a live model catalog, and they live in SQLite. This file exists so an
+// existing deployment keeps the routes it already declared, and so a fresh one can be
+// brought up with a known configuration. It is read once, when the tables are empty.
 type File struct {
-	Routes map[string]RouteYAML `yaml:"routes"`
+	Providers map[string]ProviderYAML `yaml:"providers"`
+	Routes    map[string]RouteYAML    `yaml:"routes"`
+}
+
+type ProviderYAML struct {
+	Kind       string `yaml:"kind"`
+	BaseURL    string `yaml:"baseUrl"`
+	Credential string `yaml:"credential"`
+	Billing    string `yaml:"billing"`
 }
 
 type RouteYAML struct {
-	Capabilities    []string       `yaml:"capabilities"`
-	MaxInputTokens  int            `yaml:"maxInputTokens"`
-	MaxOutputTokens int            `yaml:"maxOutputTokens"`
-	Attempts        []AttemptYAML  `yaml:"attempts"`
+	Capabilities    []string      `yaml:"capabilities"`
+	MaxInputTokens  int           `yaml:"maxInputTokens"`
+	MaxOutputTokens int           `yaml:"maxOutputTokens"`
+	Attempts        []AttemptYAML `yaml:"attempts"`
 }
 
 type AttemptYAML struct {
@@ -28,130 +40,100 @@ type AttemptYAML struct {
 	OutputMicroUSDPerMillion int64  `yaml:"outputMicroUSDPerMillion"`
 }
 
-type route struct {
-	name            string
-	capabilities    map[string]struct{}
-	capList         []string
-	maxInputTokens  int
-	maxOutputTokens int
-	attempts        []attempt
-	lastError       string
+// Seed is a provider set and a route set ready to be written to an empty database.
+type Seed struct {
+	Providers []ProviderConfig
+	Routes    []RouteInput
 }
 
-type attempt struct {
-	provider, model, credential string
-	inPerM, outPerM             policy.MicroUSD
-}
-
-func LoadRoutes(path string) ([]route, error) {
+// LoadSeed reads the optional seed file. A missing file is not an error; it means the
+// deployment configures everything from Settings.
+func LoadSeed(path string) (Seed, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return Seed{}, nil
 		}
-		return nil, err
+		return Seed{}, err
 	}
 	var file File
 	if err := yaml.Unmarshal(raw, &file); err != nil {
-		return nil, fmt.Errorf("ai: parse %s: %w", path, err)
+		return Seed{}, fmt.Errorf("ai: parse %s: %w", path, err)
 	}
-	return compileRoutes(file)
+	return compileSeed(file)
 }
 
-func compileRoutes(file File) ([]route, error) {
-	var out []route
+// compileSeed turns the file into provider and route records. An attempt that names a
+// provider the file does not declare implies one: older files named a provider and a
+// credential per attempt, with no provider section at all.
+func compileSeed(file File) (Seed, error) {
+	var seed Seed
+	providers := map[string]ProviderConfig{}
+
+	for id, y := range file.Providers {
+		p := ProviderConfig{
+			ID: id, Kind: ProviderKind(y.Kind), BaseURL: y.BaseURL,
+			CredentialID: y.Credential, Billing: Billing(y.Billing),
+		}.normalize()
+		if err := p.validate(); err != nil {
+			return Seed{}, err
+		}
+		providers[id] = p
+	}
+
 	for name, y := range file.Routes {
-		if y.MaxInputTokens <= 0 || y.MaxOutputTokens <= 0 {
-			return nil, fmt.Errorf("ai: route %q: limits must be finite and positive", name)
-		}
-		if len(y.Attempts) == 0 {
-			return nil, fmt.Errorf("ai: route %q: attempt plan is empty", name)
-		}
-		r := route{
-			name: name, maxInputTokens: y.MaxInputTokens, maxOutputTokens: y.MaxOutputTokens,
-			capabilities: map[string]struct{}{}, capList: y.Capabilities,
-		}
-		for _, c := range y.Capabilities {
-			r.capabilities[c] = struct{}{}
+		in := RouteInput{
+			Name: name, Capabilities: y.Capabilities,
+			MaxInputTokens: y.MaxInputTokens, MaxOutputTokens: y.MaxOutputTokens,
 		}
 		for _, a := range y.Attempts {
-			if a.Provider == "" || a.Model == "" || a.Credential == "" {
-				return nil, fmt.Errorf("ai: route %q: provider, model, and credential are required", name)
+			if a.Provider == "" || a.Model == "" {
+				return Seed{}, fmt.Errorf("%w: route %q: provider and model are required", ErrInvalidRoute, name)
 			}
-			if a.InputMicroUSDPerMillion <= 0 || a.OutputMicroUSDPerMillion <= 0 {
-				return nil, fmt.Errorf("%w: route %q", ErrMissingPrice, name)
+			if _, ok := providers[a.Provider]; !ok {
+				if a.Credential == "" {
+					return Seed{}, fmt.Errorf("%w: route %q: provider %q is not declared and the attempt names no credential",
+						ErrInvalidRoute, name, a.Provider)
+				}
+				kind, base := impliedProvider(a.Provider)
+				implied := ProviderConfig{
+					ID: a.Provider, Kind: kind, BaseURL: base,
+					CredentialID: a.Credential, Billing: BillingMetered,
+				}.normalize()
+				if err := implied.validate(); err != nil {
+					return Seed{}, err
+				}
+				providers[a.Provider] = implied
 			}
-			r.attempts = append(r.attempts, attempt{
-				provider: a.Provider, model: a.Model, credential: a.Credential,
-				inPerM: policy.MicroUSD(a.InputMicroUSDPerMillion),
-				outPerM: policy.MicroUSD(a.OutputMicroUSDPerMillion),
+			in.Attempts = append(in.Attempts, RouteAttemptInput{
+				Provider: a.Provider, Model: a.Model,
+				InputMicroUSDPerMillion:  a.InputMicroUSDPerMillion,
+				OutputMicroUSDPerMillion: a.OutputMicroUSDPerMillion,
 			})
 		}
-		out = append(out, r)
+		seed.Routes = append(seed.Routes, in)
 	}
-	return out, nil
+
+	for _, p := range providers {
+		seed.Providers = append(seed.Providers, p)
+	}
+	return seed, nil
 }
 
-func (r route) has(cap string) bool {
-	_, ok := r.capabilities[cap]
-	return ok
-}
-
-func (r route) estimateChat(maxTokens int) (policy.MicroUSD, error) {
-	outTok := r.maxOutputTokens
-	if maxTokens > 0 && maxTokens < outTok {
-		outTok = maxTokens
+// impliedProvider guesses the adapter and endpoint for a provider a seed file names
+// but does not declare. Only well-known ids get a base URL; anything else has to
+// declare one and fails validation with that message if it does not.
+func impliedProvider(id string) (ProviderKind, string) {
+	switch id {
+	case string(KindFake):
+		return KindFake, ""
+	case string(KindCodex):
+		return KindCodex, CodexBaseURL
+	case "openai":
+		return KindOpenAICompatible, "https://api.openai.com/v1"
+	case "openrouter":
+		return KindOpenAICompatible, "https://openrouter.ai/api/v1"
+	default:
+		return KindOpenAICompatible, ""
 	}
-	var total policy.MicroUSD
-	for _, a := range r.attempts {
-		in, err := tokensCost(int64(r.maxInputTokens), a.inPerM)
-		if err != nil {
-			return 0, err
-		}
-		out, err := tokensCost(int64(outTok), a.outPerM)
-		if err != nil {
-			return 0, err
-		}
-		sum := in + out
-		if sum < in {
-			return 0, ErrUnbounded
-		}
-		next := total + sum
-		if next < total {
-			return 0, ErrUnbounded
-		}
-		total = next
-	}
-	if total <= 0 {
-		return 0, ErrUnbounded
-	}
-	return total, nil
-}
-
-func tokensCost(tokens int64, perMillion policy.MicroUSD) (policy.MicroUSD, error) {
-	if tokens < 0 || perMillion <= 0 {
-		return 0, ErrUnbounded
-	}
-	// Round up: (tokens * perMillion + 999_999) / 1_000_000
-	n := tokens * int64(perMillion)
-	if tokens != 0 && n/tokens != int64(perMillion) {
-		return 0, ErrUnbounded
-	}
-	return policy.MicroUSD((n + 999_999) / 1_000_000), nil
-}
-
-func (a attempt) charge(inTok, outTok int64) (policy.MicroUSD, error) {
-	in, err := tokensCost(inTok, a.inPerM)
-	if err != nil {
-		return 0, err
-	}
-	out, err := tokensCost(outTok, a.outPerM)
-	if err != nil {
-		return 0, err
-	}
-	sum := in + out
-	if sum < in {
-		return 0, ErrUnbounded
-	}
-	return sum, nil
 }

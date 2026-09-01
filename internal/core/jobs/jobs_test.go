@@ -498,6 +498,46 @@ func TestCronFiresWithoutCatchUp(t *testing.T) {
 	}
 }
 
+func TestCatchUpSchedulesSkipsCurrentSlot(t *testing.T) {
+	f := newFixture(t)
+	f.enable("hello")
+	var n atomic.Int32
+	def := Def{
+		Name:     "tick",
+		Schedule: "* * * * *",
+		TimeZone: "UTC",
+		Handler: func(Context) error {
+			n.Add(1)
+			return nil
+		},
+	}
+	if err := f.q.Register("hello", def); err != nil {
+		t.Fatal(err)
+	}
+	f.start()
+	deadline := time.Now().Add(2 * time.Second)
+	for n.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n.Load() != 1 {
+		t.Fatalf("first tick ran %d times", n.Load())
+	}
+
+	f.q.UnregisterAll("hello")
+	f.advance(time.Minute)
+	if err := f.q.CatchUpSchedules(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.q.Register("hello", def); err != nil {
+		t.Fatal(err)
+	}
+	f.q.signal()
+	time.Sleep(200 * time.Millisecond)
+	if n.Load() != 1 {
+		t.Fatalf("re-register caught up skipped slot, ran %d times", n.Load())
+	}
+}
+
 func TestCronDisabledTickIsDropped(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

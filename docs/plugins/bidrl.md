@@ -13,14 +13,18 @@ surfaces lots that are anomalously cheap relative to what the pictures actually 
 ```
 plugins/bidrl/
   plugin.go        manifest, wiring
-  collect/         Playwright: auction enumeration, lot pages, images
-  analyze/         one vision call per lot, all photos together, schema-enforced
-  price/           grounded pricing with stored citations
-  score/           deal score + mislabel score
-  store/           migrations, queries
+  collect.go       gallery ID census, then paced ItemData POSTs and photo Gets
+  itemdata.go      parse POST /api/ItemData
+  pusher.go        parse GET /aucbeat/pusher/{auction}-{item}.json
+  pace.go          400ms origin spacing, 429/403 backoff
+  analyze.go       one vision call per lot, category + search_terms
+  price.go         grounded pricing with stored citations
+  jobs.go          collect, scan, reprice, refresh, enrich, search, intent, discover
+  intent.go        user-triggered intent match over collected lots
+  embeddings.go    SQLite-stored lot vectors; cosine rank at Ask time
 
 web/src/plugins/bidrl/
-  index.tsx        nav, routes, icons, feed, auction view, lot detail
+  index.tsx        one nav item; Feed / Auctions / Lots tabs; auction and lot views
 ```
 
 ## Pipeline
@@ -28,7 +32,7 @@ web/src/plugins/bidrl/
 ```
 selected auction
       ↓
-  collect        enumerate lots, cache images as blobs
+  collect        gallery IDs → ItemData + photo blobs
       ↓
   analyze        one AI().Chat per lot, all photos, structured output
       ↓
@@ -49,18 +53,57 @@ selected auction
 
 ## Decisions carried from design
 
-**Playwright lives inside this plugin, not in core.** One consumer is not enough
-information to design a shared browser API. When a second plugin wants a browser, it
-becomes a capability.
+**Collection goes through `Host.Browser()`, not a plugin-owned engine.** Playwright
+(or anything else) is an implementation detail of [`browser`](../modules/browser.md).
+The plugin passes the BIDRL/CDN DNS names it intends to touch; the host enforces HTTPS,
+the allowlist, private-network rejection, and teardown on disable. CI rejects a plugin
+that imports an automation library.
 
-**Every v1 action is user-triggered.** Collection starts only from "add auction", a scan
-starts only from "scan", pricing starts only inside that requested scan or from "reprice",
-and bids refresh only from "refresh bids". There is no cron or event-triggered work, and
-the backend manifest sets `Automated: false`. Jobs still make each requested operation
-durable, cancellable, budgeted, and subject to the host-capability kill switch.
+**Collection requires the playwright engine.** The item feed only exists because the
+page's JavaScript asks for it, and the `fake` engine runs none: it answers from
+in-process fixtures that know one test auction. Under `fake`, every real auction
+collects zero lots. The Docker image sets `CC_BROWSER_ENGINE=playwright`; a local run
+needs `browser.engine: playwright` in config or that variable in the environment.
 
-Images and analyses are cached until the user deletes the auction; identification does
-not rerun during a bid refresh. Deletion removes the auction's records and blobs. The
+**The gallery is an ID census, not the collect record.** The BIDRL bid gallery is an
+AngularJS app: the served markup carries no lot links. Collection opens
+`/bidgallery/perpage_100/page_N/` and reads `/api/getitems` (or scrapes lot links from a
+print catalog / server-rendered page when that feed never arrives) only to learn each
+lot's numeric `item_id`. It then POSTs `/api/ItemData` (`item_id` + `auction_id` form
+body) once per lot through `Page.Post`, and that JSON is the stored title, description,
+photos, bids, end time, and auction. Photo URLs are fetched with `Page.Get` into blobs.
+When ItemData succeeds, collection never `Goto`s the lot HTML page.
+
+**Live bids come from pusher, not a second ItemData pass.** "Refresh bids" GETs
+`/aucbeat/pusher/{auction_id}-{item_id}.json` — a tiny snapshot of current bid, minimum,
+increment, high bidder, bid count, end time, reserve, and whether bidding was extended.
+The UI countdown is local from the stored `ends_at`; it does not poll BidRL. Optional
+`POST /lots/{id}/enrich` re-POSTs ItemData for one lot when the operator wants a fuller
+record again.
+
+**Origin requests are paced.** ItemData POSTs and pusher GETs share one in-flight slot
+and a 400ms minimum interval. HTTP 429 or 403 backs off; three consecutive such responses
+stop the job rather than continuing into a ban.
+
+**Every v1 action is user-triggered.** Collection starts only from "add auction" or
+"collect" on a search/SITES hit, a scan starts only from "scan", search starts only from
+"search", intent matching starts only from "Ask" on the lots catalog, SITES listing starts
+only from "refresh list" or as part of a search, pricing starts only inside that
+requested scan or from "reprice", bids refresh only from "refresh bids", a single-lot
+ItemData refresh only from "enrich", and expired-record deletion only from "Remove ended".
+There is no cron
+or event-triggered work, and the backend manifest sets
+`Automated: false`. Jobs still make each requested operation durable, cancellable,
+budgeted, and subject to the host-capability kill switch.
+
+Images and analyses are cached until the user deletes the auction or removes ended
+records; identification does not rerun during a bid refresh. Deletion removes the
+auction's records and blobs. **Expiry does nothing on its own.** The stored `ends_at`
+drives a local countdown; once it passes, the lot or auction still sits in the feed,
+catalog, and collected list. There is no cron and no BidRL poll. "Remove ended" on
+`/bidrl/auctions` deletes auctions whose close (or every dated lot) is in the past,
+individual ended lots from auctions that are still open, and stale SITES listings —
+photos, analyses, and comparables included. Lots with no end time are left alone. The
 storage module's finite per-plugin quota applies, and collection stops visibly rather than
 evicting audit evidence when the quota is full. This is both the sensible engineering
 choice and the respectful one: BIDRL's user agreement prohibits automated processes that
@@ -69,10 +112,10 @@ continuous crawling.
 
 **Browser targets use a fixed HTTPS host allowlist.** The plugin accepts BIDRL auction and
 lot URLs only when their parsed host is in the compiled allowlist and their scheme is
-`https`. Browser request interception applies the same rule to redirects and subresources,
-with only the fixed BIDRL/CDN hosts required by collection. Userinfo, alternate ports, IP
-literals, and all other origins are rejected. This prevents supplied URLs from turning
-Playwright into a browser SSRF primitive.
+`https`. It passes that list to `Browser().Open`. The host applies the same rule to
+redirects and subresources. Userinfo, alternate ports, IP literals, and all other origins
+are rejected. This prevents supplied URLs from turning a browser session into an SSRF
+primitive.
 
 **Identification basis gates valuation.** The vision call must report *why* it identified
 something:
@@ -89,18 +132,21 @@ This is the difference between a tool still trusted in month three and a feed of
 fiction. A mesh chair confidently valued at $450 because it resembles an Aeron is the
 failure mode that kills the whole thing.
 
-**Vision and pricing are separate calls.** The vision model says what it sees; a pricing
-call uses `GroundingOptions` and returns typed citations. One call doing both produces
-invented MSRPs. The plugin resolves each citation's text offsets and source index, then
-stores the cited text, source URL and title, source publication time when available, and
-retrieval time with the valuation. The UI displays that evidence beside the estimate.
+**Vision and pricing are separate calls.** The vision model says what it sees. Pricing
+asks `Host.Search()` for public listings of that model **once**, ranks hits **eBay
+first, then retail, then other resale**, then the open web. A chat call (no provider web-search)
+picks a dollar amount already written in one of those hits. Invented MSRPs are rejected:
+`price_cents` must appear as `$…` in the hit title or snippet, and the stored quote is
+that snippet, not the model's prose. The feed shows the site, asking vs sold, quote, and
+link.
 
 **Resolution is the cost lever.** Medium for every photo; high on retry for a label or
 plate the model could not read.
 
-**Price the minority.** Expect 10–30% of lots to survive the first pass. That is where the
-intelligence budget goes, and where the genuine difficulty lives — making "current market
-price" trustworthy enough that a $500 estimate means about $500 today.
+**Price the minority.** Expect 10–30% of lots to survive the first pass. Identical
+model numbers reuse a comparable looked up in the last seven days, so a pallet of the
+same Keurig does not hit SearXNG once per lot. Reprice, a stale lookup, or a clear
+condition split (working vs for-parts) does a new search.
 
 ---
 
@@ -110,31 +156,173 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 
 | Host capability | Use |
 |---|---|
+| `Browser()` allowlisted sessions | gallery census, `Post` ItemData, `Get` pusher snapshots and photos |
+| `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
-| `AI()` grounding options and citations | the price stage |
-| `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, and bid refreshes |
-| `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.alert` |
+| `AI()` chat with a cited-price schema | pick a `$` amount already written in those hits |
+| `AI()` chat to expand an intent into related gear words | one `intent-expand` call; tent/headlamp/lantern, not only "camping" |
+| `AI()` Embed over titles (and identifications, if already scanned) | embed the expanded query plus cached lot vectors; cosine rank locally |
+| `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, enrich, search, intent, and SITES discovery |
+| `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.lot.enriched` |
 | `Store()` / `Blobs()` | lots, analyses, cached photos |
 | Budgets + host-capability kill switch | durable user-triggered work is still admitted, reserved, and cancellable |
-| UI | a feed with filters, an auction view, a lot detail |
+| UI | Overview, Auctions, Lots catalog, Intent, auction and lot views |
 
 If this can be built without punching a hole through the `Host` facade, the boundary is
 right.
 
 ---
 
-## Feed
+## Plugin surface
 
-The default view is not a search box. It is a treasure-hunting feed:
-
-| Filter | Means |
+| Surface | Contract |
 |---|---|
-| Best deals | priced, large gap between bid and market |
-| Likely mislabeled | high disagreement between title and photos |
-| Model number found | `exact_text` basis, highest confidence tier |
-| Worth opening | visually interesting, deliberately unpriced |
+| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
+| API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
+| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings |
+| API | `GET /lots?q=&bucket=&category=&ending=soon`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
+| API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
+| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
+| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
-Every row shows the BIDRL title beside what the photos suggest, and links back to the lot.
+Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
+browser serves a canned three-lot warehouse auction at
+`https://www.bidrl.com/auction/42/bidgallery`, plus `POST /api/ItemData` and
+`GET /aucbeat/pusher/` fixtures. Before scanning, connect a provider and
+assign models to the plugin's four declared routes, `cheap-vision` (chat+vision),
+`grounded-price` (chat), `intent-expand` (chat), and `intent-match` (embed). The plugin
+screen lists each by purpose; Models will too. Do not invent other names — the plugin
+asks for these four. Assign `intent-expand` to a cheap chat model and `intent-match` to
+an embedding model (for example `text-embedding-3-small`).
+
+---
+
+## Search
+
+Search is user-triggered (`POST/GET /search`). It does not crawl BidRL on a schedule
+and is not on the feed UI.
+
+A query is expanded into a few BidRL keywords (the full phrase plus distinctive model
+tokens such as `K-Supreme` or `20V`). Live hits come from BidRL's own `/allitems`
+keyword page, captured through `Host.Browser()` the same way collection captures the
+gallery feed.
+
+**SITES locations rank first.** BidRL's location menu — the same list as
+[Turlock](https://www.bidrl.com/affiliate/turlock-19/) — is the SITES dealer family.
+Search reads that menu, loads each affiliate landing page, and treats those open auctions
+as preferred. Scope `prefer` (default) still shows other BidRL lots below them; `only`
+hides the rest; `all` ignores location. Plugin config `preferredAffiliateIds` can narrow
+the family (empty means the whole live menu).
+
+**Titles still lie.** After a scan, search also matches the vision identification, model
+number, category, and search terms, so a chair titled "office mesh" still rises for
+"herman miller" if the photos said so. Vision categories are tools, furniture,
+electronics, appliances, outdoor, automotive, sporting, household, collectibles, or other.
+
+"Refresh list" enumerates currently open SITES auctions without searching, so a warehouse
+can be collected from the list instead of a pasted URL.
+
+---
+
+## Intent
+
+Intent matching is user-triggered (`POST/GET /intent`) from the lots catalog. It does not
+hit BidRL and does not look at photographs.
+
+Ask starts with one cheap `intent-expand` chat call: "camping" becomes related auction-title
+words (tent, headlamp, lantern, canopy, cooler). It then embeds that expanded query once
+and ranks collected lots by cosine similarity against vectors stored in SQLite
+(`bidrl_lot_embeddings`). Each lot is embedded from its title and description, plus
+identification, model, category, and search terms when a scan already exists. The vector
+is reused until that text changes. Photographs are never sent.
+
+A scan is not required. A title that says "camping tent" matches, and so does a headlamp
+that never uses the word camp, because expansion named it before embedding. Stored
+photograph identifications count when they already exist, but they do not win over a
+useful title.
+
+The host does not load a SQLite vector extension (virtual tables are denied). Vectors are
+BLOBs; ranking is a local dot product over normalized float32 rows. Ended lots are skipped
+at Ask and their stored vectors are deleted then; "Remove ended" also deletes the lot row
+and its vector together. Lots with no end time are left alone.
+
+If expansion fails, Ask embeds the typed words. If embedding fails, it matches the expanded
+words against titles. The catalog's Find box stays a direct text filter.
+
+Intent has its own tab (`/bidrl/intent`) with a few seeded intents beside the box, since the
+useful thing to type is a purpose and not a keyword. Ask sends on Enter.
+
+Navigation inside the plugin routes rather than reloading: the screens use `Link` and
+`useRouteParams` from `@cc/ui`, so clicking a lot keeps the event stream and the snapshot
+cache alive instead of reloading the whole application.
+
+---
+
+## Overview and catalog
+
+`/bidrl` is an overview, not a fourth listing of the same table: counts, the widest gaps,
+what closes next, and a link into a filtered catalog for each. With nothing collected it
+says so and points at Auctions. Every figure on it is a link to the catalog URL that
+proves it.
+
+It is one request. `GET /overview` counts in SQL and returns only the two short lists,
+because computing a front page in the browser means shipping every lot row — descriptions,
+valuations, photo URLs — to count them, which is the wrong thing to put on a phone.
+
+`/bidrl/lots` is the one catalog. It carries both the named presets and the field filters,
+because they were always the same query — `GET /feed?filter=deals` and
+`GET /lots?bucket=priced` ran the same SQL. `feedWhere` is now shared by both handlers and
+`/lots` accepts `filter=` too. Live BidRL keyword search stays API-only
+(`POST/GET /search`); no screen queues it.
+
+| Preset | Means |
+|---|---|
+| All lots | everything collected, scanned or not |
+| Best deals | priced, large gap between bid and the comparable (eBay first) |
+| Worth opening | visually interesting, deliberately unpriced |
+| Model number found | `exact_text` basis, highest confidence tier |
+| Likely mislabeled | high disagreement between title and photos |
+| All scanned | every lot a scan has looked at |
+
+`filter=all` means every lot, including `pending`. The old feed value for "scanned but not
+necessarily priced" is now spelled `filter=scanned`.
+
+Find filters the visible lots by title, identification, model, and category without
+starting a BidRL search. The catalog's whole state — preset, text, bucket, category,
+ending — lives in the query string, so a filtered list can be linked to and pasted, and
+opening a lot and coming back returns the list rather than resetting it.
+
+Every button on these screens queues a job rather than doing the work, so every button says
+what it queued and links to the job — they used to post and say nothing, which reads as a
+dead button. `GET /auctions/{id}/index` lists an auction's lot ids in screen order and
+nothing else, so the lot page can offer previous/next and "3 of 40" without downloading
+every full lot row of a large auction.
+
+Lots on the feed, catalog, and auction page switch between a card grid and a table. The
+choice is remembered. Table columns sort on click: lot code, name, bid, expiration, price,
+and the rest. Duplicate or near-duplicate listings — same model, identification,
+or long identical title — collapse to one representative with the extras behind "N similar".
+
+Every card or row shows a thumb, the BidRL title beside what the photos suggest, the
+current bid, a local countdown from stored `ends_at`, category, and a link back to BidRL.
+On a card the gap rides the photograph as a pill — green past 50%, amber past 20%, quiet
+below that, because a thin gap does not survive a buyer's premium — and the bid is the only
+large figure, with the comparable beside it as "vs $X sold · eBay". A lot whose `ends_at`
+has passed carries an "Ended" pill opposite the gap.
+
+Below 720px the lot table drops lot code, category, comparable, and bucket rather than
+scrolling sideways past the bid — those live on the lot page — the card grid tightens to
+150px columns, and each filter takes its own row.
+
+`/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
+paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"
+deletes closed auctions, leftover closed lots, and stale SITES rows. `/bidrl/lots` is the
+catalog: intent matching over embedded titles (and identifications when already scanned), then
+local text, bucket, category, and ending-soon (open lots ending within 24 hours).
+Auction and lot views add a bidder card (high bidder, bid count, min bid, reserve,
+extended) and Open on BidRL. The lot page shows photos in a large stage with a thumbnail
+strip; arrow keys and Prev/Next move between them, and clicking the photo opens a
+full-window view.
 
 ---
 
@@ -142,24 +330,34 @@ Every row shows the BIDRL title beside what the photos suggest, and links back t
 
 ### Pricing evidence
 
-- A numeric valuation is stored only for `exact_text` or `barcode` identification and only
-  when the grounded response includes at least one citation that shows the matching model
-  or code, a price and currency, item condition, source URL, and retrieval time.
-- Missing or mismatched evidence leaves the lot unpriced. The feed shows the source link,
-  quote, retrieval age, and whether the evidence is an asking or sold price; it never
-  presents an uncited model estimate as market price.
+- A numeric valuation is stored only for `exact_text` or `barcode` identification, and only
+  from a search hit that names the model and a dollar amount. Hits are ranked
+  eBay, then retail, then other resale, then the open web. The model's
+  `price_cents` must match a `$` amount in that hit.
+- Missing or mismatched evidence leaves the lot unpriced. The feed shows the source site,
+  quote, retrieval age, and whether the listing is asking or sold. It never presents an
+  uncited model estimate as a market price.
 - Repricing creates a new evidence record rather than overwriting the prior one, so a
-  displayed valuation can be audited against the evidence used at that time.
+  displayed valuation can be audited against the evidence used at that time. Reprice
+  always searches; a scan reuses a comparable for the same model looked up in the last
+  seven days unless the photos or title say the lot is impaired (for parts, broken).
 
 ### Resource limits
 
 - Collection rejects more than 500 lots per auction, more than 12 images per lot, an image
   over 10 MiB, or more than 100 MiB of images for one lot; rejected items are recorded with
   a visible reason.
-- Scan, reprice, and bid-refresh job definitions are enqueue-only, have concurrency `1`
+- Scan, reprice, bid-refresh, enrich, search, intent, and SITES-discover job definitions are enqueue-only, have concurrency `1`
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
-  fails.
-- Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs and AI
-  dispatches, and cancels running job contexts. A paid call admitted before disable may
-  finish; its usage is stored and its budget reservation is settled.
+  fails. Intent matching makes one `intent-expand` chat call to name related gear, embeds
+  that expanded query once, and embeds each collected lot whose title (or stored
+  identification) has changed, then cosine-ranks locally. It does not re-read
+  photographs. Vectors live in `bidrl_lot_embeddings`, are skipped and dropped when a lot
+  has ended, and are deleted with the lot on "Remove ended".
+- ItemData and pusher traffic to BidRL is paced at 400ms with one request in flight. Three
+  consecutive HTTP 429 or 403 responses stop the job.
+- Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs, AI
+  dispatches, and browser sessions, closes admitted browser sessions, and cancels running
+  job contexts. A paid call admitted before disable may finish; its usage is stored and
+  its budget reservation is settled.

@@ -1,6 +1,6 @@
 # Control Center — Design
 
-Status: draft · 2026-08-30 · pre-implementation
+Status: implemented through Page Watch · 2026-08-31
 
 A personal, self-hosted web application that runs on one Linux box and hosts plugins.
 **The host owns capabilities; plugins own workflows.**
@@ -22,12 +22,18 @@ The interfaces translate directly to Rust if that changes; the layering does not
 | [`docs/plugin-api.md`](docs/plugin-api.md) | Everything needed to write a plugin. Self-contained. |
 | [`docs/frontend.md`](docs/frontend.md) | Shell, plugin UI contract, live data. |
 | [`docs/modules/`](docs/modules/) | One spec per core module. |
+| [`docs/plugins/pagewatch.md`](docs/plugins/pagewatch.md) | Low-cost end-to-end confidence plugin. |
 | [`docs/plugins/bidrl.md`](docs/plugins/bidrl.md) | First real plugin. |
 
 Module specs: [storage](docs/modules/storage.md) · [events](docs/modules/events.md) ·
 [policy](docs/modules/policy.md) · [credentials](docs/modules/credentials.md) ·
-[ai](docs/modules/ai.md) · [jobs](docs/modules/jobs.md) ·
+[ai](docs/modules/ai.md) · [jobs](docs/modules/jobs.md) · [browser](docs/modules/browser.md) ·
+[search](docs/modules/search.md) ·
 [notifications](docs/modules/notifications.md) · [pluginhost](docs/modules/pluginhost.md)
+
+The whole process, including the frontend, is one image: `docker compose up --build`.
+Open `https://localhost:8443` (self-signed). The first-run admin password is
+`/data/admin.password` in the volume (`docker compose exec control-center cat /data/admin.password`).
 
 ---
 
@@ -36,12 +42,13 @@ Module specs: [storage](docs/modules/storage.md) · [events](docs/modules/events
 ### In v1
 
 - Web shell for one administrator, reachable on loopback or over TLS.
-- Eight core modules (below).
+- Ten core modules (below).
 - A plugin host that mounts compiled-in plugins through a scoped facade.
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
-  and mutation admission points.
-- Two plugins: `hello` (validating) and `bidrl` (real).
+  mutation, and browser-session admission points.
+- Four plugins: `hello` (validating), `tid` (energy usage), `pagewatch`
+  (operational confidence), and `bidrl` (the first real plugin).
 
 ### Not in v1
 
@@ -59,15 +66,18 @@ Module specs: [storage](docs/modules/storage.md) · [events](docs/modules/events
 ## 2. Principles
 
 1. **The host owns capabilities. Plugins own workflows.** If two plugins would need it, it is
-   a capability. If one plugin needs it, it lives in that plugin until a second one asks.
+   a capability. If it is a process or network boundary the kill switch must own, it is a
+   capability even with one consumer — that is why browser is host-managed from v1.
+   Ordinary libraries stay in the plugin until a second one asks.
 2. **Plugin identity is threaded through every host call.** One mechanism delivers cost
    attribution, the kill switch, budgets, and audit.
 3. **Modules emit events; they do not call each other sideways.** The bus is the spine.
 4. **Enforcement lives at host capability boundaries.** Disabling a plugin rejects new
-   host-managed work, AI dispatches, event handlers, HTTP requests, event publications,
-   and storage/blob mutations, and cancels admitted contexts. Reads and diagnostic logs
-   remain available. Trusted in-process code can ignore cancellation or use direct
-   networking; hard termination requires out-of-process isolation.
+   host-managed work, AI dispatches, browser sessions, search queries, event handlers, HTTP requests,
+   event publications, and storage/blob mutations, and cancels admitted contexts. Browser
+   sessions are closed, not asked to finish. Reads and diagnostic logs remain available.
+   Trusted in-process code can ignore cancellation or use direct networking; hard
+   termination of those paths requires out-of-process isolation.
 5. **Structure in-process plugins as if they were remote.** Separate modules, a facade,
    no reach-through.
 
@@ -82,11 +92,11 @@ There is one structural rule, and it replaces any dependency matrix:
 ```
   L6  web            HTTP, SSE, auth, static shell
        │
-  L5  plugins        hello · bidrl              (own Go modules)
+  L5  plugins        hello · tid · pagewatch · bidrl    (own Go modules)
        │
   L4  pluginhost     registry · lifecycle · Host facade construction
        │
-  L3  capabilities   ai · jobs · notifications
+  L3  capabilities   ai · jobs · browser · search · notifications
        │
   L2  support        policy · credentials
        │
@@ -97,7 +107,7 @@ There is one structural rule, and it replaces any dependency matrix:
 
 Siblings never import each other, which is what keeps the layers real:
 
-- `ai` and `jobs` do not know about each other. Both use `policy`.
+- `ai`, `jobs`, `browser`, and `search` do not know about each other. All four use `policy`.
 - No capability module calls notifications to send. It subscribes to `events`, its web
   admin surface manages rules/channels, and it reads channel secrets through the
   lower-layer `credentials` interface.
@@ -112,7 +122,7 @@ Siblings never import each other, which is what keeps the layers real:
 `pluginhost → ai → pluginhost`.
 
 So plugin state, budgets, spend counters, and the gate are extracted into `policy` at L2.
-`ai`, `jobs`, and `pluginhost` all depend on it; it depends on none of them.
+`ai`, `jobs`, `browser`, `search`, and `pluginhost` all depend on it; it depends on none of them.
 
 ---
 
@@ -124,8 +134,10 @@ So plugin state, budgets, spend counters, and the gate are extracted into `polic
 | L1 | [events](docs/modules/events.md) | Insert events transactionally, then dispatch committed events to live and durable subscribers. |
 | L2 | [policy](docs/modules/policy.md) | Own plugin enabled state and atomically reserve, settle, and release budget capacity. |
 | L2 | [credentials](docs/modules/credentials.md) | Store API keys and OAuth credentials; keep tokens fresh. |
-| L3 | [ai](docs/modules/ai.md) | Route logical model names to providers, record usage and cost. |
+| L3 | [ai](docs/modules/ai.md) | Route logical model names to administrator-configured providers, discover what those providers serve, and record usage and cost. |
 | L3 | [jobs](docs/modules/jobs.md) | Durable queue with cron, retries, cancellation, and progress. |
+| L3 | [browser](docs/modules/browser.md) | Own headless browser sessions, allowlists, and teardown for plugins. |
+| L3 | [search](docs/modules/search.md) | Own web lookup for plugins: admit the query, call SearXNG or the fake engine, return public HTTPS hits. |
 | L3 | [notifications](docs/modules/notifications.md) | Turn events into deliveries via rules and channels, using credential entries for channel secrets. |
 | L4 | [pluginhost](docs/modules/pluginhost.md) | Register plugins, own validated plugin config, run lifecycle, and build each scoped `Host`. |
 
@@ -141,7 +153,9 @@ Two walkthroughs. If these read cleanly, the architecture is doing its job.
  1  user → plugin HTTP     POST /api/plugins/bidrl/scans
  2  plugin → jobs          enqueue "bidrl.scan"
  3  jobs → policy          admit work for "bidrl"             → ok
- 4  plugin handler         host.AI().Chat(...)
+ 4  plugin handler         host.Browser().Open(...)           → session, allowlisted
+                           page.Goto(auctionURL); page.Get(imageURL)
+ 5  plugin handler         host.AI().Chat(...)
                            ↳ facade stamps plugin ID onto the context
  5  ai → policy            atomically reserve conservative maximum cost
  6  ai → credentials       Token("google-api")
@@ -162,12 +176,16 @@ calls `notifications`, and never reports its own cost.
  1  user                   toggles bidrl off
  2  pluginhost → policy    Admin.Disable("bidrl", reason)
  3  policy                 commits state and core.plugin.disabled together
- 4  host                   rejects new jobs, AI dispatches, event handlers, HTTP requests,
-                           event publications, and storage/blob mutations;
-                           cancels admitted contexts
+ 4  host                   rejects new jobs, AI dispatches, browser sessions,
+                           search queries, event handlers, HTTP requests, event
+                           publications, and storage/blob mutations; cancels
+                           admitted contexts; closes admitted browser sessions
  5  new AI request         admission → ErrPluginDisabled, no provider call
  6  admitted AI request    may finish; usage and actual cost are still recorded
- 7  web                    /api/plugins/bidrl/* → 503
+ 7  new Browser().Open     admission → ErrPluginDisabled, no engine call
+ 8  admitted browser       context cancelled, pages and session closed
+ 8b new Search().Query     admission → ErrPluginDisabled, no SearXNG call
+ 9  web                    /api/plugins/bidrl/* → 503
 ```
 
 The switch controls host capabilities, not the Go process. Trusted plugin code can ignore
@@ -188,14 +206,15 @@ control-center/
     plugins.go              ← the only file importing plugin packages
   internal/core/
     storage/  events/  policy/  credentials/
-    ai/  jobs/  notifications/  pluginhost/  web/
+    ai/  jobs/  browser/  notifications/  pluginhost/  web/
   host/                     ← separate Go module: the plugin-facing library
   plugins/
     hello/  go.mod          ← separate module
-    bidrl/  go.mod          ← separate module
+    pagewatch/  go.mod      ← separate module
+    tid/  go.mod            ← separate module
   web/                      ← React/TS frontend; canonical plugin UI under src/plugins/
   config/
-    models.yaml
+    models.yaml             ← seed only; providers and routes live in the database
   docs/
   DESIGN.md
 ```
@@ -221,7 +240,13 @@ architectural test rather than a review convention.
 - Secrets live in `credentials`, encrypted at rest with a key from the environment or the
   OS keyring, never in `config/*.yaml`. Notification channel secrets are credential
   entries. Credentials administration supports API-key create/replace and secure OAuth,
-  but neither its web API nor UI returns secret values.
+  but neither its web API nor UI returns secret values. A provider that pins a redirect
+  this server cannot receive is completed by pasting the address the browser landed on;
+  the state, its session binding, the PKCE verifier, and single use are all still enforced
+  server-side.
+- Providers and model routes are configuration rather than secrets. Editing them needs a
+  session and CSRF, not password reauthentication, and no route or provider response ever
+  carries credential material.
 - Plugins are trusted code. The table prefix and the facade are guardrails against
   mistakes, not a sandbox. Untrusted plugins are the out-of-process milestone.
 
@@ -238,13 +263,18 @@ architectural test rather than a review convention.
 | 5 | `credentials` + `ai` | Key replacement and OAuth work without exposing secrets; one provider records usage and settles reservations. |
 | 6 | `pluginhost` + `host` | Registry, facade, lifecycle, enforcement matrix all pass. |
 | 7 | `hello` | The [validating plugin](docs/plugin-api.md#8-the-hello-plugin) passes its acceptance test. |
-| 8 | `notifications` | Channels use credential entries; rules and defaults deliver committed events. |
-| 9 | `bidrl` | The first real plugin. |
-| 10 | Future | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
+| 8 | `browser` | Host-managed sessions, allowlist, fake backend, and kill-switch close all pass. |
+| 9 | `notifications` | Channels use credential entries; rules and defaults deliver committed events. |
+| 10 | `tid` | Daily Turlock Irrigation District usage, metrics, and insight flow through host capabilities. |
+| 11 | `pagewatch` | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
+| 12 | `bidrl` | The first real plugin. |
+| 13 | Future | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
 
 Steps 2–6 are the ones worth getting right. Everything after is downstream of them.
 
 Step 7 is not optional. It is where the host API gets fixed while fixing it is still cheap.
+`browser` and `pagewatch` land before `bidrl`; collection must not own Chromium, and the
+complete capability pipeline gets exercised before the larger plugin depends on it.
 
 ---
 
@@ -258,3 +288,9 @@ Step 7 is not optional. It is where the host API gets fixed while fixing it is s
 3. **Job args.** V1 stores JSON and keeps `Args(into any) error`; enqueue validates JSON
    encoding and each handler validates its decoded domain type. A typed generic wrapper
    may be added later without changing persisted jobs.
+4. **Browser.** The host owns sessions, allowlists, and teardown. Plugins pass the DNS
+   names they intend to touch; they never import Playwright or an equivalent. Disable
+   closes admitted sessions rather than letting navigation finish. Login is `Fill` /
+   `FillCredential` / `Click` each session; there is no persistent cookie jar. SPA JSON
+   that the page POSTs after login is read from `Responses`, not by giving plugins
+   `Evaluate` or a raw fetch client with the in-page token.

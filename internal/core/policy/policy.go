@@ -1,8 +1,8 @@
 // Package policy owns plugin enabled state, budgets, and atomic spend reservations, and
 // answers whether a plugin may start work or a paid call.
 //
-// Layer 2. It imports storage and events. It exists so that ai, jobs, and pluginhost can
-// all ask the same question without pluginhost depending on ai.
+// Layer 2. It imports storage and events. It exists so that ai, jobs, browser, and
+// pluginhost can all ask the same question without pluginhost depending on ai.
 package policy
 
 import (

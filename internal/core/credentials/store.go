@@ -20,7 +20,32 @@ type OAuthProvider struct {
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+
+	// ExtraAuthParams are provider-specific authorization query parameters. They are
+	// never secrets; they select a product flow, such as the ChatGPT subscription
+	// consent screen rather than the platform one.
+	ExtraAuthParams map[string]string
+
+	// RedirectURI pins the callback to one address the provider has registered,
+	// instead of this server's own callback route. Some products register a single
+	// fixed loopback URI, which a self-hosted control center cannot receive; those
+	// providers complete through CompleteOAuthManual instead.
+	RedirectURI string
+
+	// RefreshJSON sends the refresh grant as a JSON body. The authorization-code
+	// exchange stays form-encoded; providers differ on the refresh endpoint.
+	RefreshJSON bool
+
+	// AccountClaim and PlanClaim name nested id_token claim paths whose values are
+	// kept as non-secret credential attributes. A subscription-backed provider needs
+	// its account id on every request.
+	AccountClaim []string
+	PlanClaim    []string
 }
+
+// Manual reports whether the provider's registered redirect cannot reach this server,
+// so the administrator must paste the callback URL back in by hand.
+func (p OAuthProvider) Manual() bool { return p.RedirectURI != "" }
 
 // Options configures encryption, OAuth, and clocks.
 type Options struct {
@@ -111,6 +136,36 @@ func (s *Store) OAuthProviders() []string {
 	return names
 }
 
+// OAuthProviderInfo is the secret-free description the Settings UI needs to render the
+// right flow for a provider. It never carries a client secret.
+type OAuthProviderInfo struct {
+	Name   string `json:"name"`
+	Manual bool   `json:"manual"`
+	// RedirectURI is shown so the administrator recognizes the dead loopback address
+	// their browser will land on during a manual flow.
+	RedirectURI string   `json:"redirectUri"`
+	Scopes      []string `json:"scopes"`
+	// Importable providers accept pasted tokens from an existing local login.
+	Importable bool `json:"importable"`
+}
+
+// OAuthProviderList describes every configured provider for administration.
+func (s *Store) OAuthProviderList() []OAuthProviderInfo {
+	out := make([]OAuthProviderInfo, 0, len(s.oauth))
+	for name, p := range s.oauth {
+		scopes := p.Scopes
+		if scopes == nil {
+			scopes = []string{}
+		}
+		out = append(out, OAuthProviderInfo{
+			Name: name, Manual: p.Manual(), RedirectURI: p.RedirectURI,
+			Scopes: scopes, Importable: true,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 func (s *Store) verifyAll(ctx context.Context) error {
 	rows, err := s.db.Query(ctx, `SELECT id, kind, provider, version, secret_envelope FROM core_credentials`)
 	if err != nil {
@@ -146,6 +201,31 @@ func (s *Store) verifyAll(ctx context.Context) error {
 		}
 	}
 	return states.Err()
+}
+
+// Attributes returns the non-secret provider attributes recorded for a credential.
+// A subscription-backed provider needs its account id on every request, and the ai
+// module has no other way to learn it without being handed the token itself.
+func (s *Store) Attributes(ctx context.Context, id string) (Attributes, error) {
+	row, err := s.read(ctx, id)
+	if err != nil {
+		return Attributes{}, err
+	}
+	attrs := Attributes{Provider: row.provider, Kind: row.kind}
+	if row.kind != KindOAuth {
+		return attrs, nil
+	}
+	plain, err := s.decrypt(row.env, "core_credentials", row.id, string(row.kind), row.provider, row.version)
+	if err != nil {
+		return Attributes{}, err
+	}
+	tok, err := decodeOAuthSecret(plain)
+	if err != nil {
+		return Attributes{}, err
+	}
+	attrs.AccountID = tok.AccountID
+	attrs.PlanType = tok.PlanType
+	return attrs, nil
 }
 
 // Token returns an API key or a still-valid OAuth access token.

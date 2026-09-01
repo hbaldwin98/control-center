@@ -80,7 +80,7 @@ func (s *Server) blobScopeAllowed(r *http.Request, scope string) bool {
 		}
 	}
 	switch scope {
-	case "core", "core.jobs", "core.ai", "core.notifications":
+	case "core", "core.jobs", "core.ai", "core.browser", "core.notifications":
 		return true
 	}
 	return false

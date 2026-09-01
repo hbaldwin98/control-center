@@ -165,6 +165,7 @@ matches every type whose final segment is `failed`. `**` matches everything.
 | `core.job.cancelled` | `core.jobs` | job ID, plugin, name, attempt, reason |
 | `core.job.dead` | `core.jobs` | job ID, plugin, name, attempts, last error |
 | `core.ai.usage` | `core.ai` | plugin, job, operation, logical model, status, usage totals, attempts, cost in micro-USD |
+| `core.browser.denied` | `core.browser` | plugin, job when present, URL host, reason |
 | `core.plugin.enabled` / `.disabled` | `core.policy` | plugin, actor, reason |
 | `core.plugin.budget_exceeded` | `core.policy` | plugin, window, limit, reserved, committed, action |
 | `core.plugin.accounting_invariant_failed` | `core.policy` | plugin, reservation ID, reserved maximum, actual cost |

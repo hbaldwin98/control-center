@@ -28,11 +28,11 @@ rejects imports from `internal/core`, another plugin, or the application module 
 out-of-process plugins as a compatible direction, but that move will require protocols,
 adapters, supervision, and capability proxies; it is not just a transport or build swap.
 
-The public module contains `host` plus `host/ai`, `host/events`, `host/jobs`,
-`host/policy`, and `host/storage`. Those packages contain only the interfaces, DTOs,
-options, and sentinel errors shown here; they do not import `internal/core`. Core modules
-adapt their internal implementations to these public contracts. Plugin code never imports
-an `internal/` package.
+The public module contains `host` plus `host/ai`, `host/browser`, `host/events`,
+`host/jobs`, `host/policy`, `host/search`, and `host/storage`. Those packages contain only the
+interfaces, DTOs, options, and sentinel errors shown here; they do not import
+`internal/core`. Core modules adapt their internal implementations to these public
+contracts. Plugin code never imports an `internal/` package.
 
 ---
 
@@ -77,7 +77,18 @@ type Manifest struct {
     // such as cron or an event handler. Such plugins require a daily budget.
     Automated bool
 
+    // Models are the logical AI routes this plugin will request. Declare every
+    // name you pass to AI().Chat / Embed; the UI asks the operator to point each
+    // one at a provider model. The host does not create the routes for you.
+    Models []ModelNeed
+
     Config ConfigSpec
+}
+
+type ModelNeed struct {
+    Name         string   // "cheap-vision"; must match ChatRequest.Model
+    Capabilities []string // chat, vision, grounding, embed
+    Purpose      string   // shown in the UI: "Identify lots from photographs."
 }
 
 type ConfigSpec struct {
@@ -140,6 +151,8 @@ type Host interface {
     PluginID() string
 
     AI() ai.AI               // the only host-managed paid provider path
+    Browser() browser.Browser // headless sessions; the host owns the engine
+    Search() search.Search    // web lookup; the host owns SearXNG / the fake engine
     Jobs() jobs.Jobs         // enqueue, cancel, inspect
     Events() Events          // publish; Source is forced to your plugin ID
     Store() storage.DB       // SQL, restricted to your table prefix
@@ -154,7 +167,7 @@ type Host interface {
 numbers, integers, booleans, `enum`, bounds, patterns, required properties, descriptions,
 and defaults. Remote references, custom code, and secret-valued fields are forbidden.
 The host validates defaults and every update, stores one JSON document per plugin, and
-renders the supported controls in Settings. Secrets are credential references, never
+renders the supported controls on the Plugins screen. Secrets are credential references, never
 config values.
 
 ```go
@@ -175,23 +188,25 @@ but invoke no plugin code.
 
 | Missing | Why | Do this instead |
 |---|---|---|
-| Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`. |
+| Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`, and declare that name on `Manifest.Models`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
+| Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). For a login form, `Fill` / `Click` / `FillCredential` — the host types the password; you never see it. For an SPA that POSTs usage to its API with a bearer token in localStorage, parse `Responses`. For an allowlisted form POST that must share the session cookie jar, `Post`. |
+| A search-engine client or Google scrape | The kill switch cannot stop a plugin-owned crawler, and result URLs need the same public-HTTPS filter as the browser. | `h.Search().Query`. See [`search.md`](modules/search.md). The host talks to a private SearXNG sidecar (or the fake engine). |
 | Anything belonging to another plugin | Plugins compose through events, not imports. | Subscribe to their events. |
 
-Network access, HTTP clients, and browser automation are **not** provided and **not**
-restricted. If your plugin needs Playwright, it owns that dependency. One consumer is not
-enough information to design a shared API against; when a second plugin wants a browser,
-it becomes a capability.
+Ordinary `net/http` for APIs is still the plugin's own. The host-managed browser is the
+path for JavaScript-rendered pages and for fetches that must share a cookie jar and an
+HTTPS host allowlist.
 
 The plugin switch is a **host-capability kill switch**. Once disabled, the host rejects
-new managed jobs, AI dispatches, event-handler invocations, and requests to the plugin's
-HTTP routes, plus new event publications and storage/blob mutations through the facade.
-Reads and diagnostic logging remain available. The host cancels contexts it already
-admitted, but an admitted transaction may commit. In-process trusted code can ignore
-cancellation or use direct networking. Hard termination and network containment require
-out-of-process isolation.
+new managed jobs, AI dispatches, browser sessions, search queries, event-handler invocations, and requests
+to the plugin's HTTP routes, plus new event publications and storage/blob mutations
+through the facade. Admitted browser sessions are closed, not asked to finish. Reads and
+diagnostic logging remain available. The host cancels contexts it already admitted, but
+an admitted transaction may commit. In-process trusted code can ignore cancellation or
+use direct networking. Hard termination and network containment require out-of-process
+isolation.
 
 The host authenticates every request under `/api/plugins/<id>/`, checks plugin admission,
 and enforces `Origin` plus synchronizer-token CSRF checks before invoking a mutating route.
@@ -204,6 +219,18 @@ classify the code rather than treating every `503` as a disabled plugin.
 ---
 
 ## 4. Using AI
+
+Declare every logical name on the manifest first. That is how the Plugins and Models
+screens know what to offer; a hardcoded string the UI has never heard of is how operators
+get stuck.
+
+```go
+Models: []host.ModelNeed{{
+    Name:         "cheap-vision",
+    Capabilities: []string{"chat", "vision"},
+    Purpose:      "Identify lots from photographs.",
+}},
+```
 
 ```go
 resp, err := h.AI().Chat(ctx, ai.ChatRequest{
@@ -270,6 +297,30 @@ Points that matter in practice:
   it. A paid call admitted before disable may finish and is still recorded and settled.
 - **Two errors you must handle:** `policy.ErrPluginDisabled` and `policy.ErrBudgetExceeded`.
   Both mean stop cleanly, not retry.
+
+Embeddings use the same admission and accounting path. Declare `embed` on the logical
+route, then call `AI().Embed` with a short list of texts — never photographs:
+
+```go
+resp, err := h.AI().Embed(ctx, ai.EmbedRequest{
+    Model:  "intent-match",
+    Inputs: []string{lotTitle, lotTitle + "\n" + identification},
+})
+```
+
+Store the returned vectors yourself. The host does not ship a vector index; SQLite
+virtual tables are denied, so a plugin keeps float32 BLOBs and ranks with a local cosine.
+
+Web lookup that must not depend on the model's own search tool goes through the host:
+
+```go
+hits, err := h.Search().Query(ctx, search.Request{Query: model + " used price", MaxResults: 4})
+```
+
+The host queries a private SearXNG sidecar (or the fake engine). Hits are public HTTPS
+only. `AllowedDomains` keeps a host and its subdomains. Pass them into a later `Chat`
+with no `Grounding`, and keep a price only if the model cites one of those URLs **and**
+the dollar amount appears in that hit. See [`search.md`](modules/search.md).
 
 ---
 
@@ -419,6 +470,7 @@ It exercises every host capability and nothing else:
 | Store | one table recording ticks |
 | Blobs | writes and reads one small blob |
 | Config | reads one declared setting and observes an update |
+| Browser | one `Open` + `Goto` of in-process `hello.test` |
 | Log / Clock | writes an attributed log and uses the injected time source |
 | UI | one page listing its history |
 
@@ -437,6 +489,7 @@ Disabling `hello` while its job is mid-flight must:
 7. reject new event publications, SQL/blob mutations, and subscription handler entry;
    leave reads and diagnostic logging available
 8. cancel the handler context without claiming to terminate a goroutine that ignores it
+9. close admitted browser sessions rather than letting navigation finish
 
 Every row of the enforcement matrix, tested by something that is not your real plugin.
 
@@ -451,6 +504,8 @@ One file in the core app, and one line in it:
 func registerPlugins(r pluginhost.Registry) error {
     return r.RegisterAll(
         hello.New(),
+        pagewatch.New(),
+        tid.New(),
         bidrl.New(),
     )
 }

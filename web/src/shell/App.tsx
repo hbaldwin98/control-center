@@ -9,10 +9,13 @@ import { Costs } from "../core/Costs";
 import { Dashboard } from "../core/Dashboard";
 import { Events } from "../core/Events";
 import { Jobs } from "../core/Jobs";
+import { Models } from "../core/Models";
+import { PluginDetail } from "../core/PluginDetail";
 import { Plugins } from "../core/Plugins";
 import { Settings } from "../core/Settings";
+import { Inbox } from "../core/Inbox";
 
-import { FatalScreen, LoginScreen, SetupScreen } from "./Gate";
+import { FatalScreen, LoadingScreen, LoginScreen, SetupScreen } from "./Gate";
 import { Layout } from "./Layout";
 import { reconcile } from "./registry";
 import { SessionProvider, useSession } from "./session";
@@ -30,7 +33,7 @@ function Root() {
 
   switch (state.phase) {
     case "loading":
-      return <div className="cc-gate" />;
+      return <LoadingScreen />;
     case "setup":
       return <SetupScreen available={state.available} />;
     case "login":
@@ -50,10 +53,16 @@ function Authenticated({ descriptors }: { descriptors: { id: string; name: strin
   } catch (err) {
     return <FatalScreen error={err instanceof Error ? err : new Error(String(err))} />;
   }
-  return <Shell plugins={plugins} />;
+  return <Shell plugins={plugins} descriptors={descriptors} />;
 }
 
-function Shell({ plugins }: { plugins: PluginModule[] }) {
+function Shell({
+  plugins,
+  descriptors,
+}: {
+  plugins: PluginModule[];
+  descriptors: { id: string; name: string; enabled: boolean }[];
+}) {
   const pluginRoutes = useMemo(
     () => plugins.flatMap((p) => p.routes.map((r) => ({ ...r, key: `${p.id}:${r.path}` }))),
     [plugins],
@@ -62,12 +71,16 @@ function Shell({ plugins }: { plugins: PluginModule[] }) {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout plugins={plugins} />}>
-          <Route index element={<Dashboard />} />
+        <Route element={<Layout plugins={plugins} descriptors={descriptors} />}>
+          <Route index element={<Dashboard plugins={plugins} />} />
           <Route path="/plugins" element={<Plugins />} />
+          <Route path="/plugins/:id" element={<PluginDetail plugins={plugins} />} />
+          <Route path="/plugins/:id/settings" element={<PluginDetail plugins={plugins} />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/events" element={<Events />} />
           <Route path="/costs" element={<Costs />} />
+          <Route path="/models" element={<Models />} />
+          <Route path="/inbox" element={<Inbox />} />
           <Route path="/settings" element={<Settings />} />
           {pluginRoutes.map((r) => (
             <Route key={r.key} path={r.path} element={r.element} />

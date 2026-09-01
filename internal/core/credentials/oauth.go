@@ -22,8 +22,15 @@ import (
 type oauthSecret struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
+	IDToken      string    `json:"id_token,omitempty"`
 	TokenType    string    `json:"token_type"`
 	Expiry       time.Time `json:"expiry"`
+
+	// AccountID and PlanType are non-secret attributes read out of the id_token. They
+	// live inside the envelope because that is where the id_token already is; they are
+	// handed out separately through Attributes, never alongside the token.
+	AccountID string `json:"account_id,omitempty"`
+	PlanType  string `json:"plan_type,omitempty"`
 }
 
 func (t oauthSecret) validAt(at time.Time) bool {
@@ -64,6 +71,17 @@ func (s *Store) allowRedirect(raw string) (string, error) {
 	return n, nil
 }
 
+// redirectFor resolves the callback a flow must use. A provider that pins its redirect
+// uses that address and skips the server allowlist: the allowlist exists to stop this
+// server sending codes to a host it does not serve, and a pinned loopback URI is one
+// this server never serves by design.
+func (s *Store) redirectFor(prov OAuthProvider, requested string) (string, error) {
+	if prov.Manual() {
+		return normalizeRedirect(prov.RedirectURI)
+	}
+	return s.allowRedirect(requested)
+}
+
 func hashHex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
@@ -85,7 +103,7 @@ func (s *Store) BeginOAuth(ctx context.Context, in OAuthStart) (authURL, state s
 	if !ok {
 		return "", "", ErrUnknownProvider
 	}
-	redirect, err := s.allowRedirect(in.RedirectURI)
+	redirect, err := s.redirectFor(prov, in.RedirectURI)
 	if err != nil {
 		return "", "", err
 	}
@@ -134,30 +152,153 @@ func (s *Store) BeginOAuth(ctx context.Context, in OAuthStart) (authURL, state s
 	if len(prov.Scopes) > 0 {
 		q.Set("scope", strings.Join(prov.Scopes, " "))
 	}
+	for k, v := range prov.ExtraAuthParams {
+		q.Set(k, v)
+	}
 	u.RawQuery = q.Encode()
 	return u.String(), state, nil
 }
 
 func (s *Store) CompleteOAuth(ctx context.Context, in OAuthCallback) (Credential, error) {
-	actor, err := actor(ctx)
-	if err != nil {
-		return Credential{}, err
-	}
-	redirect, err := s.allowRedirect(in.RedirectURI)
+	who, err := actor(ctx)
 	if err != nil {
 		return Credential{}, err
 	}
 	if in.State == "" || in.Code == "" || in.SessionID == "" {
 		return Credential{}, ErrOAuthState
 	}
+	st, prov, err := s.consumeState(ctx, in.State, in.SessionID, in.Provider, in.RedirectURI)
+	if err != nil {
+		return Credential{}, err
+	}
+	tok, err := s.exchangeCode(ctx, prov, st.redirect, in.Code, st.verifier)
+	if err != nil {
+		return Credential{}, err
+	}
+	return s.persistOAuth(ctx, who, st.provider, prov, tok, "oauth")
+}
 
-	var verifier, provider string
-	err = s.db.Tx(ctx, func(tx storage.Tx) error {
+// CompleteOAuthManual finishes a pinned-redirect flow from the URL the administrator's
+// browser landed on. The provider redirected to an address only their own machine could
+// serve, so the code never reached this process by itself; pasting it back changes how
+// the code arrives, not what is verified. State, session binding, expiry, and
+// consume-once are enforced exactly as they are for a served callback.
+func (s *Store) CompleteOAuthManual(ctx context.Context, in OAuthManualCallback) (Credential, error) {
+	who, err := actor(ctx)
+	if err != nil {
+		return Credential{}, err
+	}
+	if in.SessionID == "" {
+		return Credential{}, ErrOAuthState
+	}
+	code, state, err := parseCallbackURL(in.CallbackURL)
+	if err != nil {
+		return Credential{}, err
+	}
+	st, prov, err := s.consumeState(ctx, state, in.SessionID, in.Provider, "")
+	if err != nil {
+		return Credential{}, err
+	}
+	if !prov.Manual() {
+		return Credential{}, ErrNotManual
+	}
+	tok, err := s.exchangeCode(ctx, prov, st.redirect, code, st.verifier)
+	if err != nil {
+		return Credential{}, err
+	}
+	return s.persistOAuth(ctx, who, st.provider, prov, tok, "oauth")
+}
+
+// parseCallbackURL pulls the authorization code and state out of a pasted redirect. A
+// provider that reported an error in the query string says so here, rather than having
+// it swallowed into a generic state failure.
+func parseCallbackURL(raw string) (code, state string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", ErrCallbackURL
+	}
+	u, perr := url.Parse(raw)
+	if perr != nil {
+		return "", "", ErrCallbackURL
+	}
+	q := u.Query()
+	if e := q.Get("error"); e != "" {
+		return "", "", fmt.Errorf("%w: provider reported %q", ErrCallbackURL, e)
+	}
+	code, state = q.Get("code"), q.Get("state")
+	if code == "" || state == "" {
+		return "", "", ErrCallbackURL
+	}
+	return code, state, nil
+}
+
+// ImportOAuth adopts tokens another client already holds for the same provider.
+//
+// The refresh token is shared with whatever minted it. Providers that rotate refresh
+// tokens invalidate the old one on first use, so after an import only one of the two
+// clients keeps working. The Settings UI says so before the administrator imports.
+func (s *Store) ImportOAuth(ctx context.Context, in OAuthImport) (Credential, error) {
+	who, err := actor(ctx)
+	if err != nil {
+		return Credential{}, err
+	}
+	prov, ok := s.oauth[in.Provider]
+	if !ok {
+		return Credential{}, ErrUnknownProvider
+	}
+	if strings.TrimSpace(in.RefreshToken.Value) == "" {
+		return Credential{}, ErrInvalidSecret
+	}
+	tok := oauthSecret{
+		AccessToken:  strings.TrimSpace(in.AccessToken.Value),
+		RefreshToken: strings.TrimSpace(in.RefreshToken.Value),
+		IDToken:      strings.TrimSpace(in.IDToken.Value),
+		TokenType:    "Bearer",
+	}
+	if in.ExpiresIn > 0 {
+		tok.Expiry = s.now().UTC().Add(time.Duration(in.ExpiresIn) * time.Second)
+	}
+	// An imported access token arrives without expires_in. Without an expiry the
+	// credential would look permanently valid and never refresh, so fall back to the
+	// token's own exp claim and, failing that, treat it as already spent so the first
+	// use renews it.
+	if tok.Expiry.IsZero() {
+		tok.Expiry = jwtExpiry(tok.AccessToken)
+	}
+	if tok.Expiry.IsZero() {
+		tok.Expiry = s.now().UTC()
+	}
+	return s.persistOAuth(ctx, who, in.Provider, prov, tok, "import")
+}
+
+type oauthState struct {
+	provider string
+	redirect string
+	verifier string
+}
+
+// consumeState verifies and burns the pending authorization state exactly once. When
+// wantRedirect is non-empty it must equal the redirect the flow began with, which binds
+// a served callback to the host that started it.
+func (s *Store) consumeState(ctx context.Context, state, sessionID, wantProvider, wantRedirect string) (oauthState, OAuthProvider, error) {
+	if state == "" {
+		return oauthState{}, OAuthProvider{}, ErrOAuthState
+	}
+	var expect string
+	if wantRedirect != "" {
+		n, err := normalizeRedirect(wantRedirect)
+		if err != nil {
+			return oauthState{}, OAuthProvider{}, err
+		}
+		expect = n
+	}
+	var out oauthState
+	err := s.db.Tx(ctx, func(tx storage.Tx) error {
 		var sessionHash, storedProvider, storedRedirect, env, expires string
 		var consumed *string
 		err := tx.QueryRow(ctx,
 			`SELECT session_hash, provider, redirect_uri, verifier_envelope, expires_at, consumed_at
-			   FROM core_credential_oauth_states WHERE state_hash = ?`, hashHex(in.State)).
+			   FROM core_credential_oauth_states WHERE state_hash = ?`, hashHex(state)).
 			Scan(&sessionHash, &storedProvider, &storedRedirect, &env, &expires, &consumed)
 		if storage.IsNoRows(err) {
 			return ErrOAuthState
@@ -172,41 +313,46 @@ func (s *Store) CompleteOAuth(ctx context.Context, in OAuthCallback) (Credential
 		if err != nil || !s.now().UTC().Before(exp) {
 			return ErrOAuthState
 		}
-		if sessionHash != hashHex(in.SessionID) || storedRedirect != redirect {
+		if sessionHash != hashHex(sessionID) {
 			return ErrOAuthState
 		}
-		if in.Provider != "" && storedProvider != in.Provider {
+		if expect != "" && storedRedirect != expect {
 			return ErrOAuthState
 		}
-		provider = storedProvider
-		plain, err := s.decrypt(env, "core_credential_oauth_states", hashHex(in.State), string(KindOAuth), storedProvider, 0)
+		if wantProvider != "" && storedProvider != wantProvider {
+			return ErrOAuthState
+		}
+		plain, err := s.decrypt(env, "core_credential_oauth_states", hashHex(state), string(KindOAuth), storedProvider, 0)
 		if err != nil {
 			return err
 		}
-		verifier = string(plain)
+		out = oauthState{provider: storedProvider, redirect: storedRedirect, verifier: string(plain)}
 		_, err = tx.Exec(ctx,
 			`UPDATE core_credential_oauth_states SET consumed_at = ? WHERE state_hash = ?`,
-			rfc(s.now()), hashHex(in.State))
+			rfc(s.now()), hashHex(state))
 		return err
 	})
 	if err != nil {
-		return Credential{}, err
+		return oauthState{}, OAuthProvider{}, err
 	}
-
-	prov, ok := s.oauth[provider]
+	prov, ok := s.oauth[out.provider]
 	if !ok {
-		return Credential{}, ErrUnknownProvider
+		return oauthState{}, OAuthProvider{}, ErrUnknownProvider
 	}
-	tok, err := s.exchangeCode(ctx, prov, redirect, in.Code, verifier)
-	if err != nil {
-		return Credential{}, err
-	}
+	return out, prov, nil
+}
+
+// persistOAuth writes the credential under the provider's stable id, bumping its version
+// so refresh compare-and-swap and audit stay coherent across reauthorization.
+func (s *Store) persistOAuth(ctx context.Context, who, provider string, prov OAuthProvider, tok oauthSecret, action string) (Credential, error) {
+	tok.AccountID = claimString(tok.IDToken, prov.AccountClaim)
+	tok.PlanType = claimString(tok.IDToken, prov.PlanClaim)
 
 	id := "oauth-" + provider
 	var out Credential
-	err = s.db.Tx(ctx, func(tx storage.Tx) error {
+	err := s.db.Tx(ctx, func(tx storage.Tx) error {
 		existing, readErr := readTx(ctx, tx, id)
-		isNew := readErr != nil && readErr == ErrUnknownCredential
+		isNew := readErr == ErrUnknownCredential
 		if readErr != nil && !isNew {
 			return readErr
 		}
@@ -241,7 +387,7 @@ func (s *Store) CompleteOAuth(ctx context.Context, in OAuthCallback) (Credential
 		if err != nil {
 			return err
 		}
-		if err := s.audit(ctx, tx, id, actor, "oauth", version); err != nil {
+		if err := s.audit(ctx, tx, id, who, action, version); err != nil {
 			return err
 		}
 		out = Credential{ID: id, Kind: KindOAuth, Provider: provider, Status: StatusOK, Version: version, Scopes: prov.Scopes}
@@ -268,44 +414,71 @@ func (s *Store) exchangeCode(ctx context.Context, prov OAuthProvider, redirect, 
 	if prov.ClientSecret != "" {
 		form.Set("client_secret", prov.ClientSecret)
 	}
-	return s.tokenRequest(ctx, prov.TokenURL, form)
+	return s.tokenRequest(ctx, prov.TokenURL, form, false)
 }
 
-func (s *Store) tokenRequest(ctx context.Context, tokenURL string, form url.Values) (oauthSecret, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+// tokenRequest posts a grant to the provider's token endpoint. Most providers take a
+// form body; some take JSON on the refresh grant only, which is why the encoding is a
+// per-request choice rather than a per-provider one.
+func (s *Store) tokenRequest(ctx context.Context, tokenURL string, form url.Values, asJSON bool) (oauthSecret, error) {
+	var (
+		body        io.Reader
+		contentType string
+	)
+	if asJSON {
+		fields := map[string]string{}
+		for k := range form {
+			fields[k] = form.Get(k)
+		}
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			return oauthSecret{}, err
+		}
+		body, contentType = strings.NewReader(string(raw)), "application/json"
+	} else {
+		body, contentType = strings.NewReader(form.Encode()), "application/x-www-form-urlencoded"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, body)
 	if err != nil {
 		return oauthSecret{}, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	res, err := s.http.Do(req)
 	if err != nil {
 		return oauthSecret{}, err
 	}
 	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
 		return oauthSecret{}, err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		// An error body can echo the grant back. Report the status and nothing else.
 		return oauthSecret{}, fmt.Errorf("credentials: token endpoint status %d", res.StatusCode)
 	}
-	var raw struct {
+	var parsed struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
 		TokenType    string `json:"token_type"`
 		ExpiresIn    int    `json:"expires_in"`
 		Error        string `json:"error"`
 	}
-	if err := json.Unmarshal(body, &raw); err != nil {
+	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return oauthSecret{}, err
 	}
-	if raw.Error == "invalid_grant" || raw.AccessToken == "" {
+	if parsed.Error == "invalid_grant" || parsed.AccessToken == "" {
 		return oauthSecret{}, ErrNeedsReauth
 	}
-	tok := oauthSecret{AccessToken: raw.AccessToken, RefreshToken: raw.RefreshToken, TokenType: raw.TokenType}
-	if raw.ExpiresIn > 0 {
-		tok.Expiry = s.now().UTC().Add(time.Duration(raw.ExpiresIn) * time.Second)
+	tok := oauthSecret{
+		AccessToken: parsed.AccessToken, RefreshToken: parsed.RefreshToken,
+		IDToken: parsed.IDToken, TokenType: parsed.TokenType,
+	}
+	if parsed.ExpiresIn > 0 {
+		tok.Expiry = s.now().UTC().Add(time.Duration(parsed.ExpiresIn) * time.Second)
+	} else {
+		tok.Expiry = jwtExpiry(tok.AccessToken)
 	}
 	return tok, nil
 }
@@ -357,15 +530,28 @@ func (s *Store) refreshOAuth(ctx context.Context, row credRow, current oauthSecr
 	if prov.ClientSecret != "" {
 		form.Set("client_secret", prov.ClientSecret)
 	}
-	next, err := s.tokenRequest(ctx, prov.TokenURL, form)
+	next, err := s.tokenRequest(ctx, prov.TokenURL, form, prov.RefreshJSON)
 	if err != nil {
 		if errorsIs(err, ErrNeedsReauth) {
 			_ = s.markNeedsReauth(ctx, fresh)
 		}
 		return "", err
 	}
+	// A refresh response need not repeat what has not changed. Carry those fields
+	// forward so a renewal does not lose the account id the provider requires.
 	if next.RefreshToken == "" {
 		next.RefreshToken = tok.RefreshToken
+	}
+	if next.IDToken == "" {
+		next.IDToken = tok.IDToken
+	}
+	next.AccountID = claimString(next.IDToken, prov.AccountClaim)
+	if next.AccountID == "" {
+		next.AccountID = tok.AccountID
+	}
+	next.PlanType = claimString(next.IDToken, prov.PlanClaim)
+	if next.PlanType == "" {
+		next.PlanType = tok.PlanType
 	}
 	if err := s.saveOAuth(ctx, fresh, next, "refresh"); err != nil {
 		return "", err

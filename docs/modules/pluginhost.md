@@ -63,6 +63,8 @@ before migrating or initializing any of them:
   subscriptions have a name
 - declared HTTP method/path pairs are relative to the plugin mount, canonical, and unique
 - config schemas use the supported JSON Schema subset and validate their defaults
+- declared AI model names are valid route names, unique per plugin, have a purpose, and
+  use only known capabilities (`chat`, `vision`, `grounding`, `embed`)
 - route, job, and subscription declarations do not collide
 
 Declarations must be readable before `Init`; handlers are not invoked during
@@ -72,7 +74,7 @@ Exactly one core file imports plugin packages:
 
 ```go
 func registerPlugins(r pluginhost.Registry) error {
-    return r.RegisterAll(hello.New(), bidrl.New())
+    return r.RegisterAll(hello.New(), pagewatch.New(), tid.New())
 }
 ```
 
@@ -93,6 +95,7 @@ func (r *registry) facadeFor(m host.Manifest) host.Host {
     return &scopedHost{
         pluginID: m.ID,
         ai:       ai.Scoped(r.ai, m.ID),
+        browser:  browser.Scoped(r.browser, m.ID),
         jobs:     jobs.Scoped(r.jobs, m.ID),
         events:   gatedEvents{inner: scopedEvents, db: r.db, gate: r.policy, pluginID: m.ID},
         store:    gatedStore{inner: scopedStore, gate: r.policy, pluginID: m.ID},
@@ -160,12 +163,12 @@ back persisted policy state. Startup and the background reconciler resume unfini
 work.
 
 Disable persists policy revocation first. Admission checks then reject new jobs, AI
-dispatches, subscription handlers, plugin HTTP requests, plugin event publication, and
-plugin storage/blob mutations. Reconciliation cancels
-admitted job, AI, subscription, and request contexts; replaces the route with the host
-503; changes durable subscriptions to discard/ack; detaches live subscriptions; and
-removes cron schedules. It then calls `Shutdown` with a bounded context for a plugin that
-was initialized. A timeout leaves health degraded; Go cannot force the plugin's
+dispatches, browser sessions, subscription handlers, plugin HTTP requests, plugin event
+publication, and plugin storage/blob mutations. Reconciliation cancels admitted job, AI,
+subscription, request, and browser contexts; closes admitted browser sessions; replaces
+the route with the host 503; changes durable subscriptions to discard/ack; detaches live
+subscriptions; and removes cron schedules. It then calls `Shutdown` with a bounded
+context for a plugin that was initialized. A timeout leaves health degraded; Go cannot force the plugin's
 goroutines to exit. Repeating any step has the same result.
 
 Config watches belong to one enabled runtime generation. Disable cancels their callback
@@ -189,6 +192,9 @@ reconciliation derives work from persisted policy state and current runtime stat
 | Admitted jobs | Context cancelled; cooperative handler is fenced and recorded cancelled. | `jobs` |
 | New `AI().Chat`, `ChatStream`, `Embed` | Rejected before reservation or provider dispatch. | `ai` |
 | Admitted AI calls | Context cancelled; paid provider work may finish and is accounted. | `ai` |
+| New `Browser().Open` / page I/O | Rejected before any engine call. | `browser` |
+| New `Search().Query` | Rejected before any engine call. | `search` |
+| Admitted browser sessions | Context cancelled; pages and the browser context are closed. | `browser` |
 | New subscription deliveries | Handler not invoked; durable cursor advances in discard/ack mode. | `pluginhost` |
 | Admitted subscription handlers | Context cancelled; handler may continue cooperatively. | `pluginhost` |
 | New HTTP requests | Host-owned `503`; plugin handler not invoked. | `pluginhost` |

@@ -7,8 +7,10 @@
 export type {
   Event,
   NavItem,
+  PluginDashboard,
   PluginDescriptor,
   PluginModule,
+  PluginSurfaceProps,
   RouteDef,
   Snapshot,
 } from "./types";
@@ -24,31 +26,58 @@ export {
 export type { ApiErrorBody, BufferedSnapshot, PluginApi } from "./api";
 
 export { idAbove, stream } from "./stream";
-export type { StreamBuffer } from "./stream";
+export type { StreamBuffer, StreamStatus } from "./stream";
 
 export { isValidPattern, matchesPattern } from "./pattern";
 
-export { useEvents, useSnapshot, useStreamEpoch } from "./hooks";
+export { Link, useNavigate, usePath, useQueryState, useRouteParams } from "./nav";
+
+export { useActivity, useEvents, useNow, useSnapshot, useStreamEpoch, useStreamStatus } from "./hooks";
 export type {
+  Activity,
   ApplyEvent,
   SnapshotState,
+  UseActivityOptions,
   UseEventsOptions,
   UseSnapshotOptions,
   UseSnapshotResult,
 } from "./hooks";
 
+export { formatDateTime, formatProgress, formatRelative, formatRemaining, formatTime, formatUSD } from "./format";
+
 export {
+  ActionsHeader,
+  Async,
   Badge,
   Button,
   Callout,
   Card,
+  Checkbox,
+  Dash,
   EmptyState,
   Field,
   Grid,
+  Hint,
   Input,
+  LiveDot,
+  Loading,
+  LogBlock,
+  Meter,
+  Metric,
+  Money,
   Page,
   PageHeader,
+  RelativeTime,
+  Countdown,
   Row,
+  Select,
+  Sparkline,
   Stack,
-  TableScroll,
+  SortHeader,
+  Table,
+  Tabs,
+  Textarea,
+  Time,
+  Toolbar,
 } from "./components";
+export { PluginAIHint } from "./setup";

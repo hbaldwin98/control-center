@@ -1,6 +1,14 @@
 package main
 
-import "context"
+import (
+	"net/http"
+
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
+	"github.com/hbaldwin98/control-center/plugins/bidrl"
+	"github.com/hbaldwin98/control-center/plugins/hello"
+	"github.com/hbaldwin98/control-center/plugins/pagewatch"
+	"github.com/hbaldwin98/control-center/plugins/tid"
+)
 
 // This is the only file in the program that imports plugin packages.
 //
@@ -8,8 +16,19 @@ import "context"
 // module. CI checks each plugin's full dependency graph and rejects core, application,
 // other-plugin, and undeclared project imports, so a boundary violation is a failed
 // architectural test rather than a review convention.
-//
-// Plugins arrive at milestone 6; until then this registers nothing.
-func registerPlugins(_ context.Context) error {
-	return nil
+func registerPlugins(r *pluginhost.Registry) error {
+	return r.RegisterAll(
+		hello.New(),
+		pagewatch.New(),
+		tid.New(),
+		bidrl.New(),
+	)
+}
+
+func fakePluginHosts() map[string]http.Handler {
+	site := bidrl.FakeSite()
+	return map[string]http.Handler{
+		"www.bidrl.com": site,
+		"bidrl.com":     site,
+	}
 }

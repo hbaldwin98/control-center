@@ -5,6 +5,7 @@
   --bg: #fbfbfa;
   --bg-raised: #ffffff;
   --bg-sunken: #f2f1ee;
+  --bg-hover: #f6f5f2;
   --border: #e2e0db;
   --border-strong: #cbc8c1;
   --text: #1b1b1d;
@@ -16,7 +17,9 @@
   --accent-soft: #eaeeff;
 
   --ok: #2f7d4f;
+  --ok-soft: #e8f5ed;
   --warn: #9a6a12;
+  --warn-soft: #fdf3e0;
   --danger: #b5342c;
   --danger-soft: #fdecea;
 
@@ -28,13 +31,25 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 
   --nav-width: 208px;
+
+  /* One spacing scale. Screens compose these rather than inventing pixel values. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
 }
 
+/* The dark palette is declared once and applied both to the system preference and to an
+   explicit choice, so the two can never drift apart. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #17171a;
     --bg-raised: #1f1f23;
     --bg-sunken: #121214;
+    --bg-hover: #26262c;
     --border: #2e2e34;
     --border-strong: #43434b;
     --text: #ececef;
@@ -46,7 +61,9 @@
     --accent-soft: #23273d;
 
     --ok: #5cbe83;
+    --ok-soft: #17291f;
     --warn: #d5a24a;
+    --warn-soft: #2b2214;
     --danger: #ef6f66;
     --danger-soft: #331d1c;
 
@@ -55,9 +72,11 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #17171a;
   --bg-raised: #1f1f23;
   --bg-sunken: #121214;
+  --bg-hover: #26262c;
   --border: #2e2e34;
   --border-strong: #43434b;
   --text: #ececef;
@@ -69,7 +88,9 @@
   --accent-soft: #23273d;
 
   --ok: #5cbe83;
+  --ok-soft: #17291f;
   --warn: #d5a24a;
+  --warn-soft: #2b2214;
   --danger: #ef6f66;
   --danger-soft: #331d1c;
 
@@ -124,6 +145,24 @@ kbd {
   font-size: 0.92em;
 }
 
+/* One focus ring for every interactive element, so keyboard position is never lost. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+.cc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ---- layout ---- */
 
 .cc-shell {
@@ -136,37 +175,17 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 16px 10px;
+  padding: var(--space-4) 10px;
   background: var(--bg-sunken);
   border-right: 1px solid var(--border);
   overflow-y: auto;
-}
-
-.cc-nav__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 8px 14px;
-}
-
-.cc-nav__items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-height: 0;
-}
-
-/* Only the narrow layout collapses the links behind this. */
-.cc-nav__toggle {
-  display: none;
 }
 
 .cc-nav__brand {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  padding: 0 var(--space-2) 14px;
   font-weight: 650;
   letter-spacing: -0.02em;
 }
@@ -178,7 +197,7 @@ kbd {
 }
 
 .cc-nav__section {
-  padding: 14px 8px 5px;
+  padding: 14px var(--space-2) 5px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -189,8 +208,8 @@ kbd {
 .cc-nav__link {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   text-decoration: none;
@@ -198,7 +217,7 @@ kbd {
 }
 
 .cc-nav__link:hover {
-  background: var(--bg-raised);
+  background: var(--bg-hover);
   color: var(--text);
 }
 
@@ -207,44 +226,237 @@ kbd {
   color: var(--accent);
 }
 
+.cc-nav__link--off {
+  color: var(--text-faint);
+}
+
+.cc-nav__link--off::after {
+  content: "off";
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .cc-nav__spacer {
   flex: 1;
+  min-height: var(--space-4);
+}
+
+.cc-nav__footer {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
 }
 
 .cc-main {
   overflow-y: auto;
 }
 
+.cc-main a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.cc-main a:hover {
+  text-decoration: underline;
+}
+
 .cc-page {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 32px 64px;
+  padding: 28px var(--space-6) 64px;
 }
 
 .cc-page__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
   margin-bottom: 20px;
 }
 
+.cc-page__heading {
+  min-width: 0;
+}
+
 .cc-page__lede {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--text-muted);
   max-width: 60ch;
 }
 
+/* Below the nav breakpoint the sidebar becomes a scrolling strip across the top. */
+@media (max-width: 720px) {
+  .cc-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .cc-nav {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding: 10px var(--space-3);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-y: visible;
+  }
+
+  .cc-nav__brand {
+    padding: 0 var(--space-2) 0 0;
+  }
+
+  /* The strip is short enough to read end to end; the group headings only muddle it. */
+  .cc-nav__section {
+    display: none;
+  }
+
+  .cc-nav__spacer {
+    min-height: 0;
+  }
+
+  .cc-nav__footer {
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .cc-page {
+    padding: 20px var(--space-4) 48px;
+  }
+
+  .cc-page__header {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* A filter bar's 180px floor produces a ragged two-up at phone widths, where the second
+     control is always too narrow to read. One control per row instead. */
+  .cc-toolbar {
+    gap: var(--space-2);
+  }
+
+  .cc-toolbar .cc-field,
+  .cc-toolbar .cc-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Four sections do not fit across a phone; the strip scrolls rather than wrapping into
+     a second row that pushes the screen down. */
+  .cc-tabs {
+    gap: var(--space-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .cc-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cc-tabs a {
+    white-space: nowrap;
+  }
+
+  .cc-card {
+    padding: var(--space-3);
+  }
+
+  .cc-table-scroll {
+    margin: 0 calc(var(--space-3) * -1);
+    padding: 0 var(--space-3);
+  }
+
+  /* iOS Safari zooms the whole viewport when a focused field is under 16px, and never
+     zooms back out. Controls also grow to a comfortable touch target here. */
+  .cc-input,
+  .cc-select,
+  .cc-textarea {
+    font-size: 16px;
+  }
+
+  .cc-button {
+    min-height: 40px;
+  }
+}
+
 /* ---- surfaces ---- */
 
+.cc-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
 .cc-card--muted {
-  opacity: 0.72;
+  background: var(--bg-sunken);
+}
+
+.cc-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.cc-card__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cc-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+/* Grid items default to min-width: auto, which lets long titles and plugin surfaces
+   blow the track out and overflow the page. */
+.cc-grid > * {
+  min-width: 0;
+}
+
+.cc-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cc-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Filter bars align their controls on the baseline of the control, not the label. */
+.cc-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.cc-toolbar .cc-field {
+  min-width: 180px;
+}
+
+.cc-toolbar .cc-check {
+  min-height: 34px;
 }
 
 .cc-stats {
   display: grid;
-  grid-template-columns: 6ch 1fr;
-  gap: 2px 16px;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -255,40 +467,69 @@ kbd {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  line-height: 22px;
 }
 
 .cc-stats dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
-.cc-card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-}
-
-.cc-card__title {
-  margin-bottom: 10px;
-}
-
-.cc-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-}
-
-.cc-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cc-row {
+.cc-check {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
+  font-size: 14px;
+}
+
+.cc-group__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.cc-mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+/* ---- typography ---- */
+
+.cc-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.cc-dash {
+  color: var(--text-faint);
+}
+
+.cc-log {
+  margin: 0;
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* A callout owns its own log block, so the border and background do not double up. */
+.cc-callout .cc-log {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
 }
 
 /* ---- controls ---- */
@@ -305,16 +546,24 @@ kbd {
   color: var(--text);
   font: inherit;
   font-weight: 550;
+  line-height: 1.35;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .cc-button:hover:not(:disabled) {
   border-color: var(--text-faint);
+  background: var(--bg-hover);
 }
 
 .cc-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.cc-button--sm {
+  padding: 3px 9px;
+  font-size: 12.5px;
 }
 
 .cc-button--primary {
@@ -323,16 +572,39 @@ kbd {
   color: var(--accent-text);
 }
 
+.cc-button--primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
+
 .cc-button--danger {
   color: var(--danger);
   border-color: var(--danger);
   background: transparent;
 }
 
+.cc-button--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.cc-button--pressed {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cc-button--pressed:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
 .cc-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
 }
 
 .cc-field__label {
@@ -344,14 +616,29 @@ kbd {
   font-size: 12.5px;
 }
 
+/* A stacked field caps at a readable measure; one in a filter bar flexes with its row. */
+.cc-field > .cc-input {
+  max-width: 480px;
+}
+
+.cc-toolbar .cc-field > .cc-input {
+  max-width: none;
+}
+
 .cc-input {
-  padding: 8px 10px;
+  padding: 7px 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text);
   font: inherit;
+  line-height: 1.35;
   width: 100%;
+}
+
+.cc-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .cc-input:focus-visible {
@@ -364,13 +651,51 @@ kbd {
   font-family: var(--mono);
 }
 
+/* Two inputs that sit beside a button rather than filling their container. */
+.cc-input--pattern {
+  width: 22ch;
+}
+
+.cc-input--reason {
+  width: 30ch;
+}
+
+.cc-select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.cc-textarea {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
 /* ---- feedback ---- */
 
 .cc-callout {
-  padding: 10px 12px;
+  padding: 10px var(--space-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-sunken);
+}
+
+.cc-callout--ok {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cc-callout--warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .cc-callout--danger {
@@ -388,6 +713,11 @@ kbd {
   border: 1px solid var(--border-strong);
   font-size: 12px;
   font-weight: 550;
+  line-height: 18px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
 }
 
@@ -405,11 +735,25 @@ kbd {
 }
 
 .cc-empty {
-  padding: 32px;
+  padding: var(--space-6);
   text-align: center;
   color: var(--text-muted);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
+}
+
+.cc-empty--loading {
+  color: var(--text-faint);
+}
+
+/* Inside a card the surrounding panel is already the placeholder, so the empty state is
+   a quiet line of text rather than a second box drawn within the first. */
+.cc-card .cc-empty {
+  padding: 2px 0;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  font-size: 12.5px;
 }
 
 /* ---- centred single-purpose screens (setup, login, fatal) ---- */
@@ -418,7 +762,7 @@ kbd {
   display: grid;
   place-items: center;
   min-height: 100%;
-  padding: 24px;
+  padding: var(--space-5);
 }
 
 .cc-gate__panel {
@@ -427,11 +771,11 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 24px;
+  padding: var(--space-5);
 }
 
 .cc-gate__title {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .cc-gate__lede {
@@ -440,6 +784,15 @@ kbd {
 }
 
 /* ---- tables ---- */
+
+/* Wide tables scroll inside their card; the page itself never scrolls sideways. */
+.cc-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  margin: 0 calc(var(--space-4) * -1);
+  padding: 0 var(--space-4);
+}
 
 .cc-table {
   width: 100%;
@@ -465,13 +818,94 @@ kbd {
   vertical-align: top;
 }
 
-.cc-table tr:last-child td {
+.cc-table th:last-child,
+.cc-table td:last-child {
+  padding-right: 0;
+}
+
+/* A numeric column heads right too, so the header sits over its own digits. */
+.cc-table th.cc-num {
+  text-align: right;
+}
+
+.cc-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.cc-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+/* An expanded detail row belongs to the row above it, so it does not restripe on hover. */
+.cc-table tbody tr.cc-table__detail:hover td {
+  background: none;
+}
+
+.cc-table__detail > td {
+  padding-bottom: var(--space-3);
+}
+
+.cc-table__actions {
+  width: 1%;
+}
+
+.cc-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cc-table__sort:hover {
+  color: var(--text);
+}
+
+.cc-table th[aria-sort="ascending"] .cc-table__sort,
+.cc-table th[aria-sort="descending"] .cc-table__sort {
+  color: var(--text);
+}
+
+.cc-table th.cc-num .cc-table__sort {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.cc-table__sort-indicator {
+  display: inline-block;
+  width: 0.9em;
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0;
+}
+
+.cc-table th[aria-sort="ascending"] .cc-table__sort-indicator,
+.cc-table th[aria-sort="descending"] .cc-table__sort-indicator {
+  opacity: 1;
 }
 
 .cc-num {
   text-align: right;
   color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* A timestamp reads as one token. The table scrolls, so it never has to wrap. */
+.cc-table time {
+  white-space: nowrap;
+}
+
+.cc-nowrap {
   white-space: nowrap;
 }
 
@@ -485,104 +919,341 @@ kbd {
   color: var(--text-muted);
 }
 
-/* A table keeps its natural column widths and scrolls inside this, so the page itself
-   never scrolls sideways. */
-.cc-table-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+/* ---- dashboard ---- */
+
+/* Named densities, so no screen has to pass column pixels of its own. */
+.cc-grid--metric {
+  grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 1fr));
 }
 
-/* ---- narrow viewports (phones, split-screen tablets) ----
+.cc-grid--tile {
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+}
 
-   The sidebar becomes a top bar whose links collapse behind a toggle, the page gutters
-   shrink, and controls grow to comfortable touch targets. Inputs go to 16px because iOS
-   Safari zooms the viewport when a focused field is smaller. */
+/* A liveness dot. `live` pulses; the rest are steady, so a glance distinguishes them. */
+.cc-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
 
-@media (max-width: 860px) {
-  .cc-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+.cc-dot--live {
+  background: var(--ok);
+  animation: cc-pulse 2s ease-out infinite;
+}
+
+.cc-dot--idle {
+  background: color-mix(in srgb, var(--ok) 55%, var(--border-strong));
+}
+
+.cc-dot--stale {
+  background: var(--warn);
+}
+
+.cc-dot--off {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+@keyframes cc-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
   }
-
-  .cc-nav {
-    padding: 10px 12px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    overflow: visible;
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--ok) 0%, transparent);
   }
-
-  .cc-nav__bar {
-    padding: 0;
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent);
   }
+}
 
-  .cc-nav__toggle {
-    display: inline-flex;
-    align-items: center;
-    min-height: 40px;
-    padding: 7px 14px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-raised);
-    color: var(--text);
-    font: inherit;
-    font-size: 15px;
-    font-weight: 550;
-    cursor: pointer;
+@media (prefers-reduced-motion: reduce) {
+  .cc-dot--live {
+    animation: none;
   }
+}
 
-  .cc-nav__items {
-    display: none;
-  }
+/* ---- figures ---- */
 
-  .cc-nav[data-open="true"] .cc-nav__items {
-    display: flex;
-    padding-top: 10px;
-  }
+.cc-metric {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
 
-  .cc-nav__link {
-    padding: 10px 8px;
-  }
+.cc-metric__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
 
-  /* The sign-out button sits directly under the links rather than at the far edge. */
-  .cc-nav__spacer {
-    display: none;
-  }
+.cc-metric__value {
+  margin-top: 2px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 
-  .cc-page {
-    padding: 20px 16px 48px;
-  }
+.cc-metric__hint {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
 
-  .cc-page__header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
+.cc-metric--ok .cc-metric__value {
+  color: var(--ok);
+}
+.cc-metric--warn .cc-metric__value {
+  color: var(--warn);
+}
+.cc-metric--danger .cc-metric__value {
+  color: var(--danger);
+}
 
-  .cc-card {
-    padding: 14px;
-    /* Tables live inside cards; scroll them here so the page does not move sideways. */
-    overflow-x: auto;
-  }
+/* Widths come from the component as custom properties: they are data, not design. */
+.cc-meter {
+  display: flex;
+  width: 100%;
+  min-width: 60px;
+  height: 5px;
+  margin-top: var(--space-1);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
 
-  .cc-gate {
-    align-content: start;
-    padding: 32px 16px;
-  }
+.cc-meter__fill {
+  width: var(--meter-used);
+}
 
-  .cc-gate__panel {
-    padding: 20px;
-  }
+.cc-meter__fill--ok {
+  background: var(--ok);
+}
+.cc-meter__fill--warn {
+  background: var(--warn);
+}
+.cc-meter__fill--danger {
+  background: var(--danger);
+}
+.cc-meter__fill--accent {
+  background: var(--accent);
+}
 
-  .cc-input,
-  .cc-button {
-    font-size: 16px;
-  }
+/* The reserved-but-not-committed part: present, but visibly not yet spent. */
+.cc-meter__held {
+  width: var(--meter-held);
+  background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 4px);
+}
 
-  .cc-button {
-    min-height: 40px;
-  }
+.cc-spark {
+  display: block;
+  width: 100%;
+  height: 22px;
+}
 
-  .cc-truncate {
-    max-width: min(42ch, 60vw);
-  }
+.cc-spark--tall {
+  height: 34px;
+}
+
+.cc-spark__bar {
+  fill: var(--accent);
+}
+
+.cc-spark__bar--empty {
+  fill: var(--border);
+}
+
+/* ---- plugin tiles ---- */
+
+.cc-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The title is a link, but it is still the card's heading: it takes colour on hover only. */
+.cc-main .cc-tile__link {
+  color: inherit;
+}
+
+.cc-main .cc-tile__link:hover {
+  color: var(--accent);
+}
+
+.cc-tile__stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.cc-tile__stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cc-tile__stat-value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.cc-tile__activity {
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+.cc-tile__foot {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: auto;
+  padding-top: var(--space-1);
+}
+
+/* A whole-card link for the plugin catalog: one click opens the plugin. */
+a.cc-catalog {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.cc-main a.cc-catalog {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cc-main a.cc-catalog:hover {
+  text-decoration: none;
+}
+
+.cc-main a.cc-catalog:hover .cc-card {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.cc-catalog .cc-card {
+  height: 100%;
+}
+
+.cc-catalog__lede {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* A plugin-supplied surface, fenced off so it reads as the plugin's own area. */
+.cc-surface {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cc-tile .cc-surface {
+  max-height: 7.5rem;
+}
+
+.cc-surface--failed {
+  color: var(--danger);
+}
+
+/* ---- budget windows ---- */
+
+.cc-windows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cc-windows__row {
+  display: grid;
+  grid-template-columns: 7ch 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.cc-windows__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-top: 2px;
+}
+
+.cc-windows__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-card > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.cc-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cc-card[open] > summary {
+  margin-bottom: 10px;
+}
+
+.cc-tabs {
+  display: flex;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-1);
+}
+
+.cc-tabs a {
+  padding: var(--space-2) 0;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.cc-tabs a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.cc-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-countdown--soon {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.cc-countdown--ended {
+  color: var(--text-faint);
+}
+
+.cc-lot-thumb {
+  display: block;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
 }

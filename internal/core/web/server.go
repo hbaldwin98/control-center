@@ -16,6 +16,8 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
+	"github.com/hbaldwin98/control-center/internal/core/notifications"
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
@@ -54,13 +56,23 @@ type Deps struct {
 	// AI is host-managed model routing and usage. Query returns no credentials.
 	AI *ai.Service
 
-	// Plugins reports the registered plugins the shell reconciles against. pluginhost
-	// supplies it at milestone 6; until then the registry is empty.
+	// Notifications turns committed events into inbox rows and channel deliveries.
+	Notifications *notifications.Service
+
+	// Plugins reports the registered plugins the shell reconciles against.
 	Plugins func(context.Context) []PluginDescriptor
+
+	// PluginHost owns plugin lifecycle, scoped facades, and /api/plugins/ routes.
+	PluginHost *pluginhost.Registry
 
 	// StaticDir holds the built frontend. When it is missing, the server serves a small
 	// built-in placeholder so the API is still usable.
 	StaticDir string
+
+	// BootstrapPassword, when set and no administrator exists yet, completes first-run
+	// setup without the loopback token. The container entrypoint uses this so Docker
+	// Desktop (where the browser is not a loopback peer) can start in one command.
+	BootstrapPassword string
 
 	// Now is injectable for tests.
 	Now func() time.Time
@@ -101,6 +113,16 @@ func New(ctx context.Context, m storage.Migrator, deps Deps) (*Server, error) {
 	if err := s.auth.purgeExpired(ctx); err != nil {
 		return nil, err
 	}
+	if deps.BootstrapPassword != "" {
+		created, err := s.auth.createAdminIfAbsent(ctx, deps.BootstrapPassword)
+		if err != nil {
+			return nil, err
+		}
+		if created {
+			slog.Info("administrator created from CC_BOOTSTRAP_PASSWORD")
+		}
+		return s, nil
+	}
 	token, err := s.auth.ensureBootstrapToken(ctx)
 	if err != nil {
 		return nil, err
@@ -131,6 +153,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/admin/plugins/{id}/enable", s.authenticated(s.handlePluginEnable))
 	s.mux.HandleFunc("POST /api/admin/plugins/{id}/disable", s.authenticated(s.handlePluginDisable))
 	s.mux.HandleFunc("PUT /api/admin/plugins/{id}/budget", s.authenticated(s.handlePluginBudget))
+	s.mux.HandleFunc("GET /api/admin/plugins/{id}/config", s.authenticated(s.handlePluginConfigGet))
+	s.mux.HandleFunc("PUT /api/admin/plugins/{id}/config", s.authenticated(s.handlePluginConfigPut))
+
+	s.mux.Handle("/api/plugins/", s.authenticated(s.handlePluginAPI))
 
 	s.mux.HandleFunc("GET /api/jobs", s.authenticated(s.handleJobList))
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.authenticated(s.handleJobGet))
@@ -147,10 +173,40 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/admin/credentials/{id}/rotate", s.requireReauth(s.handleCredentialRotate))
 	s.mux.HandleFunc("DELETE /api/admin/credentials/{id}", s.requireReauth(s.handleCredentialDelete))
 	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/begin", s.requireReauth(s.handleOAuthBegin))
+	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/import", s.requireReauth(s.handleOAuthImport))
+	// Completing a flow is gated the same way whether the callback is served or pasted:
+	// a session, and the one-time state that only the browser which began it holds.
+	// Reauthentication is spent at the beginning, because the sign-in in between is a
+	// trip through the provider's own login and can outlast the five-minute window.
+	s.mux.HandleFunc("POST /api/admin/credentials/oauth/{provider}/manual", s.authenticated(s.withActor(s.handleOAuthManual)))
 	s.mux.HandleFunc("GET /api/admin/credentials/oauth/callback", s.authenticated(s.withActor(s.handleOAuthCallback)))
+	// The address a pinned provider redirects to. It completes the flow only when this
+	// server is what answers there; otherwise it is an ordinary frontend path.
+	s.mux.HandleFunc("GET /auth/callback", s.handlePinnedOAuthCallback)
 
+	// Providers and routes are configuration, not secrets: they name a credential but
+	// never carry one, so they need a session and CSRF rather than reauthentication.
+	s.mux.HandleFunc("GET /api/admin/ai/providers", s.authenticated(s.handleAIProviderList))
+	s.mux.HandleFunc("PUT /api/admin/ai/providers/{id}", s.authenticated(s.handleAIProviderPut))
+	s.mux.HandleFunc("DELETE /api/admin/ai/providers/{id}", s.authenticated(s.handleAIProviderDelete))
+	s.mux.HandleFunc("GET /api/admin/ai/providers/{id}/models", s.authenticated(s.handleAIModels))
 	s.mux.HandleFunc("GET /api/admin/ai/routes", s.authenticated(s.handleAIRoutes))
+	s.mux.HandleFunc("PUT /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRoutePut))
+	s.mux.HandleFunc("PUT /api/admin/ai/routes/{name}/assign", s.authenticated(s.handleAIAssign))
+	s.mux.HandleFunc("DELETE /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRouteDelete))
 	s.mux.HandleFunc("GET /api/ai/calls", s.authenticated(s.handleAICalls))
+
+	s.mux.HandleFunc("GET /api/notifications", s.authenticated(s.handleInboxList))
+	s.mux.HandleFunc("GET /api/notifications/{id}", s.authenticated(s.handleInboxGet))
+	s.mux.HandleFunc("POST /api/notifications/{id}/read", s.authenticated(s.handleInboxRead))
+
+	s.mux.HandleFunc("GET /api/admin/notifications/rules", s.authenticated(s.handleNotifRules))
+	s.mux.HandleFunc("PUT /api/admin/notifications/rules/{id}", s.authenticated(s.handleNotifRulePut))
+	s.mux.HandleFunc("DELETE /api/admin/notifications/rules/{id}", s.authenticated(s.handleNotifRuleDelete))
+	s.mux.HandleFunc("GET /api/admin/notifications/channels", s.authenticated(s.handleNotifChannels))
+	s.mux.HandleFunc("PUT /api/admin/notifications/channels/{id}", s.authenticated(s.handleNotifChannelPut))
+	s.mux.HandleFunc("DELETE /api/admin/notifications/channels/{id}", s.authenticated(s.handleNotifChannelDelete))
+	s.mux.HandleFunc("GET /api/admin/notifications/health", s.authenticated(s.handleNotifHealth))
 
 	s.mux.HandleFunc("/", s.serveStatic)
 }
