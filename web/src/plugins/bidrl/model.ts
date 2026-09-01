@@ -83,6 +83,12 @@ export type AuctionPage = {
   latestEventId: number;
 };
 
+/** Just enough of an auction's lots to page through them from a lot screen. */
+export type AuctionIndex = {
+  title: string;
+  lots: { id: string; lotCode: string; title: string }[];
+};
+
 export type AuctionsPage = {
   auctions: Auction[];
   latestEventId: number;
@@ -170,19 +176,55 @@ export function cents(n: number | null | undefined): string {
   return (n / 100).toLocaleString(undefined, { style: "currency", currency: "USD" });
 }
 
+/**
+ * The named presets, in the order the catalog offers them. They are the same predicates
+ * the feed endpoint has always had; the catalog now accepts them too, so a preset and the
+ * bucket/category filters are one screen rather than two listings of the same table.
+ */
+export const LOT_PRESETS = [
+  { value: "", label: "All lots", hint: "Every collected lot, scanned or not." },
+  { value: "deals", label: "Best deals", hint: "Priced lots where the current bid is below a search listing that names the model and a price, preferring eBay sold comps." },
+  { value: "worth_opening", label: "Worth opening", hint: "Visually interesting, deliberately unpriced." },
+  { value: "model", label: "Model number found", hint: "A model number or barcode was read from a photo." },
+  { value: "mislabeled", label: "Likely mislabeled", hint: "Title and photographs disagree." },
+  { value: "scanned", label: "All scanned", hint: "Every lot a scan has looked at." },
+] as const;
+
 export function filterLabel(filter: string): string {
-  switch (filter) {
-    case "deals":
-      return "Priced lots where the current bid is below a search listing that names the model and a price, preferring eBay sold comps.";
-    case "mislabeled":
-      return "Title and photographs disagree.";
-    case "model":
-      return "A model number or barcode was read from a photo.";
-    case "worth_opening":
-      return "Visually interesting, deliberately unpriced.";
-    default:
-      return "Every scanned lot.";
-  }
+  return LOT_PRESETS.find((p) => p.value === filter)?.hint ?? LOT_PRESETS[0].hint;
+}
+
+/** What the overview endpoint counts, so the front page never ships the lot table. */
+export type OverviewStats = {
+  auctions: number;
+  lots: number;
+  scanned: number;
+  unscanned: number;
+  priced: number;
+  live: number;
+  ending: number;
+};
+
+export type OverviewPage = {
+  stats: OverviewStats;
+  deals: Lot[];
+  closing: Lot[];
+  latestEventId: number;
+};
+
+/** True when a close time falls inside the window ahead. No end time is never "soon". */
+export function endsWithin(endsAt: string, now: number, windowMs: number): boolean {
+  if (!endsAt) return false;
+  const ms = Date.parse(endsAt);
+  if (!Number.isFinite(ms)) return false;
+  return ms > now && ms - now <= windowMs;
+}
+
+export function comparableHint(lot: Pick<Lot, "priceKind" | "sourceLabel" | "sourceUrl">): string {
+  const kind = lot.priceKind === "sold" ? "sold" : lot.priceKind === "asking" ? "asking" : "";
+  const where = lot.sourceLabel || sourceHost(lot.sourceUrl);
+  if (kind && where) return `${kind} · ${where}`;
+  return where || kind;
 }
 
 /**
@@ -217,13 +259,6 @@ export const INTENT_EXAMPLES = [
   "Outfit a first apartment kitchen",
   "Gear for a road trip",
 ] as const;
-
-export function comparableHint(lot: Pick<Lot, "priceKind" | "sourceLabel" | "sourceUrl">): string {
-  const kind = lot.priceKind === "sold" ? "sold" : lot.priceKind === "asking" ? "asking" : "";
-  const where = lot.sourceLabel || sourceHost(lot.sourceUrl);
-  if (kind && where) return `${kind} · ${where}`;
-  return where || kind;
-}
 
 export type LocationGroup<T> = {
   key: string;
@@ -536,4 +571,21 @@ export function cleanupMessage(result: CleanupResult): string {
     return "Nothing had ended.";
   }
   return `Removed ${parts.join(" and ")}.`;
+}
+
+/**
+ * Where a lot sits among its auction's lots, and what is either side of it. The list is
+ * taken in the order the auction screen shows it, so "next" means the next row there.
+ */
+export function lotNeighbours<T extends { id: string }>(
+  lots: T[],
+  id: string,
+): { prev: T | null; next: T | null; position: string } {
+  const at = lots.findIndex((lot) => lot.id === id);
+  if (at < 0) return { prev: null, next: null, position: "" };
+  return {
+    prev: lots[at - 1] ?? null,
+    next: lots[at + 1] ?? null,
+    position: `${at + 1} of ${lots.length}`,
+  };
 }

@@ -30,6 +30,8 @@ export type { StreamBuffer, StreamStatus } from "./stream";
 
 export { isValidPattern, matchesPattern } from "./pattern";
 
+export { Link, useNavigate, usePath, useQueryState, useRouteParams } from "./nav";
+
 export { useActivity, useEvents, useNow, useSnapshot, useStreamEpoch, useStreamStatus } from "./hooks";
 export type {
   Activity,

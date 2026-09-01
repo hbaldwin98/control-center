@@ -256,11 +256,22 @@ inline styles, hand-roll a `<table>`, or borrow a class from another component. 
 screens and the `hello` plugin are the worked examples.
 
 **Layout** — `Page`, `PageHeader`, `Card`, `Stack`, `Grid`, `Row`, `Toolbar`, `Tabs`.
-`Toolbar` is the filter bar above a listing; its controls wrap rather than overflow.
-`Tabs` is the in-page section row; the current item sets `aria-current="page"`.
+`Toolbar` is the filter bar above a listing; its controls wrap rather than overflow, and
+below 720px each takes its own row. `Tabs` is the in-page section row; the current item
+sets `aria-current="page"`, and the strip scrolls sideways on a phone rather than wrapping.
+
+**Navigation** — `Link`, `useNavigate`, `usePath`, `useRouteParams`, and `useQueryState`.
+A plugin may not import the shell router, but a raw `<a href>` to another screen is a full
+document load that tears down the event stream, the snapshot cache, and the screen's own
+state — so the router is wrapped in `ui/nav.tsx`, the one place in `@cc/ui` that knows it
+exists. Use `<a href>` only for a genuinely external destination. `useRouteParams` replaces
+parsing `window.location`; `useQueryState` puts one filter in the query string, which is
+what makes a filtered list linkable and makes going into a record and back return the list
+as it was left.
 
 **Data** — `Table` renders the header row and its own horizontal scroll container, so a
-wide table scrolls inside its card and the page never scrolls sideways. `ActionsHeader`
+wide table scrolls inside its card and the page never scrolls sideways. It takes a
+`className` for the screens that would rather shed columns than scroll on a phone. `ActionsHeader`
 is the header cell for a column of buttons. `SortHeader` is a clickable column head that
 sets `aria-sort` on the cell. `Time`, `Money`, and `Dash` render the three
 values that appear on every screen; `Time` shows local time and puts the exact instant in
