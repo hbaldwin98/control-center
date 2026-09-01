@@ -52,6 +52,54 @@ export type AuctionsPage = {
   latestEventId: number;
 };
 
+export type SearchHit = {
+  lotId: string;
+  auctionId: string;
+  url: string;
+  title: string;
+  auctionTitle: string;
+  lotCode: string;
+  affiliateId: string;
+  affiliateName: string;
+  preferred: boolean;
+  currentBidCents: number | null;
+  matchScore: number;
+  matchReason: string;
+  source: string;
+  collected: boolean;
+};
+
+export type SearchPage = {
+  search: {
+    id: string;
+    query: string;
+    scope: string;
+    status: string;
+    hitCount: number;
+    lastError: string;
+    createdAt: string;
+  } | null;
+  hits: SearchHit[];
+  latestEventId: number;
+};
+
+export type SitesAuction = {
+  id: string;
+  url: string;
+  title: string;
+  affiliateId: string;
+  affiliateName: string;
+  city: string;
+  itemCount: number;
+  endsAt: string;
+  collected: boolean;
+};
+
+export type SitesPage = {
+  auctions: SitesAuction[];
+  latestEventId: number;
+};
+
 export function eventBoundary(id: number | string | undefined): string {
   try {
     return BigInt(id ?? 0).toString();

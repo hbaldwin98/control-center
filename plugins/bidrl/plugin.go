@@ -43,7 +43,7 @@ func (p *Plugin) Manifest() host.Manifest {
 		ID:          pluginID,
 		Name:        "BIDRL",
 		Version:     "0.1.0",
-		Description: "Scores BIDRL lots from photographs, prices only when a model or barcode is cited, and ranks deals.",
+		Description: "Scores BIDRL lots from photographs, searches SITES auctions first, and prices only when a model or barcode is cited.",
 		Automated:   false,
 		Models: []host.ModelNeed{
 			{
@@ -58,8 +58,26 @@ func (p *Plugin) Manifest() host.Manifest {
 			},
 		},
 		Config: host.ConfigSpec{
-			Schema:   json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`),
-			Defaults: json.RawMessage(`{}`),
+			Schema: json.RawMessage(`{
+				"type":"object",
+				"additionalProperties":false,
+				"properties":{
+					"preferredAffiliateIds":{
+						"type":"array",
+						"title":"Preferred SITES locations",
+						"description":"Numeric BidRL affiliate ids (19 is Turlock). Empty uses every location on BidRL's SITES menu.",
+						"items":{"type":"string","pattern":"^[0-9]{1,8}$","maxLength":8},
+						"maxItems":20
+					},
+					"searchScope":{
+						"type":"string",
+						"title":"Search scope",
+						"description":"prefer ranks SITES lots first, only hides the rest, all ignores location.",
+						"enum":["prefer","only","all"]
+					}
+				}
+			}`),
+			Defaults: json.RawMessage(`{"preferredAffiliateIds":[],"searchScope":"prefer"}`),
 		},
 	}
 }
@@ -71,6 +89,8 @@ func (p *Plugin) Jobs() []hostjobs.Def {
 		{Name: "scan", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.scanJob},
 		{Name: "reprice", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.repriceJob},
 		{Name: "refresh", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.refreshJob},
+		{Name: "search", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.searchJob},
+		{Name: "discover", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.discoverJob},
 	}
 }
 
@@ -92,6 +112,10 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
 		{Pattern: "GET /lots/{id}", Handler: http.HandlerFunc(p.handleGetLot)},
 		{Pattern: "POST /lots/{id}/reprice", Handler: http.HandlerFunc(p.handleReprice)},
+		{Pattern: "POST /search", Handler: http.HandlerFunc(p.handlePostSearch)},
+		{Pattern: "GET /search", Handler: http.HandlerFunc(p.handleGetSearch)},
+		{Pattern: "GET /sites/auctions", Handler: http.HandlerFunc(p.handleListSites)},
+		{Pattern: "POST /sites/refresh", Handler: http.HandlerFunc(p.handleRefreshSites)},
 	}
 }
 

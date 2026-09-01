@@ -70,11 +70,13 @@ its own. Enumeration probes the gallery once first; when the markup does contain
 links — a print catalog, or a server-rendered page — it scrapes those instead, and the
 scrape also remains the fallback when no feed arrives.
 
-**Every v1 action is user-triggered.** Collection starts only from "add auction", a scan
-starts only from "scan", pricing starts only inside that requested scan or from "reprice",
-and bids refresh only from "refresh bids". There is no cron or event-triggered work, and
-the backend manifest sets `Automated: false`. Jobs still make each requested operation
-durable, cancellable, budgeted, and subject to the host-capability kill switch.
+**Every v1 action is user-triggered.** Collection starts only from "add auction" or
+"collect" on a search/SITES hit, a scan starts only from "scan", search starts only from
+"search", SITES listing starts only from "refresh list" or as part of a search, pricing
+starts only inside that requested scan or from "reprice", and bids refresh only from
+"refresh bids". There is no cron or event-triggered work, and the backend manifest sets
+`Automated: false`. Jobs still make each requested operation durable, cancellable,
+budgeted, and subject to the host-capability kill switch.
 
 Images and analyses are cached until the user deletes the auction; identification does
 not rerun during a bid refresh. Deletion removes the auction's records and blobs. The
@@ -130,7 +132,7 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 | `Browser()` allowlisted sessions | collection: auction pages, lot pages, images |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` grounding options and citations | the price stage |
-| `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, and bid refreshes |
+| `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, search, and SITES discovery |
 | `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.alert` |
 | `Store()` / `Blobs()` | lots, analyses, cached photos |
 | Budgets + host-capability kill switch | durable user-triggered work is still admitted, reserved, and cancellable |
@@ -145,11 +147,12 @@ right.
 
 | Surface | Contract |
 |---|---|
-| Jobs | `collect`, `scan`, `reprice`, `refresh` — enqueue-only, concurrency 1, two-hour timeout |
+| Jobs | `collect`, `scan`, `reprice`, `refresh`, `search`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
 | API | `GET /api/plugins/bidrl/lots/{id}`, `POST /lots/{id}/reprice`, `GET /feed?filter=` |
-| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed` |
-| UI | `/bidrl` feed, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+| API | `POST/GET /search`, `GET /sites/auctions`, `POST /sites/refresh` |
+| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.sites.discovered` |
+| UI | `/bidrl` feed + search, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
@@ -160,9 +163,34 @@ too. Do not invent other names — the plugin asks for these two.
 
 ---
 
+## Search
+
+Search is user-triggered. It does not crawl BidRL on a schedule.
+
+A query is expanded into a few BidRL keywords (the full phrase plus distinctive model
+tokens such as `K-Supreme` or `20V`). Live hits come from BidRL's own `/allitems`
+keyword page, captured through `Host.Browser()` the same way collection captures the
+gallery feed.
+
+**SITES locations rank first.** BidRL's location menu — the same list as
+[Turlock](https://www.bidrl.com/affiliate/turlock-19/) — is the SITES dealer family.
+Search reads that menu, loads each affiliate landing page, and treats those open auctions
+as preferred. Scope `prefer` (default) still shows other BidRL lots below them; `only`
+hides the rest; `all` ignores location. Plugin config `preferredAffiliateIds` can narrow
+the family (empty means the whole live menu).
+
+**Titles still lie.** After a scan, search also matches the vision identification and
+model number, so a chair titled "office mesh" still rises for "herman miller" if the
+photos said so.
+
+"Refresh list" enumerates currently open SITES auctions without searching, so a warehouse
+can be collected from the list instead of a pasted URL.
+
+---
+
 ## Feed
 
-The default view is not a search box. It is a treasure-hunting feed:
+The treasure-hunting feed is still the default reading, now with a search box above it:
 
 | Filter | Means |
 |---|---|
@@ -193,7 +221,7 @@ Every row shows the BIDRL title beside what the photos suggest, and links back t
 - Collection rejects more than 500 lots per auction, more than 12 images per lot, an image
   over 10 MiB, or more than 100 MiB of images for one lot; rejected items are recorded with
   a visible reason.
-- Scan, reprice, and bid-refresh job definitions are enqueue-only, have concurrency `1`
+- Scan, reprice, bid-refresh, search, and SITES-discover job definitions are enqueue-only, have concurrency `1`
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
   fails.

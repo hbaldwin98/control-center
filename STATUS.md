@@ -212,7 +212,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Separate `plugins/bidrl` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
 | User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
-| Operator UI | ✅ | Treasure-hunting feed, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
+| Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ---
