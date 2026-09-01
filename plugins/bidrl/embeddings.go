@@ -337,7 +337,7 @@ func (p *Plugin) matchIntentSemantic(jc hostjobs.Context, h host.Host, query str
 		if score > top {
 			top = score
 		}
-		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: intentReason(bestProbe, words, c)})
+		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: intentReason(query, bestProbe, c)})
 	}
 	return trimIntentTail(matches, top), nil
 }
@@ -376,35 +376,93 @@ func trimIntentTail(matches []intentMatch, top float64) []intentMatch {
 	return out
 }
 
-// intentReason names the words that connect the lot to the probe it matched.
-func intentReason(query string, words []string, c intentCard) string {
-	var qtoks []string
-	qtoks = append(qtoks, words...)
-	qtoks = append(qtoks, contentTokens(query)...)
-	hay := strings.ToLower(strings.Join([]string{c.Title, c.Identification, c.Model, c.Category, c.Terms}, " "))
+// intentReason explains a hit in the terms the ranking actually used: which
+// probe pulled the lot in — the words the user typed, or a related product
+// type the expansion named — and what in the lot connects to it. Naming that
+// bridge is the point; listing the overlapping words alone says nothing the
+// title does not already show.
+func intentReason(query, probe string, c intentCard) string {
+	query = strings.Join(strings.Fields(query), " ")
+	probe = strings.Join(strings.Fields(probe), " ")
+	related := !strings.EqualFold(query, probe)
+	tail := ""
+	if related {
+		tail = ", related to " + query
+	}
+	toks := reasonTokens(probe)
+	if hit := matchedTokens(toks, c.Title); len(hit) > 0 {
+		return quoteList(hit) + " in the title" + tail
+	}
+	if matched(toks, c.Identification) {
+		return "photos show " + clipWords(c.Identification, reasonFieldMax) + tail
+	}
+	if matched(toks, c.Model) {
+		return "model " + clipWords(c.Model, reasonFieldMax) + tail
+	}
+	if hit := matchedTokens(toks, c.Terms); len(hit) > 0 {
+		return "listed as " + quoteList(hit) + tail
+	}
+	if matched(toks, c.Category) {
+		return "category " + clipWords(c.Category, reasonFieldMax) + tail
+	}
+	if related {
+		return "reads like " + probe + tail
+	}
+	return "reads like " + query
+}
+
+const (
+	reasonFieldMax  = 60
+	maxReasonTokens = 3
+)
+
+// reasonTokens are the probe words worth quoting back at the user.
+func reasonTokens(probe string) []string {
+	var out []string
+	for _, t := range contentTokens(probe) {
+		if _, stop := intentStop[strings.ToLower(t)]; stop {
+			continue
+		}
+		if len(t) < 3 {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func matchedTokens(toks []string, field string) []string {
+	hay := strings.ToLower(strings.TrimSpace(field))
+	if hay == "" {
+		return nil
+	}
 	var hit []string
 	seen := map[string]struct{}{}
-	for _, t := range qtoks {
+	for _, t := range toks {
 		tl := strings.ToLower(t)
-		if _, stop := intentStop[tl]; stop {
+		if _, dup := seen[tl]; dup {
 			continue
 		}
-		if _, ok := seen[tl]; ok {
+		if !strings.Contains(hay, tl) {
 			continue
 		}
-		if strings.Contains(hay, tl) {
-			seen[tl] = struct{}{}
-			hit = append(hit, t)
+		seen[tl] = struct{}{}
+		hit = append(hit, t)
+		if len(hit) == maxReasonTokens {
+			break
 		}
 	}
-	if len(hit) > 0 {
-		return strings.Join(hit, ", ")
+	return hit
+}
+
+func matched(toks []string, field string) bool {
+	return len(matchedTokens(toks, field)) > 0
+}
+
+func quoteList(words []string) string {
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = "\"" + w + "\""
 	}
-	if c.Identification != "" {
-		return "similar to " + c.Identification
-	}
-	if c.Title != "" {
-		return "similar to " + c.Title
-	}
-	return "similar meaning"
+	return strings.Join(quoted, ", ")
 }

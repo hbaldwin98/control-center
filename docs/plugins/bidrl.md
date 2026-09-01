@@ -250,6 +250,13 @@ that never uses the word camp, because expansion named it before embedding. Stor
 photograph identifications count when they already exist, but they do not win over a
 useful title.
 
+The "Why" column names the bridge rather than echoing the lot: which probe pulled the lot
+in, and what in the lot connects to it — `"lantern" in the title, related to camping`,
+`photos show Herman Miller Aeron`, `listed as "aeron"`, `category Furniture`, or
+`reads like sleeping bag, related to camping` when nothing textual overlaps. A bare list
+of shared words, or "similar to" the lot's own title, says nothing the row does not
+already show.
+
 The host does not load a SQLite vector extension (virtual tables are denied). Vectors are
 BLOBs; ranking is a local dot product over normalized float32 rows. Ended lots are skipped
 at Ask and their stored vectors are deleted then; "Remove ended" also deletes the lot row

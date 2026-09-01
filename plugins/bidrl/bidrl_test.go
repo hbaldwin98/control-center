@@ -748,6 +748,68 @@ func TestLotDocumentClipsBoilerplateDescription(t *testing.T) {
 	}
 }
 
+func TestIntentReasonNamesTheBridge(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, query, probe, want string
+		card                     intentCard
+	}{
+		{
+			name:  "typed words in the title",
+			query: "camping tent", probe: "camping tent",
+			card: intentCard{Title: "4-person camping tent"},
+			want: `"camping", "tent" in the title`,
+		},
+		{
+			name:  "a related type says why it surfaced",
+			query: "camping", probe: "lantern",
+			card: intentCard{Title: "Coleman LED Lantern"},
+			want: `"lantern" in the title, related to camping`,
+		},
+		{
+			name:  "the photos carried the match",
+			query: "herman miller", probe: "herman miller",
+			card: intentCard{Title: "office mesh chair", Identification: "Herman Miller Aeron"},
+			want: "photos show Herman Miller Aeron",
+		},
+		{
+			name:  "a stored alias carried the match",
+			query: "aeron", probe: "aeron",
+			card: intentCard{Title: "office chair", Terms: "aeron, task chair"},
+			want: `listed as "aeron"`,
+		},
+		{
+			name:  "no shared words at all",
+			query: "camping", probe: "sleeping bag",
+			card: intentCard{Title: "Ozark Trail bedroll"},
+			want: "reads like sleeping bag, related to camping",
+		},
+		{
+			name:  "typed query with nothing to quote",
+			query: "camping", probe: "camping",
+			card: intentCard{Title: "Ozark Trail bedroll"},
+			want: "reads like camping",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := intentReason(tc.query, tc.probe, tc.card); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIntentReasonPrefersTheTitleOverThePhotos(t *testing.T) {
+	t.Parallel()
+	got := intentReason("camping", "tent", intentCard{
+		Title: "camping tent", Identification: "Coleman Sundome tent", Category: "tent",
+	})
+	if got != `"tent" in the title, related to camping` {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestKeepIntentMatchesDropsUnknownAndEmpty(t *testing.T) {
 	t.Parallel()
 	cards := []intentCard{{ID: "1001"}, {ID: "1002"}}
