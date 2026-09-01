@@ -87,13 +87,20 @@ stop the job rather than continuing into a ban.
 "collect" on a search/SITES hit, a scan starts only from "scan", search starts only from
 "search", SITES listing starts only from "refresh list" or as part of a search, pricing
 starts only inside that requested scan or from "reprice", bids refresh only from
-"refresh bids", and a single-lot ItemData refresh only from "enrich". There is no cron
+"refresh bids", a single-lot ItemData refresh only from "enrich", and expired-record
+deletion only from "Remove ended". There is no cron
 or event-triggered work, and the backend manifest sets
 `Automated: false`. Jobs still make each requested operation durable, cancellable,
 budgeted, and subject to the host-capability kill switch.
 
-Images and analyses are cached until the user deletes the auction; identification does
-not rerun during a bid refresh. Deletion removes the auction's records and blobs. The
+Images and analyses are cached until the user deletes the auction or removes ended
+records; identification does not rerun during a bid refresh. Deletion removes the
+auction's records and blobs. **Expiry does nothing on its own.** The stored `ends_at`
+drives a local countdown; once it passes, the lot or auction still sits in the feed,
+catalog, and collected list. There is no cron and no BidRL poll. "Remove ended" on
+`/bidrl/auctions` deletes auctions whose close (or every dated lot) is in the past,
+individual ended lots from auctions that are still open, and stale SITES listings —
+photos, analyses, and comparables included. Lots with no end time are left alone. The
 storage module's finite per-plugin quota applies, and collection stops visibly rather than
 evicting audit evidence when the quota is full. This is both the sensible engineering
 choice and the respectful one: BIDRL's user agreement prohibits automated processes that
@@ -123,8 +130,8 @@ fiction. A mesh chair confidently valued at $450 because it resembles an Aeron i
 failure mode that kills the whole thing.
 
 **Vision and pricing are separate calls.** The vision model says what it sees. Pricing
-asks `Host.Search()` for public listings of that model, **eBay sold comps first**, then
-retail, then other resale marketplaces, then the open web. A chat call (no provider web-search)
+asks `Host.Search()` for public listings of that model **once**, ranks hits **eBay
+first, then retail, then other resale**, then the open web. A chat call (no provider web-search)
 picks a dollar amount already written in one of those hits. Invented MSRPs are rejected:
 `price_cents` must appear as `$…` in the hit title or snippet, and the stored quote is
 that snippet, not the model's prose. The feed shows the site, asking vs sold, quote, and
@@ -133,9 +140,10 @@ link.
 **Resolution is the cost lever.** Medium for every photo; high on retry for a label or
 plate the model could not read.
 
-**Price the minority.** Expect 10–30% of lots to survive the first pass. That is where the
-intelligence budget goes, and where the genuine difficulty lives — making "current market
-price" trustworthy enough that a $500 estimate means about $500 today.
+**Price the minority.** Expect 10–30% of lots to survive the first pass. Identical
+model numbers reuse a comparable looked up in the last seven days, so a pallet of the
+same Keurig does not hit SearXNG once per lot. Reprice, a stale lookup, or a clear
+condition split (working vs for-parts) does a new search.
 
 ---
 
@@ -146,7 +154,7 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 | Host capability | Use |
 |---|---|
 | `Browser()` allowlisted sessions | gallery census, `Post` ItemData, `Get` pusher snapshots and photos |
-| `Search()` host-owned web lookup | eBay sold comps first, then retail, then other resale |
+| `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` chat with a cited-price schema | pick a `$` amount already written in those hits |
 | `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, enrich, search, and SITES discovery |
@@ -166,10 +174,11 @@ right.
 |---|---|
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
+| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings |
 | API | `GET /lots?q=&bucket=&category=&ending=soon`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `GET /sites/auctions`, `POST /sites/refresh` |
-| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.sites.discovered` |
-| UI | `/bidrl` feed + search, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
+| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
@@ -183,7 +192,8 @@ too. Do not invent other names — the plugin asks for these two.
 
 ## Search
 
-Search is user-triggered. It does not crawl BidRL on a schedule.
+Search is user-triggered (`POST/GET /search`). It does not crawl BidRL on a schedule
+and is not on the feed UI.
 
 A query is expanded into a few BidRL keywords (the full phrase plus distinctive model
 tokens such as `K-Supreme` or `20V`). Live hits come from BidRL's own `/allitems`
@@ -209,8 +219,9 @@ can be collected from the list instead of a pasted URL.
 
 ## Feed
 
-The treasure-hunting feed lives at `/bidrl` with search above it. Auctions and the lot
-catalog have their own tabs so collecting and browsing do not share one dumped page.
+The treasure-hunting feed lives at `/bidrl`. Auctions and the lot catalog have their own
+tabs so collecting and browsing do not share one dumped page. Live BidRL keyword search
+is API-only (`POST/GET /search`); the feed does not queue it.
 
 | Filter | Means |
 |---|---|
@@ -219,13 +230,22 @@ catalog have their own tabs so collecting and browsing do not share one dumped p
 | Model number found | `exact_text` basis, highest confidence tier |
 | Worth opening | visually interesting, deliberately unpriced |
 
-Every row shows a thumb, the BidRL title beside what the photos suggest, the current bid,
-a local countdown from stored `ends_at`, category, and a link back to BidRL.
+Find in feed filters the visible lots by title, identification, model, and category
+without starting a BidRL search.
 
-`/bidrl/auctions` is SITES discovery, paste-a-URL collect, and already-collected auctions.
-`/bidrl/lots` is the catalog: local text, bucket, category, and ending-soon. Auction and
-lot views add a bidder card (high bidder, bid count, min bid, reserve, extended) and
-Open on BidRL.
+Lots on the feed, catalog, and auction page switch between a card grid and a table. The
+choice is remembered. Duplicate or near-duplicate listings — same model, identification,
+or long identical title — collapse to one representative with the extras behind "N similar".
+
+Every card or row shows a thumb, the BidRL title beside what the photos suggest, the
+current bid, a local countdown from stored `ends_at`, category, and a link back to BidRL.
+
+`/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
+paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"
+deletes closed auctions, leftover closed lots, and stale SITES rows. `/bidrl/lots` is the
+catalog: local text, bucket, category, and ending-soon (open lots ending within 24 hours).
+Auction and lot views add a bidder card (high bidder, bid count, min bid, reserve,
+extended) and Open on BidRL.
 
 ---
 
@@ -234,14 +254,16 @@ Open on BidRL.
 ### Pricing evidence
 
 - A numeric valuation is stored only for `exact_text` or `barcode` identification, and only
-  from the first search tier that returns a hit naming the model and a dollar amount:
-  eBay, then retail, then other resale marketplaces, then the open web. The model's
+  from a search hit that names the model and a dollar amount. Hits are ranked
+  eBay, then retail, then other resale, then the open web. The model's
   `price_cents` must match a `$` amount in that hit.
 - Missing or mismatched evidence leaves the lot unpriced. The feed shows the source site,
   quote, retrieval age, and whether the listing is asking or sold. It never presents an
   uncited model estimate as a market price.
 - Repricing creates a new evidence record rather than overwriting the prior one, so a
-  displayed valuation can be audited against the evidence used at that time.
+  displayed valuation can be audited against the evidence used at that time. Reprice
+  always searches; a scan reuses a comparable for the same model looked up in the last
+  seven days unless the photos or title say the lot is impaired (for parts, broken).
 
 ### Resource limits
 

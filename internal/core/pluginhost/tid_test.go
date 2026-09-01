@@ -102,6 +102,7 @@ routes:
 		t.Fatal(err)
 	}
 
+	d0 := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
 	d1 := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
 	d2 := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	mux := http.NewServeMux()
@@ -177,10 +178,12 @@ routes:
 			http.Error(w, "bill service agreement", http.StatusBadRequest)
 			return
 		}
-		fmt.Fprintf(w, `{"data":{"billHistoryList":[{"usagePeriodStartDateTime":"%sT00:00:00-07:00","usagePeriodEndDateTime":"%sT23:59:59-07:00"}]}}`, d1, d2)
+		fmt.Fprintf(w, `{"data":{"billHistoryList":[{"usagePeriodStartDateTime":"%sT00:00:00-07:00","usagePeriodEndDateTime":"%sT23:59:59-07:00"},{"usagePeriodStartDateTime":"%sT00:00:00-07:00","usagePeriodEndDateTime":"%sT23:59:59-07:00"}]}}`, d1, d2, d0, d0)
 	})
+	usageCall := 0
 	mux.HandleFunc("POST /ouaf/retrieve-usage-for-sa", func(w http.ResponseWriter, r *http.Request) {
-		if !nextStep(w, 5) || !checkHeaders(w, r, true) {
+		usageCall++
+		if !nextStep(w, 4+usageCall) || !checkHeaders(w, r, true) {
 			return
 		}
 		var body struct {
@@ -189,7 +192,7 @@ routes:
 			Username                 string            `json:"username"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Payload["action"] != "READ" || body.Payload["username"] != "internal-test" || body.Payload["firstname"] != "Test" || body.Payload["lastname"] != "Person" || body.Payload["emailAddress"] != "person@example.test" || body.Payload["accountId"] != "account-test" || body.Payload["personId"] != "" || body.Payload["saId"] != "service-test" || body.Payload["viewModeFlg"] != "D2BB" || body.Payload["usagePeriodStartDateTime"] != d1+"T00:00:00-07:00" || body.Payload["usagePeriodEndDateTime"] != d2+"T23:59:59-07:00" || body.Username != "internal-test" {
+		if body.Payload["action"] != "READ" || body.Payload["username"] != "internal-test" || body.Payload["firstname"] != "Test" || body.Payload["lastname"] != "Person" || body.Payload["emailAddress"] != "person@example.test" || body.Payload["accountId"] != "account-test" || body.Payload["personId"] != "" || body.Payload["saId"] != "service-test" || body.Payload["viewModeFlg"] != "D2BB" || body.Username != "internal-test" {
 			http.Error(w, "usage request", http.StatusBadRequest)
 			return
 		}
@@ -197,7 +200,11 @@ routes:
 			http.Error(w, "selected service agreement", http.StatusBadRequest)
 			return
 		}
-		fmt.Fprintf(w, `{"status":"OK","data":{"usageList":[{"costDate":"%s","usage":"12.5"},{"costDate":"%s","usage":"8"}]}}`, d1, d2)
+		if usageCall == 1 {
+			fmt.Fprintf(w, `{"status":"OK","data":{"usageList":[{"costDate":"%s","usage":"12.5","dailyCost":3.25,"onPeakKwh":5.5,"offPeakKwh":7},{"costDate":"%s","usage":"8","dailyCost":2,"onPeakKwh":3,"offPeakKwh":5}],"demandInfo":{"peakDemandDate":"%s","peakDemandKw":7.92}}}`, d1, d2, d2)
+			return
+		}
+		fmt.Fprintf(w, `{"status":"OK","data":{"usageList":[{"costDate":"%s","usage":"9","dailyCost":2.25,"onPeakKwh":4,"offPeakKwh":5}],"demandInfo":{"peakDemandDate":"%s","peakDemandKw":4.5}}}`, d0, d0)
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -248,7 +255,7 @@ routes:
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/plugins/tid/sync", bytes.NewReader(nil))
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/tid/history/sync", bytes.NewReader(nil))
 	reg.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sync enqueue: %d %s", rec.Code, rec.Body.Bytes())
@@ -292,99 +299,39 @@ routes:
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Days) != 2 {
+	if len(page.Days) != 3 {
 		t.Fatalf("summary days %+v", page.Days)
 	}
 	byDay := map[string]float64{}
 	for _, d := range page.Days {
 		byDay[d.Day] = d.KWh
 	}
-	if byDay[d1] != 12.5 || byDay[d2] != 8 {
-		t.Fatalf("summary days %+v want %s=12.5 %s=8", page.Days, d1, d2)
+	if byDay[d0] != 9 || byDay[d1] != 12.5 || byDay[d2] != 8 {
+		t.Fatalf("summary days %+v", page.Days)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/plugins/tid/history", nil)
+	reg.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("history: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var history struct {
+		Periods []struct {
+			Start, End, PeakDemandDate      string
+			TotalKWh, OnPeakKWh, OffPeakKWh float64
+			PeakDemandKW                    *float64               `json:"peakDemandKw"`
+			Days                            []struct{ Day string } `json:"days"`
+		} `json:"periods"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Periods) != 2 || history.Periods[0].TotalKWh != 20.5 || history.Periods[0].OnPeakKWh != 8.5 || history.Periods[0].OffPeakKWh != 12 || history.Periods[0].PeakDemandKW == nil || *history.Periods[0].PeakDemandKW != 7.92 || len(history.Periods[1].Days) != 1 {
+		t.Fatalf("history %+v", history.Periods)
 	}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
-
-func TestTIDUploadCSV(t *testing.T) {
-	ctx := context.Background()
-	dir := t.TempDir()
-	store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(dir, "cc.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	blobs, err := storage.NewBlobStore(store, storage.BlobOptions{
-		Dir: filepath.Join(dir, "blobs"), MaxObjectBytes: 1 << 20, MaxScopeBytes: 10 << 20,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bus, err := events.New(store, store, events.Options{PollInterval: 20 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bus.Start(ctx)
-	t.Cleanup(bus.Stop)
-	pol, err := policy.New(store, store, bus, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q, err := jobs.New(store, store, bus, pol, jobs.Options{
-		PollInterval: 20 * time.Millisecond, LeaseTTL: time.Second, Heartbeat: 40 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	q.Start(ctx)
-	t.Cleanup(q.Stop)
-
-	reg, err := New(ctx, store, Options{
-		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: q, ShutdownTimeout: time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.RegisterAll(tid.New()); err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = reg.Stop(context.Background()) })
-	if err := pol.SetBudget(ctx, "tid", policy.Budget{Daily: 50_000_000, OnExceed: policy.ExceedReject}); err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.Enable(ctx, "tid", "test", "go"); err != nil {
-		t.Fatal(err)
-	}
-
-	body, _ := json.Marshal(map[string]string{"csv": "Date,kWh\n2026-08-10,4.2\n2026-08-11,5\n"})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/plugins/tid/upload", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	reg.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("upload: %d %s", rec.Code, rec.Body.Bytes())
-	}
-	var posted struct {
-		JobID int64 `json:"jobId"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &posted); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		j, err := q.Get(ctx, posted.JobID)
-		if err == nil && j.State == jobs.StateSucceeded {
-			return
-		}
-		if err == nil && (j.State == jobs.StateFailed || j.State == jobs.StateDead) {
-			t.Fatalf("upload job %s: %s", j.State, j.LastError)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("upload job did not finish")
-}

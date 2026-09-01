@@ -5,7 +5,7 @@
  * this module never imports the shell router. One sidebar item; Feed / Auctions / Lots
  * are in-plugin tabs.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   Badge,
   Button,
@@ -38,17 +38,25 @@ import type { PluginModule, PluginSurfaceProps, UseSnapshotResult } from "@cc/ui
 import {
   LOT_CATEGORIES,
   cents,
+  cleanupMessage,
   comparableHint,
   eventBoundary,
   filterLabel,
+  groupByLocation,
+  groupSimilarLots,
+  type Auction,
   type AuctionPage,
   type AuctionsPage,
+  type CleanupResult,
   type FeedPage,
+  type LocationGroup,
   type Lot,
   type LotsPage,
-  type SearchPage,
+  type SimilarGroup,
+  type SitesAuction,
   type SitesPage,
 } from "./model";
+import "./index.css";
 
 const api = pluginApi("bidrl");
 
@@ -56,12 +64,15 @@ function pathParts(): string[] {
   return window.location.pathname.split("/").filter(Boolean);
 }
 
-function useFeed(filter: string): UseSnapshotResult<FeedPage> {
+function useFeed(filter: string, q: string): UseSnapshotResult<FeedPage> {
   const load = useCallback(async (signal: AbortSignal) => {
-    const q = filter ? `?filter=${encodeURIComponent(filter)}` : "";
-    const data = await api.get<FeedPage>(`/feed${q}`, signal);
+    const params = new URLSearchParams();
+    if (filter) params.set("filter", filter);
+    if (q.trim()) params.set("q", q.trim());
+    const qs = params.toString();
+    const data = await api.get<FeedPage>(`/feed${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [filter]);
+  }, [filter, q]);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -97,14 +108,6 @@ function useSites(): UseSnapshotResult<SitesPage> {
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
-function useSearch(): UseSnapshotResult<SearchPage> {
-  const load = useCallback(async (signal: AbortSignal) => {
-    const data = await api.get<SearchPage>("/search", signal);
-    return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, []);
-  return useSnapshot(load, { events: "bidrl.**" });
-}
-
 function useLots(q: string, bucket: string, category: string, ending: string): UseSnapshotResult<LotsPage> {
   const load = useCallback(async (signal: AbortSignal) => {
     const params = new URLSearchParams();
@@ -117,6 +120,38 @@ function useLots(q: string, bucket: string, category: string, ending: string): U
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [q, bucket, category, ending]);
   return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useLotView(): ["grid" | "table", (view: "grid" | "table") => void] {
+  const [view, setView] = useState<"grid" | "table">(() => {
+    try {
+      return localStorage.getItem("bidrl.lotView") === "table" ? "table" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const change = (next: "grid" | "table") => {
+    setView(next);
+    try {
+      localStorage.setItem("bidrl.lotView", next);
+    } catch {
+      /* ignore quota / private mode */
+    }
+  };
+  return [view, change];
+}
+
+function ViewToggle({ value, onChange }: { value: "grid" | "table"; onChange: (view: "grid" | "table") => void }) {
+  return (
+    <div className="bidrl-actions">
+      <Button size="sm" pressed={value === "grid"} onClick={() => onChange("grid")}>
+        Grid
+      </Button>
+      <Button size="sm" pressed={value === "table"} onClick={() => onChange("table")}>
+        Table
+      </Button>
+    </div>
+  );
 }
 
 function bucketTone(bucket: string): "neutral" | "ok" | "warn" | "danger" {
@@ -132,6 +167,89 @@ function BidrlLink({ href, children }: { href: string; children?: string }) {
     <a href={href} target="_blank" rel="noreferrer">
       {children ?? "Open on BidRL"}
     </a>
+  );
+}
+
+function LocationSections<T>({
+  groups,
+  empty,
+  children,
+}: {
+  groups: LocationGroup<T>[];
+  empty: string;
+  children: (items: T[]) => ReactNode;
+}) {
+  if (groups.length === 0) {
+    return <EmptyState>{empty}</EmptyState>;
+  }
+  return (
+    <div className="bidrl-locations">
+      {groups.map((group, i) => (
+        <details key={group.key} className="bidrl-location" open={i === 0 || groups.length <= 3}>
+          <summary>
+            <span className="bidrl-location__name">{group.label}</span>
+            <span className="bidrl-location__meta">
+              {group.items.length} auction{group.items.length === 1 ? "" : "s"}
+            </span>
+          </summary>
+          <div className="bidrl-location__body">{children(group.items)}</div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function CollectedTable({ auctions }: { auctions: Auction[] }) {
+  return (
+    <Table head={<><th>Auction</th><th>Status</th><th>Lots</th><th>Ends</th></>}>
+      {auctions.map((a) => (
+        <tr key={a.id}>
+          <td>
+            <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title || a.id}</a>
+            {a.url ? <Hint><BidrlLink href={a.url} /></Hint> : null}
+          </td>
+          <td><Badge>{a.status}</Badge></td>
+          <td className="cc-num">{a.lotCount}</td>
+          <td>{a.endsAt ? <Countdown iso={a.endsAt} /> : <Dash />}</td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+function SitesTable({
+  auctions,
+  disabled,
+  busy,
+  onCollect,
+}: {
+  auctions: SitesAuction[];
+  disabled: boolean;
+  busy: string | null;
+  onCollect: (url: string) => void;
+}) {
+  return (
+    <Table head={<><th>Auction</th><th>Lots</th><th>Ends</th><th></th></>}>
+      {auctions.map((a) => (
+        <tr key={a.id}>
+          <td>
+            {a.collected ? <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title}</a> : a.title}
+            {a.url ? (
+              <Hint><BidrlLink href={a.url} /></Hint>
+            ) : null}
+          </td>
+          <td className="cc-num">{a.itemCount}</td>
+          <td>{a.endsAt ? <Countdown iso={a.endsAt} /> : <Dash />}</td>
+          <td>
+            {a.collected ? "Collected" : (
+              <Button size="sm" disabled={disabled || busy !== null} onClick={() => onCollect(a.url)}>
+                Collect
+              </Button>
+            )}
+          </td>
+        </tr>
+      ))}
+    </Table>
   );
 }
 
@@ -161,10 +279,137 @@ function BidrlTabs() {
   );
 }
 
-function LotTable({ lots, empty }: { lots: Lot[]; empty: string }) {
+function LotThumb({ lot, className }: { lot: Lot; className?: string }) {
+  if (!lot.thumbUrl) {
+    return className ? <div className={`${className}-empty`}><Dash /></div> : <Dash />;
+  }
+  return <img className={className ?? "cc-lot-thumb"} src={lot.thumbUrl} alt="" width={className ? 220 : 48} height={className ? 220 : 48} />;
+}
+
+function LotMeta({ lot }: { lot: Lot }) {
+  return (
+    <>
+      <span>{cents(lot.currentBidCents)}</span>
+      {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+      {lot.category ? <Badge>{lot.category}</Badge> : null}
+      <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
+    </>
+  );
+}
+
+function LotTitle({ lot }: { lot: Lot }) {
+  return (
+    <>
+      <a href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</a>
+      <Hint>
+        {lot.identification && lot.identification !== lot.title ? lot.identification : lot.lotCode}
+        {lot.url ? (
+          <>
+            {" · "}
+            <BidrlLink href={lot.url} />
+          </>
+        ) : null}
+      </Hint>
+    </>
+  );
+}
+
+function LotComparable({ lot }: { lot: Lot }) {
+  if (lot.priceCents == null) return <Dash />;
+  return (
+    <>
+      {cents(lot.priceCents)}
+      <Hint>
+        {lot.sourceUrl ? (
+          <a href={lot.sourceUrl} target="_blank" rel="noreferrer">
+            {comparableHint(lot) || lot.sourceTitle || "source"}
+          </a>
+        ) : (
+          comparableHint(lot) || <Dash />
+        )}
+      </Hint>
+    </>
+  );
+}
+
+function LotTableRows({ lots, extraClass }: { lots: Lot[]; extraClass?: string }) {
+  return (
+    <>
+      {lots.map((lot) => (
+        <tr key={lot.id} className={extraClass}>
+          <td><LotThumb lot={lot} /></td>
+          <td><LotTitle lot={lot} /></td>
+          <td>{cents(lot.currentBidCents)}</td>
+          <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
+          <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
+          <td><LotComparable lot={lot} /></td>
+          <td className="cc-num">{lot.dealScore != null ? `${Math.round(lot.dealScore * 100)}%` : <Dash />}</td>
+          <td><Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function LotCard({ lot }: { lot: Lot }) {
+  return (
+    <>
+      <LotThumb lot={lot} className="bidrl-lot-card__img" />
+      <div className="bidrl-lot-card__title"><LotTitle lot={lot} /></div>
+      <div className="bidrl-lot-card__meta">
+        <LotMeta lot={lot} />
+      </div>
+      {lot.priceCents != null ? (
+        <Hint>
+          {cents(lot.priceCents)}
+          {lot.dealScore != null ? ` · ${Math.round(lot.dealScore * 100)}% gap` : ""}
+          {comparableHint(lot) ? ` · ${comparableHint(lot)}` : ""}
+        </Hint>
+      ) : null}
+    </>
+  );
+}
+
+function SimilarList({ lots }: { lots: Lot[] }) {
+  return (
+    <div className="bidrl-similar">
+      {lots.map((lot) => (
+        <div key={lot.id} className="bidrl-similar__row">
+          <a href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.lotCode || lot.title || lot.id}</a>
+          <span>
+            {cents(lot.currentBidCents)}
+            {lot.endsAt ? (
+              <>
+                {" · "}
+                <Countdown iso={lot.endsAt} />
+              </>
+            ) : null}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LotBrowser({ lots, empty, view }: { lots: Lot[]; empty: string; view: "grid" | "table" }) {
+  const groups = useMemo(() => groupSimilarLots(lots), [lots]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const toggle = (key: string) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+
   if (lots.length === 0) {
     return <EmptyState>{empty}</EmptyState>;
   }
+
+  if (view === "grid") {
+    return (
+      <div className="bidrl-lot-grid">
+        {groups.map((group) => (
+          <LotGroupCard key={group.key} group={group} open={Boolean(open[group.key])} onToggle={() => toggle(group.key)} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <Table
       head={
@@ -180,53 +425,75 @@ function LotTable({ lots, empty }: { lots: Lot[]; empty: string }) {
         </>
       }
     >
-      {lots.map((lot) => (
-        <tr key={lot.id}>
-          <td>
-            {lot.thumbUrl ? (
-              <img className="cc-lot-thumb" src={lot.thumbUrl} alt="" width={48} height={48} />
-            ) : (
-              <Dash />
-            )}
-          </td>
-          <td>
-            <a href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</a>
-            <Hint>
-              {lot.identification && lot.identification !== lot.title ? lot.identification : lot.lotCode}
-              {lot.url ? (
-                <>
-                  {" · "}
-                  <BidrlLink href={lot.url} />
-                </>
-              ) : null}
-            </Hint>
-          </td>
-          <td>{cents(lot.currentBidCents)}</td>
-          <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
-          <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
-          <td>
-            {lot.priceCents != null ? (
-              <>
-                {cents(lot.priceCents)}
-                <Hint>
-                  {lot.sourceUrl ? (
-                    <a href={lot.sourceUrl} target="_blank" rel="noreferrer">
-                      {comparableHint(lot) || lot.sourceTitle || "source"}
-                    </a>
-                  ) : (
-                    comparableHint(lot) || <Dash />
-                  )}
-                </Hint>
-              </>
-            ) : (
-              <Dash />
-            )}
-          </td>
-          <td className="cc-num">{lot.dealScore != null ? `${Math.round(lot.dealScore * 100)}%` : <Dash />}</td>
-          <td><Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge></td>
-        </tr>
+      {groups.map((group) => (
+        <LotGroupRows key={group.key} group={group} open={Boolean(open[group.key])} onToggle={() => toggle(group.key)} />
       ))}
     </Table>
+  );
+}
+
+function LotGroupCard({
+  group,
+  open,
+  onToggle,
+}: {
+  group: SimilarGroup;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const head = group.lots[0];
+  if (!head) return null;
+  const rest = group.lots.slice(1);
+  return (
+    <article className="bidrl-lot-card">
+      <LotCard lot={head} />
+      {rest.length > 0 ? (
+        <>
+          <Button size="sm" pressed={open} onClick={onToggle}>
+            {open ? "Hide similar" : `${rest.length} similar`}
+          </Button>
+          {open ? <SimilarList lots={rest} /> : null}
+        </>
+      ) : null}
+    </article>
+  );
+}
+
+function LotGroupRows({
+  group,
+  open,
+  onToggle,
+}: {
+  group: SimilarGroup;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const head = group.lots[0];
+  if (!head) return null;
+  const rest = group.lots.slice(1);
+  return (
+    <>
+      <tr>
+        <td><LotThumb lot={head} /></td>
+        <td>
+          <LotTitle lot={head} />
+          {rest.length > 0 ? (
+            <div>
+              <Button size="sm" pressed={open} onClick={onToggle}>
+                {open ? "Hide similar" : `${rest.length} similar`}
+              </Button>
+            </div>
+          ) : null}
+        </td>
+        <td>{cents(head.currentBidCents)}</td>
+        <td>{head.endsAt ? <Countdown iso={head.endsAt} /> : <Dash />}</td>
+        <td>{head.category ? <Badge>{head.category}</Badge> : <Dash />}</td>
+        <td><LotComparable lot={head} /></td>
+        <td className="cc-num">{head.dealScore != null ? `${Math.round(head.dealScore * 100)}%` : <Dash />}</td>
+        <td><Badge tone={bucketTone(head.bucket)}>{head.bucket.replace("_", " ")}</Badge></td>
+      </tr>
+      {open ? <LotTableRows lots={rest} extraClass="bidrl-similar-row" /> : null}
+    </>
   );
 }
 
@@ -255,157 +522,57 @@ function Notices({
 
 function Feed() {
   const [filter, setFilter] = useState("deals");
-  const snap = useFeed(filter);
-  const searchSnap = useSearch();
-  const [query, setQuery] = useState("");
-  const [scope, setScope] = useState("prefer");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [q, setQ] = useState("");
+  const [view, setView] = useLotView();
+  const snap = useFeed(filter, q);
   const disabled = snap.error instanceof PluginDisabledError;
-
-  const add = async (auctionURL: string) => {
-    setBusy("add");
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await api.post<{ jobId: number; auctionId: string }>("/auctions", { url: auctionURL });
-      setMessage(`Collect queued as job ${result.jobId}.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const search = async () => {
-    setBusy("search");
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await api.post<{ jobId: number }>("/search", { query, scope });
-      setMessage(`Search queued as job ${result.jobId}. SITES locations rank first.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   return (
     <Page>
       <PageHeader
         title="BIDRL"
-        lede="Search SITES auctions first, then score lots from photographs. A comparable appears only when a model or barcode is read and a search hit writes a dollar amount — eBay sold listings first."
+        lede="Lots scored from photographs. A comparable appears only when a model or barcode is read and a search hit writes a dollar amount — eBay sold listings first."
       />
       <Stack>
         <BidrlTabs />
-        <Notices message={message} error={error} disabled={disabled} />
-        <Card title="Search">
-          <Stack>
-            <Hint>
-              Matches BidRL titles and any lots you have already scanned — so a chair titled
-              "office mesh" still rises for "herman miller" if the photos said so. SITES
-              locations (Turlock and the other dealers on that menu) rank first.
-            </Hint>
-            <Field label="Find">
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Keurig K-Supreme, DeWalt 20V, Herman Miller…"
-                disabled={disabled || busy !== null}
-                aria-label="Search query"
-              />
-            </Field>
-            <Field label="Where">
-              <Select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Search scope">
-                <option value="prefer">SITES first, then everywhere</option>
-                <option value="only">SITES locations only</option>
-                <option value="all">All BidRL, no location boost</option>
-              </Select>
-            </Field>
-            <Button
-              variant="primary"
-              disabled={disabled || busy !== null || query.trim() === ""}
-              onClick={() => void search()}
-            >
-              {busy === "search" ? "Queueing…" : "Search"}
-            </Button>
-            {searchSnap.status === "ready" && searchSnap.data.search ? (
-              <>
-                <Hint>
-                  {searchSnap.data.search.query} · {searchSnap.data.search.status}
-                  {searchSnap.data.search.lastError ? ` · ${searchSnap.data.search.lastError}` : ""}
-                </Hint>
-                {searchSnap.data.hits.length === 0 ? (
-                  <EmptyState>No matching lots yet. Search only runs when you ask.</EmptyState>
-                ) : (
-                  <Table
-                    head={
-                      <>
-                        <th>Lot</th>
-                        <th>Location</th>
-                        <th>Bid</th>
-                        <th>Why</th>
-                        <th></th>
-                      </>
-                    }
-                  >
-                    {searchSnap.data.hits.map((hit) => (
-                      <tr key={hit.url}>
-                        <td>
-                          {hit.collected ? (
-                            <a href={`/bidrl/lot/${encodeURIComponent(hit.lotId)}`}>{hit.title}</a>
-                          ) : (
-                            <BidrlLink href={hit.url}>{hit.title}</BidrlLink>
-                          )}
-                          <Hint>{hit.auctionTitle || hit.auctionId}</Hint>
-                        </td>
-                        <td>
-                          {hit.preferred ? <Badge tone="ok">{hit.affiliateName || "SITES"}</Badge> : (
-                            <Badge>{hit.affiliateName || "other"}</Badge>
-                          )}
-                        </td>
-                        <td>{cents(hit.currentBidCents)}</td>
-                        <td><Hint>{hit.matchReason || hit.source}</Hint></td>
-                        <td>
-                          {hit.collected ? (
-                            <a href={`/bidrl/auction/${encodeURIComponent(hit.auctionId)}`}>Collected</a>
-                          ) : (
-                            <Button
-                              disabled={disabled || busy !== null || hit.auctionId === ""}
-                              onClick={() => void add(`https://www.bidrl.com/auction/${hit.auctionId}/bidgallery`)}
-                            >
-                              Collect auction
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </Table>
-                )}
-              </>
-            ) : null}
-          </Stack>
-        </Card>
+        <Notices message={null} error={null} disabled={disabled} />
         <Card
           title="Feed"
-          actions={
-            <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Feed filter">
-              <option value="deals">Best deals</option>
-              <option value="mislabeled">Likely mislabeled</option>
-              <option value="model">Model number found</option>
-              <option value="worth_opening">Worth opening</option>
-              <option value="all">All scanned</option>
-            </Select>
-          }
+          actions={<ViewToggle value={view} onChange={setView} />}
         >
+          <Toolbar>
+            <Field label="Find">
+              <Input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setQ(draft);
+                }}
+                placeholder="Title, identification, model…"
+                disabled={disabled}
+                aria-label="Find in feed"
+              />
+            </Field>
+            <Button disabled={disabled} onClick={() => setQ(draft)}>
+              Find
+            </Button>
+            <Field label="Show">
+              <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Feed filter">
+                <option value="deals">Best deals</option>
+                <option value="mislabeled">Likely mislabeled</option>
+                <option value="model">Model number found</option>
+                <option value="worth_opening">Worth opening</option>
+                <option value="all">All scanned</option>
+              </Select>
+            </Field>
+          </Toolbar>
           {snap.status === "loading" ? <Loading label="Loading feed…" /> : null}
           {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
           {snap.status === "ready" ? (
             <>
               <Hint>{filterLabel(filter)}</Hint>
-              <LotTable lots={snap.data.lots} empty="Nothing in this filter yet. Collect an auction and run a scan." />
+              <LotBrowser lots={snap.data.lots} empty="Nothing in this filter yet. Collect an auction and run a scan." view={view} />
             </>
           ) : null}
         </Card>
@@ -422,6 +589,10 @@ function Auctions() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const disabled = auctions.error instanceof PluginDisabledError;
+  const collected = auctions.status === "ready" ? auctions.data.auctions : [];
+  const collectedGroups = useMemo(() => groupByLocation(collected), [collected]);
+  const siteList = sites.status === "ready" ? sites.data.auctions : [];
+  const siteGroups = useMemo(() => groupByLocation(siteList), [siteList]);
 
   const add = async (auctionURL: string) => {
     setBusy("add");
@@ -431,6 +602,29 @@ function Auctions() {
       const result = await api.post<{ jobId: number; auctionId: string }>("/auctions", { url: auctionURL });
       setMessage(`Collect queued as job ${result.jobId}.`);
       setUrl("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cleanup = async () => {
+    if (
+      !window.confirm(
+        "Remove ended auctions and lots? Photos, analyses, and comparables for those records are deleted.",
+      )
+    ) {
+      return;
+    }
+    setBusy("cleanup");
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.post<CleanupResult>("/cleanup");
+      auctions.reload();
+      sites.reload();
+      setMessage(cleanupMessage(result));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -456,15 +650,63 @@ function Auctions() {
     <Page>
       <PageHeader
         title="Auctions"
-        lede="Collect from SITES locations or a pasted BidRL URL. Collection runs only when you ask."
+        lede="Your collected auctions first, then SITES locations. Collection runs only when you ask."
       />
       <Stack>
         <BidrlTabs />
         <Notices message={message} error={error} disabled={disabled} />
         <Card
-          title="SITES auctions"
+          title="Collected auctions"
           actions={
-            <Button disabled={disabled || busy !== null} onClick={() => void refreshSites()}>
+            <Button size="sm" disabled={disabled || busy !== null} onClick={() => void cleanup()}>
+              {busy === "cleanup" ? "Removing…" : "Remove ended"}
+            </Button>
+          }
+        >
+          <Hint>
+            Ended auctions and lots stay until you remove them. The countdown is local from
+            the last collect or bid refresh — nothing is deleted on a schedule.
+          </Hint>
+          {auctions.status === "loading" ? <Loading label="Loading auctions…" /> : null}
+          {auctions.status === "error" && !disabled ? <Callout tone="danger">{auctions.error.message}</Callout> : null}
+          {auctions.status === "ready" && collected.length > 0 ? (
+            <LocationSections groups={collectedGroups} empty="No collected auctions yet.">
+              {(group) => <CollectedTable auctions={group} />}
+            </LocationSections>
+          ) : auctions.status === "ready" ? (
+            <EmptyState>No collected auctions yet. Add a URL or collect from SITES.</EmptyState>
+          ) : null}
+        </Card>
+        <Card title="Add auction">
+          <Stack>
+            <Hint>
+              Paste a BIDRL auction or print-catalog URL. Collection runs only when you ask;
+              there is no crawl.
+            </Hint>
+            <Toolbar>
+              <Field label="Auction URL">
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://www.bidrl.com/auction/…"
+                  disabled={disabled || busy !== null}
+                  aria-label="Auction URL"
+                />
+              </Field>
+              <Button
+                variant="primary"
+                disabled={disabled || busy !== null || url.trim() === ""}
+                onClick={() => void add(url)}
+              >
+                {busy === "add" ? "Queueing…" : "Add auction"}
+              </Button>
+            </Toolbar>
+          </Stack>
+        </Card>
+        <Card
+          title="SITES by location"
+          actions={
+            <Button size="sm" disabled={disabled || busy !== null} onClick={() => void refreshSites()}>
               {busy === "sites" ? "Queueing…" : "Refresh list"}
             </Button>
           }
@@ -474,73 +716,20 @@ function Auctions() {
             <a href="https://www.bidrl.com/affiliate/turlock-19/" target="_blank" rel="noreferrer">Turlock</a>.
             Refresh is user-triggered; nothing is crawled on a schedule.
           </Hint>
-          {sites.status === "ready" && sites.data.auctions.length > 0 ? (
-            <Table head={<><th>Auction</th><th>Location</th><th>Lots</th><th>Ends</th><th></th></>}>
-              {sites.data.auctions.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    {a.collected ? <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title}</a> : a.title}
-                    {a.url ? (
-                      <Hint><BidrlLink href={a.url} /></Hint>
-                    ) : null}
-                  </td>
-                  <td><Badge tone="ok">{a.affiliateName || a.city}</Badge></td>
-                  <td className="cc-num">{a.itemCount}</td>
-                  <td>{a.endsAt ? <Countdown iso={a.endsAt} /> : <Dash />}</td>
-                  <td>
-                    {a.collected ? "Collected" : (
-                      <Button disabled={disabled || busy !== null} onClick={() => void add(a.url)}>
-                        Collect
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </Table>
+          {sites.status === "ready" && siteList.length > 0 ? (
+            <LocationSections groups={siteGroups} empty="No SITES list yet.">
+              {(group) => (
+                <SitesTable
+                  auctions={group}
+                  disabled={disabled}
+                  busy={busy}
+                  onCollect={(auctionURL) => void add(auctionURL)}
+                />
+              )}
+            </LocationSections>
           ) : (
-            <EmptyState>No SITES list yet. Search, or refresh the list.</EmptyState>
+            <EmptyState>No SITES list yet. Refresh the list.</EmptyState>
           )}
-        </Card>
-        <Card title="Add auction">
-          <Stack>
-            <Hint>
-              Paste a BIDRL auction or print-catalog URL. Collection runs only when you ask;
-              there is no crawl.
-            </Hint>
-            <Field label="Auction URL">
-              <Input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.bidrl.com/auction/…"
-                disabled={disabled || busy !== null}
-                aria-label="Auction URL"
-              />
-            </Field>
-            <Button variant="primary" disabled={disabled || busy !== null || url.trim() === ""} onClick={() => void add(url)}>
-              {busy === "add" ? "Queueing…" : "Add auction"}
-            </Button>
-          </Stack>
-        </Card>
-        <Card title="Collected auctions">
-          {auctions.status === "loading" ? <Loading label="Loading auctions…" /> : null}
-          {auctions.status === "error" && !disabled ? <Callout tone="danger">{auctions.error.message}</Callout> : null}
-          {auctions.status === "ready" && auctions.data.auctions.length > 0 ? (
-            <Table head={<><th>Auction</th><th>Status</th><th>Lots</th><th>Ends</th></>}>
-              {auctions.data.auctions.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title || a.id}</a>
-                    {a.url ? <Hint><BidrlLink href={a.url} /></Hint> : null}
-                  </td>
-                  <td><Badge>{a.status}</Badge></td>
-                  <td className="cc-num">{a.lotCount}</td>
-                  <td>{a.endsAt ? <Countdown iso={a.endsAt} /> : <Dash />}</td>
-                </tr>
-              ))}
-            </Table>
-          ) : auctions.status === "ready" ? (
-            <EmptyState>No collected auctions yet. Add a URL or collect from SITES.</EmptyState>
-          ) : null}
         </Card>
       </Stack>
     </Page>
@@ -553,6 +742,7 @@ function LotsCatalog() {
   const [bucket, setBucket] = useState("all");
   const [category, setCategory] = useState("all");
   const [endingSoon, setEndingSoon] = useState(false);
+  const [view, setView] = useLotView();
   const snap = useLots(q, bucket, category, endingSoon ? "soon" : "");
   const disabled = snap.error instanceof PluginDisabledError;
 
@@ -609,11 +799,11 @@ function LotsCatalog() {
             />
           </Toolbar>
         </Card>
-        <Card title="Catalog">
+        <Card title="Catalog" actions={<ViewToggle value={view} onChange={setView} />}>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
           {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
           {snap.status === "ready" ? (
-            <LotTable lots={snap.data.lots} empty="No lots match these filters." />
+            <LotBrowser lots={snap.data.lots} empty="No lots match these filters." view={view} />
           ) : null}
         </Card>
       </Stack>
@@ -624,6 +814,7 @@ function LotsCatalog() {
 function AuctionView() {
   const id = pathParts()[2] ?? "";
   const snap = useAuction(id);
+  const [view, setView] = useLotView();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const run = async (action: "scan" | "refresh") => {
@@ -656,7 +847,7 @@ function AuctionView() {
         title={auction?.title ?? "Auction"}
         lede={auction ? undefined : "Auction"}
         actions={
-          <Row>
+          <div className="bidrl-actions">
             <Button variant="primary" disabled={disabled || busy !== null} onClick={() => void run("scan")}>
               {busy === "scan" ? "Queueing…" : "Scan"}
             </Button>
@@ -667,7 +858,7 @@ function AuctionView() {
               Delete
             </Button>
             {auction?.url ? <BidrlLink href={auction.url} /> : null}
-          </Row>
+          </div>
         }
       />
       <Stack>
@@ -684,7 +875,9 @@ function AuctionView() {
           </Grid>
         ) : null}
         {snap.status === "ready" ? (
-          <LotTable lots={snap.data.lots} empty="This auction has no lots yet." />
+          <Card title="Lots" actions={<ViewToggle value={view} onChange={setView} />}>
+            <LotBrowser lots={snap.data.lots} empty="This auction has no lots yet." view={view} />
+          </Card>
         ) : null}
       </Stack>
     </Page>
@@ -715,7 +908,7 @@ function LotView() {
         title={lot?.title ?? "Lot"}
         lede={lot?.lotCode ? `Lot ${lot.lotCode}` : undefined}
         actions={
-          <Row>
+          <div className="bidrl-actions">
             <Button
               variant="primary"
               disabled={disabled || busy !== null || (lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode")}
@@ -728,7 +921,7 @@ function LotView() {
             </Button>
             {lot ? <a href={`/bidrl/auction/${encodeURIComponent(lot.auctionId)}`}>Auction</a> : null}
             {lot?.url ? <BidrlLink href={lot.url} /> : null}
-          </Row>
+          </div>
         }
       />
       <Stack>
@@ -796,6 +989,14 @@ function LotView() {
                       {lot.sourceTitle || lot.sourceUrl}
                     </a>
                   ) : null}
+                  {lot.reusedFromLotId ? (
+                    <Hint>
+                      Same comparable as{" "}
+                      <a href={`/bidrl/lot/${encodeURIComponent(lot.reusedFromLotId)}`}>
+                        lot {lot.reusedFromLotId}
+                      </a>
+                    </Hint>
+                  ) : null}
                   {lot.retrievedAt ? (
                     <Hint>
                       <RelativeTime at={lot.retrievedAt} prefix="Looked up" />
@@ -818,7 +1019,7 @@ function LotView() {
 }
 
 function Tile({ enabled }: PluginSurfaceProps) {
-  const snap = useFeed("deals");
+  const snap = useFeed("deals", "");
   if (snap.status === "loading") return <Hint>Loading…</Hint>;
   if (snap.status === "error") {
     return <Hint>{snap.error instanceof PluginDisabledError ? "Disabled." : snap.error.message}</Hint>;
@@ -850,12 +1051,12 @@ function Tile({ enabled }: PluginSurfaceProps) {
 }
 
 function Detail({ enabled }: PluginSurfaceProps) {
-  const snap = useFeed("deals");
+  const snap = useFeed("deals", "");
   if (snap.status !== "ready") return <Hint>Loading…</Hint>;
   if (snap.data.lots.length === 0) {
     return <Hint>{enabled ? "No priced lots yet." : "Disabled."}</Hint>;
   }
-  return <LotTable lots={snap.data.lots.slice(0, 8)} empty="No priced lots yet." />;
+  return <LotBrowser lots={snap.data.lots.slice(0, 8)} empty="No priced lots yet." view="table" />;
 }
 
 const bidrl: PluginModule = {
@@ -869,7 +1070,7 @@ const bidrl: PluginModule = {
     { path: "/bidrl/lot/:id", element: <LotView /> },
   ],
   dashboard: {
-    summary: "Searches SITES auctions first, then scores lots from photographs.",
+    summary: "Scores lots from photographs. Collect a SITES auction, then scan.",
     live: ["bidrl.**"],
     tile: Tile,
     detail: Detail,

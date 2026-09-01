@@ -3,16 +3,34 @@ package tid
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	hostpolicy "github.com/hbaldwin98/control-center/host/policy"
 )
 
 type dayView struct {
-	Day       string  `json:"day"`
-	KWh       float64 `json:"kwh"`
-	CostCents *int64  `json:"costCents"`
+	Day        string   `json:"day"`
+	KWh        float64  `json:"kwh"`
+	CostCents  *int64   `json:"costCents"`
+	OnPeakKWh  *float64 `json:"onPeakKwh"`
+	OffPeakKWh *float64 `json:"offPeakKwh"`
+}
+
+type billingPeriodView struct {
+	Start          string    `json:"start"`
+	End            string    `json:"end"`
+	TotalKWh       float64   `json:"totalKwh"`
+	TotalCostCents *int64    `json:"totalCostCents"`
+	OnPeakKWh      *float64  `json:"onPeakKwh"`
+	OffPeakKWh     *float64  `json:"offPeakKwh"`
+	PeakDemandDate string    `json:"peakDemandDate"`
+	PeakDemandKW   *float64  `json:"peakDemandKw"`
+	Days           []dayView `json:"days"`
+}
+
+type historyPage struct {
+	Periods     []billingPeriodView `json:"periods"`
+	LatestEvent int64               `json:"latestEventId"`
 }
 
 type insightView struct {
@@ -33,18 +51,20 @@ type syncView struct {
 }
 
 type summaryPage struct {
-	MonthKWh     float64      `json:"monthKwh"`
-	LastMonthKWh float64      `json:"lastMonthKwh"`
-	LastYearKWh  float64      `json:"lastYearKwh"`
-	Avg7         float64      `json:"avg7"`
-	PeakDay      string       `json:"peakDay"`
-	PeakKWh      float64      `json:"peakKwh"`
-	EstCostCents *int64       `json:"estCostCents"`
-	Spark        []float64    `json:"spark"`
-	Days         []dayView    `json:"days"`
-	Insight      *insightView `json:"insight"`
-	LastSync     *syncView    `json:"lastSync"`
-	LatestEvent  int64        `json:"latestEventId"`
+	MonthKWh              float64      `json:"monthKwh"`
+	LastMonthKWh          float64      `json:"lastMonthKwh"`
+	LastBillingPeriodKWh  float64      `json:"lastBillingPeriodKwh"`
+	LastBillingPeriodFrom string       `json:"lastBillingPeriodFrom"`
+	LastBillingPeriodTo   string       `json:"lastBillingPeriodTo"`
+	LastYearKWh           float64      `json:"lastYearKwh"`
+	PeakDay               string       `json:"peakDay"`
+	PeakKWh               float64      `json:"peakKwh"`
+	EstCostCents          *int64       `json:"estCostCents"`
+	Spark                 []float64    `json:"spark"`
+	Days                  []dayView    `json:"days"`
+	Insight               *insightView `json:"insight"`
+	LastSync              *syncView    `json:"lastSync"`
+	LatestEvent           int64        `json:"latestEventId"`
 }
 
 func (p *Plugin) handleGetSummary(w http.ResponseWriter, r *http.Request) {
@@ -75,23 +95,13 @@ func (p *Plugin) handlePostSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"jobId": id})
 }
 
-func (p *Plugin) handlePostUpload(w http.ResponseWriter, r *http.Request) {
+func (p *Plugin) handlePostHistorySync(w http.ResponseWriter, r *http.Request) {
 	h, ok := p.host()
 	if !ok {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
-	var body struct {
-		CSV string `json:"csv"`
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.CSV == "" {
-		writeErr(w, http.StatusBadRequest, "bad_request", "csv is required")
-		return
-	}
-	id, err := h.Jobs().Enqueue(r.Context(), "sync", syncArgs{Source: "upload", CSV: body.CSV})
+	id, err := h.Jobs().Enqueue(r.Context(), "sync", syncArgs{Source: "history", History: true})
 	if err != nil {
 		writeHostErr(w, err)
 		return
@@ -99,22 +109,18 @@ func (p *Plugin) handlePostUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"jobId": id})
 }
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if r.Body == nil {
-		writeErr(w, http.StatusBadRequest, "bad_request", "malformed JSON body")
-		return false
+func (p *Plugin) handleGetHistory(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
 	}
-	defer r.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil || len(raw) == 0 {
-		writeErr(w, http.StatusBadRequest, "bad_request", "malformed JSON body")
-		return false
+	page, err := p.history(r.Context(), h, 24)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
 	}
-	if err := json.Unmarshal(raw, dst); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_request", "malformed JSON body")
-		return false
-	}
-	return true
+	writeJSON(w, http.StatusOK, page)
 }
 
 func writeHostErr(w http.ResponseWriter, err error) {

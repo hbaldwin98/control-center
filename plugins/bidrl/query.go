@@ -3,6 +3,7 @@ package bidrl
 import (
 	"encoding/json"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -171,6 +172,56 @@ func notesAndTerms(termsJSON, notes string) string {
 	var terms []string
 	_ = json.Unmarshal([]byte(termsJSON), &terms)
 	return strings.TrimSpace(strings.Join(terms, " ") + " " + notes)
+}
+
+const endingSoonWindow = 24 * time.Hour
+
+func endingSoon(endsAt string, now time.Time) bool {
+	t, ok := parseEndsAt(endsAt)
+	if !ok {
+		return false
+	}
+	if t.Before(now) {
+		return false
+	}
+	return !t.After(now.Add(endingSoonWindow))
+}
+
+func hasEnded(endsAt string, now time.Time) bool {
+	t, ok := parseEndsAt(endsAt)
+	return ok && t.Before(now)
+}
+
+// auctionEnded is true when the auction close is in the past, or every lot that
+// recorded an end time has already closed. Unknown timestamps are left alone.
+func auctionEnded(auctionEnds string, lotEnds []string, now time.Time) bool {
+	if hasEnded(auctionEnds, now) {
+		return true
+	}
+	known := 0
+	for _, ends := range lotEnds {
+		if ends == "" {
+			continue
+		}
+		known++
+		if !hasEnded(ends, now) {
+			return false
+		}
+	}
+	return known > 0
+}
+
+func parseEndsAt(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
 }
 
 func uniqueFold(in []string, max int) []string {

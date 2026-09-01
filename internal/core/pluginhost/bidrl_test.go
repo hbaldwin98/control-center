@@ -279,6 +279,70 @@ routes:
 		t.Fatalf("all lots %+v", all.Lots)
 	}
 
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots?bucket=priced", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("lots priced: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var priced struct {
+		Lots []struct {
+			ID string `json:"id"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &priced); err != nil {
+		t.Fatal(err)
+	}
+	if len(priced.Lots) != 1 || priced.Lots[0].ID != "1001" {
+		t.Fatalf("priced lots %+v", priced.Lots)
+	}
+
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots?q=keurig", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("lots q: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var found struct {
+		Lots []struct {
+			ID string `json:"id"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &found); err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Lots) != 1 || found.Lots[0].ID != "1001" {
+		t.Fatalf("keurig lots %+v", found.Lots)
+	}
+
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots?category=appliances", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("lots category: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var appliances struct {
+		Lots []struct {
+			ID string `json:"id"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &appliances); err != nil {
+		t.Fatal(err)
+	}
+	if len(appliances.Lots) != 1 || appliances.Lots[0].ID != "1001" {
+		t.Fatalf("appliance lots %+v", appliances.Lots)
+	}
+
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/feed?filter=all&q=keurig", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("feed q: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var feedQ struct {
+		Lots []struct {
+			ID string `json:"id"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &feedQ); err != nil {
+		t.Fatal(err)
+	}
+	if len(feedQ.Lots) != 1 || feedQ.Lots[0].ID != "1001" {
+		t.Fatalf("feed keurig %+v", feedQ.Lots)
+	}
+
 	searchBody, _ := json.Marshal(map[string]string{"query": "keurig", "scope": "prefer"})
 	rec = serve(http.MethodPost, "/api/plugins/bidrl/search", searchBody)
 	if rec.Code != http.StatusAccepted {
@@ -342,6 +406,91 @@ routes:
 	}
 	if len(sites.Auctions) != 1 || sites.Auctions[0].ID != "42" {
 		t.Fatalf("SITES auctions %+v", sites.Auctions)
+	}
+
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list auctions: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var listed struct {
+		Auctions []struct {
+			ID            string `json:"id"`
+			AffiliateName string `json:"affiliateName"`
+			City          string `json:"city"`
+		} `json:"auctions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Auctions) != 1 || listed.Auctions[0].ID != "42" || listed.Auctions[0].AffiliateName != "Turlock" {
+		t.Fatalf("collected auctions %+v", listed.Auctions)
+	}
+
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	if _, err := store.Exec(ctx, `UPDATE bidrl_lots SET ends_at = ? WHERE id = '1002'`, past); err != nil {
+		t.Fatal(err)
+	}
+	rec = serve(http.MethodPost, "/api/plugins/bidrl/cleanup", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cleanup: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var cleaned struct {
+		Auctions int `json:"auctions"`
+		Lots     int `json:"lots"`
+		Sites    int `json:"sites"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cleaned); err != nil {
+		t.Fatal(err)
+	}
+	if cleaned.Auctions != 0 || cleaned.Lots != 1 {
+		t.Fatalf("cleanup %+v", cleaned)
+	}
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("auction after lot cleanup: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var remaining struct {
+		Auction struct {
+			LotCount int `json:"lotCount"`
+		} `json:"auction"`
+		Lots []struct {
+			ID string `json:"id"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining.Auction.LotCount != 2 || len(remaining.Lots) != 2 {
+		t.Fatalf("after lot cleanup %+v", remaining)
+	}
+	for _, lot := range remaining.Lots {
+		if lot.ID == "1002" {
+			t.Fatal("ended lot still present")
+		}
+	}
+
+	if _, err := store.Exec(ctx, `UPDATE bidrl_affiliate_auctions SET ends_at = ? WHERE id = '42'`, past); err != nil {
+		t.Fatal(err)
+	}
+	rec = serve(http.MethodPost, "/api/plugins/bidrl/cleanup", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sites cleanup: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cleaned); err != nil {
+		t.Fatal(err)
+	}
+	if cleaned.Sites != 1 {
+		t.Fatalf("sites cleanup %+v", cleaned)
+	}
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/sites/auctions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sites after cleanup: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sites); err != nil {
+		t.Fatal(err)
+	}
+	if len(sites.Auctions) != 0 {
+		t.Fatalf("ended SITES listing still present: %+v", sites.Auctions)
 	}
 
 	rec = serve(http.MethodDelete, "/api/plugins/bidrl/auctions/42", nil)

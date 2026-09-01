@@ -13,15 +13,65 @@ import (
 
 const searxngTimeout = 20 * time.Second
 const maxSearxngBytes = 1 << 20
+const searxngRetryWait = 400 * time.Millisecond
+
+// defaultSearxngEngines are tried one at a time. Querying them together makes
+// DuckDuckGo and Brave both see a burst from the same Docker IP.
+var defaultSearxngEngines = []string{"brave", "duckduckgo"}
 
 // SearXNG calls a private SearXNG instance's JSON API. The base URL is host config,
 // never plugin-supplied.
 type SearXNG struct {
 	BaseURL string
 	Client  *http.Client
+	// Engines, when nonempty, overrides the default Brave-then-DuckDuckGo order.
+	Engines []string
 }
 
 func (s SearXNG) Search(ctx context.Context, query string, limit int) ([]Hit, error) {
+	var last error
+	for _, engine := range s.engineNames() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		hits, err := s.searchEngine(ctx, query, engine, limit)
+		if err != nil {
+			last = err
+			continue
+		}
+		if len(hits) > 0 {
+			return hits, nil
+		}
+	}
+	if last != nil {
+		return nil, last
+	}
+	return nil, nil
+}
+
+func (s SearXNG) engineNames() []string {
+	if len(s.Engines) > 0 {
+		return s.Engines
+	}
+	return defaultSearxngEngines
+}
+
+func (s SearXNG) searchEngine(ctx context.Context, query, engine string, limit int) ([]Hit, error) {
+	hits, err := s.searchOnce(ctx, query, engine, limit)
+	if err == nil {
+		return hits, nil
+	}
+	t := time.NewTimer(searxngRetryWait)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-t.C:
+	}
+	return s.searchOnce(ctx, query, engine, limit)
+}
+
+func (s SearXNG) searchOnce(ctx context.Context, query, engine string, limit int) ([]Hit, error) {
 	base := strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
 	if base == "" {
 		return nil, fmt.Errorf("%w: searxng url is empty", ErrUnavailable)
@@ -34,6 +84,9 @@ func (s SearXNG) Search(ctx context.Context, query string, limit int) ([]Hit, er
 	q.Set("q", query)
 	q.Set("format", "json")
 	q.Set("language", "en")
+	if engine != "" {
+		q.Set("engines", engine)
+	}
 	u.RawQuery = q.Encode()
 
 	client := s.Client

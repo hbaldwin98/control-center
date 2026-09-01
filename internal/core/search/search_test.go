@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFakeSearchFindsKeurig(t *testing.T) {
@@ -67,6 +68,9 @@ func TestSearXNGParsesJSONResults(t *testing.T) {
 		if r.URL.Query().Get("format") != "json" || r.URL.Query().Get("q") == "" {
 			t.Errorf("query = %s", r.URL.RawQuery)
 		}
+		if r.URL.Query().Get("engines") != "brave" {
+			t.Errorf("engines = %s", r.URL.Query().Get("engines"))
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"results": []map[string]string{{
 				"url":     "https://shop.example.test/dcd791",
@@ -86,13 +90,51 @@ func TestSearXNGParsesJSONResults(t *testing.T) {
 	}
 }
 
+func TestSearXNGFallsBackWhenBraveIsEmpty(t *testing.T) {
+	var engines []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		engines = append(engines, r.URL.Query().Get("engines"))
+		if r.URL.Query().Get("engines") == "brave" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]string{{
+				"url":     "https://shop.example.test/dcd791",
+				"title":   "DeWalt DCD791",
+				"content": "Used DeWalt DCD791 for $89",
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	hits, err := (SearXNG{BaseURL: srv.URL, Client: srv.Client()}).Search(context.Background(), "DCD791", 4)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("hits=%#v err=%v", hits, err)
+	}
+	if len(engines) != 2 || engines[0] != "brave" || engines[1] != "duckduckgo" {
+		t.Fatalf("engines=%v", engines)
+	}
+}
+
 func TestSearXNGHTTPErrorIsUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	t.Cleanup(srv.Close)
-	_, err := (SearXNG{BaseURL: srv.URL, Client: srv.Client()}).Search(context.Background(), "x", 1)
+	_, err := (SearXNG{BaseURL: srv.URL, Client: srv.Client(), Engines: []string{"brave"}}).Search(context.Background(), "x", 1)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPaceHonoursCancel(t *testing.T) {
+	p := Pace(Fake{}, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	if _, err := p.Search(ctx, "keurig", 1); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if _, err := p.Search(ctx, "keurig", 1); err == nil {
+		t.Fatal("expected cancel while waiting")
 	}
 }

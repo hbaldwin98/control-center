@@ -82,6 +82,9 @@ function patternList(events: string | readonly string[] | undefined): string[] {
  * the request, installs the snapshot, then applies buffered events strictly above
  * `asOfEventId`. Without `apply`, a matching event invalidates the snapshot and it
  * refetches — which is the right shape for job progress, logs, and notifications.
+ *
+ * `loader` must be referentially stable (`useCallback`). When its identity changes — a
+ * new filter query, a different resource id — the snapshot reloads from that loader.
  */
 export function useSnapshot<T>(
   loader: (signal: AbortSignal) => Promise<Snapshot<T>>,
@@ -173,7 +176,7 @@ export function useSnapshot<T>(
       for (const b of buffers) b.close();
       for (const u of unsubs) u();
     };
-  }, [patternKey, generation, epoch, reload]);
+  }, [patternKey, generation, epoch, reload, loader]);
 
   return { ...state, reload };
 }
