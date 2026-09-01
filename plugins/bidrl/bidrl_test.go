@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hbaldwin98/control-center/host"
+	hostai "github.com/hbaldwin98/control-center/host/ai"
 )
 
 func TestParseAuctionURL(t *testing.T) {
@@ -102,6 +103,35 @@ func TestBucketForBasis(t *testing.T) {
 	}
 	if bucketFor("category_only") != "discarded" {
 		t.Fatal(bucketFor("category_only"))
+	}
+}
+
+func TestDecodeAnalysisUsesStructuredJSON(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"identification":"Ninja CREAMi","basis":"exact_text","model_or_sku":"NC301","title_agreement":0.9,"notes":"model plate"}`)
+	got, ok := decodeAnalysis(&hostai.ChatResponse{Parsed: raw}, "wrong title")
+	if !ok || got.Basis != "exact_text" || got.ModelOrSKU != "NC301" || got.Identification != "Ninja CREAMi" {
+		t.Fatalf("ok=%t %+v", ok, got)
+	}
+}
+
+func TestDecodeAnalysisExtractsJSONFromProse(t *testing.T) {
+	t.Parallel()
+	got, ok := decodeAnalysis(&hostai.ChatResponse{Text: "Sure.\n```json\n{\"identification\":\"INSE S9X\",\"basis\":\"exact_text\",\"model_or_sku\":\"S9X\",\"title_agreement\":0.8,\"notes\":\"label\"}\n```\n"}, "Cordless Vacuum")
+	if !ok || got.Basis != "exact_text" || got.ModelOrSKU != "S9X" {
+		t.Fatalf("ok=%t %+v", ok, got)
+	}
+	got, ok = decodeAnalysis(&hostai.ChatResponse{Text: `Here it is: {"identification":"Ninja CREAMi","basis":"exact_text","model_or_sku":"NC301","title_agreement":0.9,"notes":"plate"}`}, "Ice Cream Maker")
+	if !ok || got.Basis != "exact_text" || got.Identification != "Ninja CREAMi" {
+		t.Fatalf("embedded object: ok=%t %+v", ok, got)
+	}
+}
+
+func TestDecodeAnalysisLeavesDefaultWhenTheModelWroteProse(t *testing.T) {
+	t.Parallel()
+	got, ok := decodeAnalysis(&hostai.ChatResponse{Text: "This looks like a cordless vacuum, probably an INSE."}, "Cordless Vacuum")
+	if ok || got.Basis != "category_only" || got.Identification != "Cordless Vacuum" || got.Notes != "" {
+		t.Fatalf("prose must not look like a successful identification: ok=%t %+v", ok, got)
 	}
 }
 

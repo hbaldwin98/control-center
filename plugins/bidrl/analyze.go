@@ -19,11 +19,11 @@ var analysisSchema = json.RawMessage(`{
 	"additionalProperties":false,
 	"required":["identification","basis","model_or_sku","title_agreement","notes"],
 	"properties":{
-		"identification":{"type":"string"},
-		"basis":{"type":"string","enum":["exact_text","barcode","distinctive_visual_match","product_family","category_only"]},
-		"model_or_sku":{"type":"string"},
-		"title_agreement":{"type":"number"},
-		"notes":{"type":"string"}
+		"identification":{"type":"string","description":"What the photographs actually show"},
+		"basis":{"type":"string","enum":["exact_text","barcode","distinctive_visual_match","product_family","category_only"],"description":"exact_text: a model or SKU is legible in a photo. barcode: a barcode, UPC, or SKU. distinctive_visual_match: a named product with no readable model. product_family: a brand or line without a specific model. category_only: a generic item with no brand or model."},
+		"model_or_sku":{"type":"string","description":"The readable model, barcode, or empty"},
+		"title_agreement":{"type":"number","description":"0-1 how well the listing title matches the photographs"},
+		"notes":{"type":"string","description":"Short evidence taken from the photographs"}
 	}
 }`)
 
@@ -123,7 +123,15 @@ func (p *Plugin) analyzeLot(jc hostjobs.Context, h host.Host, lot lotRow) error 
 	if err != nil {
 		return err
 	}
-	prompt := fmt.Sprintf(`Identify this auction lot from the photographs, not the title. Report why you identified it.
+	prompt := fmt.Sprintf(`Identify this auction lot from the photographs, not the title.
+
+Reply with JSON:
+- identification: what the photos show
+- basis: exact_text (model/SKU legible in a photo), barcode, distinctive_visual_match (named product, no readable model), product_family (brand or line only), category_only (generic item)
+- model_or_sku: the readable model or barcode, or empty
+- title_agreement: 0-1 how well the title matches the photos
+- notes: short evidence from the photos
+
 Title: %s
 Lot code: %s
 URL: %s
@@ -140,11 +148,9 @@ Photos: %d`, lot.Title, lot.LotCode, lot.URL, len(images))
 	if err != nil {
 		return err
 	}
-	parsed := analysisResult{Identification: lot.Title, Basis: "category_only", TitleAgreement: 0}
-	if len(resp.Parsed) > 0 {
-		_ = json.Unmarshal(resp.Parsed, &parsed)
-	} else if trim := bytes.TrimSpace([]byte(resp.Text)); json.Valid(trim) {
-		_ = json.Unmarshal(trim, &parsed)
+	parsed, ok := decodeAnalysis(resp, lot.Title)
+	if !ok && resp != nil {
+		_ = jc.Logf("lot %s: cheap-vision returned no JSON (%d chars); defaulting to category_only", lot.ID, len(resp.Text))
 	}
 	parsed.Basis = normalizeBasis(parsed.Basis)
 	if parsed.TitleAgreement < 0 {
@@ -204,6 +210,93 @@ func (p *Plugin) loadLotImages(jc hostjobs.Context, h host.Host, lotID string) (
 		images = append(images, hostai.Image{Blob: body, MIME: km[1], Resolution: hostai.ResolutionMedium})
 	}
 	return images, nil
+}
+
+func decodeAnalysis(resp *hostai.ChatResponse, fallbackTitle string) (analysisResult, bool) {
+	parsed := analysisResult{Identification: fallbackTitle, Basis: "category_only", TitleAgreement: 0}
+	if resp == nil {
+		return parsed, false
+	}
+	raw := resp.Parsed
+	if len(raw) == 0 || !json.Valid(raw) {
+		raw = extractJSONObject(resp.Text)
+	}
+	if len(raw) == 0 {
+		return parsed, false
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return analysisResult{Identification: fallbackTitle, Basis: "category_only", TitleAgreement: 0}, false
+	}
+	return parsed, true
+}
+
+// extractJSONObject returns the first JSON object in s, including one wrapped in a
+// markdown fence. Prose with no object yields nil, which leaves analysis at its
+// category_only default.
+func extractJSONObject(s string) json.RawMessage {
+	trim := bytes.TrimSpace([]byte(s))
+	if obj := jsonObject(trim); obj != nil {
+		return obj
+	}
+	open := bytes.Index(trim, []byte("```"))
+	if open < 0 {
+		return jsonObject(firstObject(trim))
+	}
+	rest := trim[open+3:]
+	if i := bytes.IndexByte(rest, '\n'); i >= 0 {
+		rest = rest[i+1:]
+	}
+	if close := bytes.Index(rest, []byte("```")); close >= 0 {
+		rest = rest[:close]
+	}
+	if obj := jsonObject(bytes.TrimSpace(rest)); obj != nil {
+		return obj
+	}
+	return jsonObject(firstObject(trim))
+}
+
+func jsonObject(b []byte) json.RawMessage {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || b[0] != '{' || !json.Valid(b) {
+		return nil
+	}
+	return json.RawMessage(b)
+}
+
+func firstObject(b []byte) []byte {
+	start := bytes.IndexByte(b, '{')
+	if start < 0 {
+		return nil
+	}
+	depth, inStr, esc := 0, false, false
+	for i := start; i < len(b); i++ {
+		c := b[i]
+		if inStr {
+			if esc {
+				esc = false
+				continue
+			}
+			switch c {
+			case '\\':
+				esc = true
+			case '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return b[start : i+1]
+			}
+		}
+	}
+	return nil
 }
 
 func normalizeBasis(s string) string {

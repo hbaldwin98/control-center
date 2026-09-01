@@ -58,11 +58,16 @@ type responsesRequest struct {
 	Model             string          `json:"model"`
 	Instructions      string          `json:"instructions,omitempty"`
 	Input             []responsesItem `json:"input"`
+	Text              *responsesText  `json:"text,omitempty"`
 	ToolChoice        string          `json:"tool_choice"`
 	ParallelToolCalls bool            `json:"parallel_tool_calls"`
 	Store             bool            `json:"store"`
 	Stream            bool            `json:"stream"`
 	Include           []string        `json:"include"`
+}
+
+type responsesText struct {
+	Format json.RawMessage `json:"format"`
 }
 
 type responsesItem struct {
@@ -101,6 +106,9 @@ func (p Codex) Chat(ctx context.Context, d Dispatch, req ChatRequest) (providerR
 	body := responsesRequest{
 		Model: d.Model, ToolChoice: "auto", Store: false, Stream: true,
 		Include: []string{},
+	}
+	if len(req.Schema) > 0 {
+		body.Text = &responsesText{Format: responsesJSONSchemaFormat(req.Schema)}
 	}
 	for _, m := range req.Messages {
 		// The Responses API separates the standing instruction from the turn history.
@@ -176,9 +184,20 @@ func (p Codex) Chat(ctx context.Context, d Dispatch, req ChatRequest) (providerR
 	// billed stays false: the subscription was charged, this request was not. The
 	// reservation was zero, so there is nothing to settle beyond the usage record.
 	return providerResult{
-		text: text, inputTokens: in, outputTokens: out, cost: cost,
+		text: text, parsed: jsonIfObject(text), inputTokens: in, outputTokens: out, cost: cost,
 		providerStatus: strconv.Itoa(res.StatusCode),
 	}, nil
+}
+
+func responsesJSONSchemaFormat(schema json.RawMessage) json.RawMessage {
+	raw, err := json.Marshal(map[string]any{
+		"type": "json_schema", "name": "result", "strict": true,
+		"schema": json.RawMessage(schema),
+	})
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func joinInstructions(existing, next string) string {
