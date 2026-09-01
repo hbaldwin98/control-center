@@ -45,6 +45,8 @@ export type Lot = {
   reusedFromLotId: string;
   retrievedAt: string;
   dealScore: number | null;
+  matchScore?: number | null;
+  matchReason?: string;
   thumbUrl: string;
   photoUrls?: string[];
   latestEventId?: number;
@@ -114,6 +116,23 @@ export type SearchPage = {
     createdAt: string;
   } | null;
   hits: SearchHit[];
+  latestEventId: number;
+};
+
+export type IntentSearch = {
+  id: string;
+  query: string;
+  status: string;
+  scanned: number;
+  skipped: number;
+  hitCount: number;
+  lastError: string;
+  createdAt: string;
+};
+
+export type IntentPage = {
+  search: IntentSearch | null;
+  lots: Lot[];
   latestEventId: number;
 };
 

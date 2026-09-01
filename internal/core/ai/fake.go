@@ -52,6 +52,9 @@ func fakeReply(req ChatRequest, prompt string) (string, json.RawMessage, []Citat
 	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), "basis") {
 		return fakeAnalysis(prompt)
 	}
+	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), `"matches"`) {
+		return fakeIntentMatches(prompt)
+	}
 	if len(req.Schema) > 0 {
 		raw := json.RawMessage(`{"ok":true}`)
 		return string(raw), raw, nil, nil
@@ -140,6 +143,69 @@ func fakeGrounded(prompt string) (string, json.RawMessage, []Citation, []Source)
 		"model_or_code": model,
 	})
 	return text, parsed, []Citation{{Start: 0, End: len(text), Source: 0}}, []Source{src}
+}
+
+func fakeIntentMatches(prompt string) (string, json.RawMessage, []Citation, []Source) {
+	intent := strings.ToLower(fieldAfter(prompt, "Intent:"))
+	lotsPart := prompt
+	if i := strings.Index(prompt, "Lots:"); i >= 0 {
+		lotsPart = prompt[i+len("Lots:"):]
+	}
+	groups := [][]string{
+		{"coffee", "brew", "keurig", "espresso", "cafe"},
+		{"sit", "seat", "seating", "chair", "desk", "office", "aeron"},
+		{"camp", "camping", "tent", "stove", "lantern", "cooler", "backpack", "shelter"},
+	}
+	var active [][]string
+	for _, g := range groups {
+		if groupHits(intent, g) {
+			active = append(active, g)
+		}
+	}
+	var matches []map[string]any
+	for _, line := range strings.Split(lotsPart, "\n") {
+		line = strings.TrimSpace(line)
+		id, hay, ok := parseFakeIntentLot(line)
+		if !ok {
+			continue
+		}
+		for _, g := range active {
+			if !groupHits(hay, g) {
+				continue
+			}
+			matches = append(matches, map[string]any{
+				"id": id, "score": 0.86, "reason": "serves the stated intent",
+			})
+			break
+		}
+	}
+	parsed, _ := json.Marshal(map[string]any{"matches": matches})
+	return string(parsed), parsed, nil, nil
+}
+
+func groupHits(s string, group []string) bool {
+	for _, w := range group {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseFakeIntentLot(line string) (id, hay string, ok bool) {
+	parts := strings.Split(line, " | ")
+	if len(parts) < 3 {
+		return "", "", false
+	}
+	id = strings.TrimSpace(parts[0])
+	if id == "" || strings.ContainsAny(id, " \t") {
+		return "", "", false
+	}
+	rest := parts[1:]
+	if parts[1] == "photos" || parts[1] == "listing" {
+		rest = parts[2:]
+	}
+	return id, strings.ToLower(strings.Join(rest, " ")), true
 }
 
 func fieldAfter(s, label string) string {

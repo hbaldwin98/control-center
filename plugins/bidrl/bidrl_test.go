@@ -146,7 +146,7 @@ func TestPluginContract(t *testing.T) {
 		t.Fatalf("manifest = %#v, want non-automated %q", m, pluginID)
 	}
 	jobs := p.Jobs()
-	if len(jobs) != 7 {
+	if len(jobs) != 8 {
 		t.Fatalf("jobs = %d", len(jobs))
 	}
 	for _, j := range jobs {
@@ -154,7 +154,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 16 {
+	if len(p.Routes()) != 18 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -164,12 +164,15 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 4 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
+	if len(mig.migrations) != 5 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
 	if err := json.Unmarshal(m.Config.Defaults, &defaults); err != nil {
 		t.Fatal(err)
+	}
+	if len(m.Models) != 3 || m.Models[2].Name != "intent-match" {
+		t.Fatalf("models = %#v", m.Models)
 	}
 }
 
@@ -663,5 +666,56 @@ func TestLookupComparablesRetriesAfterEngineError(t *testing.T) {
 	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
 	if err != nil || tier.class != "retail" || len(hits) != 1 || calls != 2 {
 		t.Fatalf("tier=%s hits=%+v calls=%d err=%v", tier.class, hits, calls, err)
+	}
+}
+
+func TestDecodeIntentMatchesUsesStructuredJSON(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"matches":[{"id":"1001","score":0.9,"reason":"propane stove for camp cooking"}]}`)
+	got := decodeIntentMatches(&hostai.ChatResponse{Parsed: raw})
+	if len(got) != 1 || got[0].ID != "1001" || got[0].Score != 0.9 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestKeepIntentMatchesDropsUnknownAndWeak(t *testing.T) {
+	t.Parallel()
+	cards := []intentCard{{ID: "1001"}, {ID: "1002"}}
+	got := keepIntentMatches([]intentMatch{
+		{ID: "1001", Score: 0.9, Reason: "camp cooking"},
+		{ID: "1001", Score: 0.7, Reason: "weaker duplicate"},
+		{ID: "1002", Score: 0.4, Reason: "too weak"},
+		{ID: "9999", Score: 0.99, Reason: "unknown lot"},
+		{ID: "1002", Score: 1.4, Reason: "  extra   spaces  "},
+	}, cards)
+	if len(got) != 2 {
+		t.Fatalf("%+v", got)
+	}
+	if got[0].ID != "1002" || got[0].Score != 1 || got[0].Reason != "extra spaces" {
+		t.Fatalf("clamped %+v", got[0])
+	}
+	if got[1].ID != "1001" || got[1].Reason != "camp cooking" {
+		t.Fatalf("kept %+v", got[1])
+	}
+}
+
+func TestFormatIntentCardIsOneLine(t *testing.T) {
+	t.Parallel()
+	got := formatIntentCard(intentCard{
+		ID: "1001", Category: "outdoor", Identification: "Coleman\n2-burner stove",
+		Model: "414", Terms: "coleman, stove", Notes: "tank attached",
+		Title: "misc outdoor", Description: "should not appear on a photos row",
+	})
+	if strings.Contains(got, "\n") || !strings.HasPrefix(got, "1001 | photos | outdoor | Coleman 2-burner stove") {
+		t.Fatalf("%q", got)
+	}
+	if strings.Contains(got, "misc outdoor") {
+		t.Fatalf("photos row leaked listing title: %q", got)
+	}
+	listed := formatIntentCard(intentCard{
+		ID: "1004", Title: "4-person\ncamping tent", Description: "rainfly and stakes",
+	})
+	if listed != "1004 | listing | 4-person camping tent | rainfly and stakes" {
+		t.Fatalf("%q", listed)
 	}
 }

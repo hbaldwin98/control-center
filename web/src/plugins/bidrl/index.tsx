@@ -5,7 +5,7 @@
  * this module never imports the shell router. One sidebar item; Feed / Auctions / Lots
  * are in-plugin tabs.
  */
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Badge,
   Button,
@@ -31,6 +31,7 @@ import {
   Stack,
   Table,
   Tabs,
+  Textarea,
   Toolbar,
   pluginApi,
   useSnapshot,
@@ -50,6 +51,7 @@ import {
   type AuctionsPage,
   type CleanupResult,
   type FeedPage,
+  type IntentPage,
   type LocationGroup,
   type Lot,
   type LotsPage,
@@ -120,6 +122,14 @@ function useLots(q: string, bucket: string, category: string, ending: string): U
     const data = await api.get<LotsPage>(`/lots${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [q, bucket, category, ending]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useIntent(): UseSnapshotResult<IntentPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<IntentPage>("/intent", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -280,11 +290,204 @@ function BidrlTabs() {
   );
 }
 
-function LotThumb({ lot, className }: { lot: Lot; className?: string }) {
+function LotThumb({ lot, className }: { lot: Lot; className?: string | undefined }) {
   if (!lot.thumbUrl) {
     return className ? <div className={`${className}-empty`}><Dash /></div> : <Dash />;
   }
   return <img className={className ?? "cc-lot-thumb"} src={lot.thumbUrl} alt="" width={className ? 220 : 48} height={className ? 220 : 48} />;
+}
+
+function LotThumbLink({ lot, className }: { lot: Lot; className?: string | undefined }) {
+  const thumb = <LotThumb lot={lot} className={className} />;
+  if (!lot.thumbUrl) return thumb;
+  return (
+    <a
+      href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
+      className={className ? `${className}-link` : undefined}
+      aria-label={`Open ${lot.title || lot.id}`}
+    >
+      {thumb}
+    </a>
+  );
+}
+
+function LotPhotos({ urls }: { urls: string[] }) {
+  const count = urls.length;
+  const [index, setIndex] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const current = urls[Math.min(index, Math.max(count - 1, 0))] ?? "";
+
+  const step = useCallback(
+    (delta: number) => {
+      if (count < 2) return;
+      setIndex((i) => (i + delta + count) % count);
+    },
+    [count],
+  );
+
+  useEffect(() => {
+    if (count < 2) return;
+    const next = new Image();
+    next.src = urls[(index + 1) % count] ?? "";
+    const prev = new Image();
+    prev.src = urls[(index - 1 + count) % count] ?? "";
+  }, [count, index, urls]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        step(1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        step(-1);
+      } else if (e.key === "Escape") {
+        setExpanded(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [step]);
+
+  useEffect(() => {
+    document.querySelector(`[data-bidrl-thumb="${index}"]`)?.scrollIntoView({
+      inline: "nearest",
+      block: "nearest",
+    });
+  }, [index]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const scroller = document.querySelector(".cc-main");
+    if (!(scroller instanceof HTMLElement)) return;
+    const prev = scroller.style.overflowY;
+    scroller.style.overflowY = "hidden";
+    return () => {
+      scroller.style.overflowY = prev;
+    };
+  }, [expanded]);
+
+  if (count === 0) return null;
+
+  const stage = (
+    <div className="bidrl-gallery__stage">
+      {count > 1 ? (
+        <Button
+          size="sm"
+          className="bidrl-gallery__nav bidrl-gallery__nav--prev"
+          onClick={() => step(-1)}
+          aria-label="Previous photo"
+        >
+          Prev
+        </Button>
+      ) : null}
+      <button
+        type="button"
+        className="bidrl-gallery__frame"
+        onClick={() => setExpanded(true)}
+        aria-label={`Photo ${index + 1} of ${count}. Enlarge`}
+      >
+        <img src={current} alt="" />
+      </button>
+      {count > 1 ? (
+        <Button
+          size="sm"
+          className="bidrl-gallery__nav bidrl-gallery__nav--next"
+          onClick={() => step(1)}
+          aria-label="Next photo"
+        >
+          Next
+        </Button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <>
+      <Card
+        title="Photos"
+        actions={<Hint>{index + 1} / {count}</Hint>}
+      >
+        <div className="bidrl-gallery">
+          {stage}
+          {count > 1 ? (
+            <div className="bidrl-gallery__thumbs" role="list">
+              {urls.map((src, i) => (
+                <button
+                  key={src}
+                  type="button"
+                  role="listitem"
+                  data-bidrl-thumb={i}
+                  className="bidrl-gallery__thumb"
+                  aria-current={i === index ? "true" : undefined}
+                  aria-label={`Photo ${i + 1}`}
+                  onClick={() => setIndex(i)}
+                >
+                  <img src={src} alt="" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <Hint>
+            {count > 1 ? "Arrow keys move. " : ""}
+            Click the photo to enlarge.
+          </Hint>
+        </div>
+      </Card>
+      {expanded ? (
+        <div
+          className="bidrl-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Photo ${index + 1} of ${count}`}
+          onClick={() => setExpanded(false)}
+        >
+          <div className="bidrl-lightbox__bar" onClick={(e) => e.stopPropagation()}>
+            <span>{index + 1} / {count}</span>
+            <Button size="sm" onClick={() => setExpanded(false)}>
+              Close
+            </Button>
+          </div>
+          {count > 1 ? (
+            <Button
+              size="sm"
+              className="bidrl-lightbox__nav bidrl-lightbox__nav--prev"
+              onClick={(e) => {
+                e.stopPropagation();
+                step(-1);
+              }}
+              aria-label="Previous photo"
+            >
+              Prev
+            </Button>
+          ) : null}
+          <img
+            src={current}
+            alt=""
+            onClick={(e) => {
+              e.stopPropagation();
+              if (count > 1) step(1);
+            }}
+          />
+          {count > 1 ? (
+            <Button
+              size="sm"
+              className="bidrl-lightbox__nav bidrl-lightbox__nav--next"
+              onClick={(e) => {
+                e.stopPropagation();
+                step(1);
+              }}
+              aria-label="Next photo"
+            >
+              Next
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function LotMeta({ lot }: { lot: Lot }) {
@@ -333,12 +536,12 @@ function LotComparable({ lot }: { lot: Lot }) {
   );
 }
 
-function LotTableRows({ lots, extraClass }: { lots: Lot[]; extraClass?: string }) {
+function LotTableRows({ lots, extraClass, showWhy = false }: { lots: Lot[]; extraClass?: string; showWhy?: boolean }) {
   return (
     <>
       {lots.map((lot) => (
         <tr key={lot.id} className={extraClass}>
-          <td><LotThumb lot={lot} /></td>
+          <td><LotThumbLink lot={lot} /></td>
           <td><LotTitle lot={lot} /></td>
           <td>{cents(lot.currentBidCents)}</td>
           <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
@@ -346,6 +549,7 @@ function LotTableRows({ lots, extraClass }: { lots: Lot[]; extraClass?: string }
           <td><LotComparable lot={lot} /></td>
           <td className="cc-num">{lot.dealScore != null ? `${Math.round(lot.dealScore * 100)}%` : <Dash />}</td>
           <td><Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge></td>
+          {showWhy ? <td>{lot.matchReason || <Dash />}</td> : null}
         </tr>
       ))}
     </>
@@ -355,7 +559,7 @@ function LotTableRows({ lots, extraClass }: { lots: Lot[]; extraClass?: string }
 function LotCard({ lot }: { lot: Lot }) {
   return (
     <>
-      <LotThumb lot={lot} className="bidrl-lot-card__img" />
+      <LotThumbLink lot={lot} className="bidrl-lot-card__img" />
       <div className="bidrl-lot-card__title"><LotTitle lot={lot} /></div>
       <div className="bidrl-lot-card__meta">
         <LotMeta lot={lot} />
@@ -367,6 +571,7 @@ function LotCard({ lot }: { lot: Lot }) {
           {comparableHint(lot) ? ` · ${comparableHint(lot)}` : ""}
         </Hint>
       ) : null}
+      {lot.matchReason ? <p className="bidrl-intent-reason">{lot.matchReason}</p> : null}
     </>
   );
 }
@@ -392,10 +597,24 @@ function SimilarList({ lots }: { lots: Lot[] }) {
   );
 }
 
-function LotBrowser({ lots, empty, view }: { lots: Lot[]; empty: string; view: "grid" | "table" }) {
-  const groups = useMemo(() => groupSimilarLots(lots), [lots]);
+function LotBrowser({
+  lots,
+  empty,
+  view,
+  groupSimilar = true,
+}: {
+  lots: Lot[];
+  empty: string;
+  view: "grid" | "table";
+  groupSimilar?: boolean;
+}) {
+  const groups = useMemo(
+    () => (groupSimilar ? groupSimilarLots(lots) : lots.map((lot) => ({ key: `id:${lot.id}`, label: lot.title, lots: [lot] }))),
+    [lots, groupSimilar],
+  );
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+  const showWhy = lots.some((lot) => Boolean(lot.matchReason));
 
   if (lots.length === 0) {
     return <EmptyState>{empty}</EmptyState>;
@@ -423,11 +642,18 @@ function LotBrowser({ lots, empty, view }: { lots: Lot[]; empty: string; view: "
           <th>Comparable</th>
           <th className="cc-num">Gap</th>
           <th>Bucket</th>
+          {showWhy ? <th>Why</th> : null}
         </>
       }
     >
       {groups.map((group) => (
-        <LotGroupRows key={group.key} group={group} open={Boolean(open[group.key])} onToggle={() => toggle(group.key)} />
+        <LotGroupRows
+          key={group.key}
+          group={group}
+          open={Boolean(open[group.key])}
+          onToggle={() => toggle(group.key)}
+          showWhy={showWhy}
+        />
       ))}
     </Table>
   );
@@ -464,10 +690,12 @@ function LotGroupRows({
   group,
   open,
   onToggle,
+  showWhy = false,
 }: {
   group: SimilarGroup;
   open: boolean;
   onToggle: () => void;
+  showWhy?: boolean;
 }) {
   const head = group.lots[0];
   if (!head) return null;
@@ -475,7 +703,7 @@ function LotGroupRows({
   return (
     <>
       <tr>
-        <td><LotThumb lot={head} /></td>
+        <td><LotThumbLink lot={head} /></td>
         <td>
           <LotTitle lot={head} />
           {rest.length > 0 ? (
@@ -492,8 +720,9 @@ function LotGroupRows({
         <td><LotComparable lot={head} /></td>
         <td className="cc-num">{head.dealScore != null ? `${Math.round(head.dealScore * 100)}%` : <Dash />}</td>
         <td><Badge tone={bucketTone(head.bucket)}>{head.bucket.replace("_", " ")}</Badge></td>
+        {showWhy ? <td>{head.matchReason || <Dash />}</td> : null}
       </tr>
-      {open ? <LotTableRows lots={rest} extraClass="bidrl-similar-row" /> : null}
+      {open ? <LotTableRows lots={rest} extraClass="bidrl-similar-row" showWhy={showWhy} /> : null}
     </>
   );
 }
@@ -743,19 +972,97 @@ function LotsCatalog() {
   const [bucket, setBucket] = useState("all");
   const [category, setCategory] = useState("all");
   const [endingSoon, setEndingSoon] = useState(false);
+  const [intentDraft, setIntentDraft] = useState("");
+  const [intentBusy, setIntentBusy] = useState(false);
+  const [intentError, setIntentError] = useState<string | null>(null);
   const [view, setView] = useLotView();
   const snap = useLots(q, bucket, category, endingSoon ? "soon" : "");
+  const intent = useIntent();
   const disabled = snap.error instanceof PluginDisabledError;
+  const search = intent.status === "ready" ? intent.data.search : null;
+  const intentLots = intent.status === "ready" ? intent.data.lots : [];
+  const intentRunning = search?.status === "queued" || search?.status === "running" || intentBusy;
+
+  const ask = async () => {
+    const query = intentDraft.trim();
+    if (!query || intentRunning) return;
+    setIntentBusy(true);
+    setIntentError(null);
+    try {
+      await api.post("/intent", { query });
+      intent.reload();
+    } catch (err) {
+      setIntentError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIntentBusy(false);
+    }
+  };
 
   return (
     <Page>
       <PageHeader
         title="Lots"
-        lede="Every collected lot. Filter by bucket, category, or lots that are ending soon."
+        lede="Every collected lot. Filter by text, or ask what you actually want — camping gear, not the word camp."
       />
       <Stack>
         <BidrlTabs />
-        <Notices message={null} error={null} disabled={disabled} />
+        <Notices message={null} error={intentError} disabled={disabled} />
+        <PluginAIHint pluginId="bidrl" />
+        <Card title="Intent">
+          <Stack>
+            <Hint>
+              Reads photograph identifications when a lot has been scanned. Unscanned lots
+              still count if the title or description fits. Starts only when you ask.
+            </Hint>
+            <Field label="What are you looking to do?">
+              <Textarea
+                value={intentDraft}
+                onChange={(e) => setIntentDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void ask();
+                  }
+                }}
+                placeholder="Things that would help me camp"
+                disabled={disabled || intentRunning}
+                rows={2}
+                aria-label="Intent search"
+              />
+            </Field>
+            <div className="bidrl-actions">
+              <Button variant="primary" disabled={disabled || intentRunning || !intentDraft.trim()} onClick={() => void ask()}>
+                {intentRunning ? "Reading lots…" : "Ask"}
+              </Button>
+            </div>
+            {search?.status === "failed" && search.lastError ? (
+              <Callout tone="danger">{search.lastError}</Callout>
+            ) : null}
+            {search && search.status !== "failed" ? (
+              <Hint>
+                {search.status === "ready"
+                  ? `${search.hitCount} match${search.hitCount === 1 ? "" : "es"} of ${search.scanned} lots`
+                  : `Looking through ${search.scanned || "collected"} lots…`}
+                {search.skipped > 0 ? ` · ${search.skipped} from title or description` : ""}
+                {search.query ? ` · “${search.query}”` : ""}
+              </Hint>
+            ) : null}
+          </Stack>
+        </Card>
+        {search && (search.status === "ready" || intentRunning) ? (
+          <Card title="Matches" actions={<ViewToggle value={view} onChange={setView} />}>
+            {intent.status === "loading" || intentRunning ? <Loading label="Matching lots to your intent…" /> : null}
+            {intent.status === "error" && !disabled ? <Callout tone="danger">{intent.error.message}</Callout> : null}
+            {intent.status === "ready" && search.status === "ready" ? (
+              <LotBrowser
+                lots={intentLots}
+                empty="Nothing in the collected lots serves that intent."
+                view={view}
+                groupSimilar={false}
+              />
+            ) : null}
+          </Card>
+        ) : null}
         <Card title="Filter">
           <Toolbar>
             <Field label="Find">
@@ -945,24 +1252,8 @@ function LotView() {
               />
               <Metric label="Ends" value={lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />} />
             </Grid>
-            <Card title="Bidding">
-              <Grid density="metric">
-                <Metric label="High bidder" value={lot.highBidder || <Dash />} />
-                <Metric label="Bids" value={String(lot.bidCount)} />
-                <Metric label="Minimum bid" value={cents(lot.minBidCents)} />
-                <Metric label="Increment" value={cents(lot.bidIncrementCents)} />
-                <Metric label="Reserve" value={lot.reserveMet ? "Met" : "Not met"} />
-                <Metric label="Extended" value={lot.biddingExtended ? "Yes" : "No"} />
-              </Grid>
-            </Card>
             {lot.photoUrls && lot.photoUrls.length > 0 ? (
-              <Card title="Photos">
-                <Row>
-                  {lot.photoUrls.map((src) => (
-                    <img key={src} src={src} alt="" width={160} height={160} />
-                  ))}
-                </Row>
-              </Card>
+              <LotPhotos key={lot.id} urls={lot.photoUrls} />
             ) : null}
             <Card title="Identification">
               <Stack>
@@ -975,6 +1266,16 @@ function LotView() {
                 </Hint>
                 {lot.description ? <p>{lot.description}</p> : null}
               </Stack>
+            </Card>
+            <Card title="Bidding">
+              <Grid density="metric">
+                <Metric label="High bidder" value={lot.highBidder || <Dash />} />
+                <Metric label="Bids" value={String(lot.bidCount)} />
+                <Metric label="Minimum bid" value={cents(lot.minBidCents)} />
+                <Metric label="Increment" value={cents(lot.bidIncrementCents)} />
+                <Metric label="Reserve" value={lot.reserveMet ? "Met" : "Not met"} />
+                <Metric label="Extended" value={lot.biddingExtended ? "Yes" : "No"} />
+              </Grid>
             </Card>
             {lot.priceCents != null ? (
               <Card title="Where this number came from">

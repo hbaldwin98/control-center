@@ -166,5 +166,31 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			ALTER TABLE bidrl_valuations ADD COLUMN reused_from_lot_id TEXT NOT NULL DEFAULT '';
 			CREATE INDEX bidrl_valuations_model ON bidrl_valuations(model_or_code);
 		`,
+	}, {
+		Version: 5,
+		Name:    "intent",
+		Up: `
+			CREATE TABLE bidrl_intent_searches (
+				id          TEXT PRIMARY KEY,
+				query       TEXT NOT NULL,
+				status      TEXT NOT NULL,
+				scanned     INTEGER NOT NULL DEFAULT 0,
+				skipped     INTEGER NOT NULL DEFAULT 0,
+				hit_count   INTEGER NOT NULL DEFAULT 0,
+				last_error  TEXT NOT NULL DEFAULT '',
+				created_at  TEXT NOT NULL
+			) STRICT;
+
+			CREATE TABLE bidrl_intent_hits (
+				search_id  TEXT NOT NULL,
+				ordinal    INTEGER NOT NULL,
+				lot_id     TEXT NOT NULL,
+				score      REAL NOT NULL,
+				reason     TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY (search_id, ordinal)
+			) STRICT;
+			CREATE INDEX bidrl_intent_hits_search ON bidrl_intent_hits(search_id);
+			CREATE INDEX bidrl_intent_hits_lot ON bidrl_intent_hits(lot_id);
+		`,
 	}})
 }

@@ -56,6 +56,11 @@ func (p *Plugin) Manifest() host.Manifest {
 				Capabilities: []string{"chat"},
 				Purpose:      "Pick a dollar amount already written on an eBay, retail, or marketplace search hit.",
 			},
+			{
+				Name:         "intent-match",
+				Capabilities: []string{"chat"},
+				Purpose:      "Judge which collected lots would serve a person's intent, from photograph identifications.",
+			},
 		},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
@@ -91,6 +96,7 @@ func (p *Plugin) Jobs() []hostjobs.Def {
 		{Name: "refresh", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.refreshJob},
 		{Name: "enrich", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.enrichJob},
 		{Name: "search", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.searchJob},
+		{Name: "intent", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.intentJob},
 		{Name: "discover", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.discoverJob},
 	}
 }
@@ -118,6 +124,8 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /lots/{id}/enrich", Handler: http.HandlerFunc(p.handleEnrich)},
 		{Pattern: "POST /search", Handler: http.HandlerFunc(p.handlePostSearch)},
 		{Pattern: "GET /search", Handler: http.HandlerFunc(p.handleGetSearch)},
+		{Pattern: "POST /intent", Handler: http.HandlerFunc(p.handlePostIntent)},
+		{Pattern: "GET /intent", Handler: http.HandlerFunc(p.handleGetIntent)},
 		{Pattern: "GET /sites/auctions", Handler: http.HandlerFunc(p.handleListSites)},
 		{Pattern: "POST /sites/refresh", Handler: http.HandlerFunc(p.handleRefreshSites)},
 	}

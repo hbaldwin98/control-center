@@ -19,7 +19,8 @@ plugins/bidrl/
   pace.go          400ms origin spacing, 429/403 backoff
   analyze.go       one vision call per lot, category + search_terms
   price.go         grounded pricing with stored citations
-  jobs.go          collect, scan, reprice, refresh, enrich, search, discover
+  jobs.go          collect, scan, reprice, refresh, enrich, search, intent, discover
+  intent.go        user-triggered intent match over collected identifications
 
 web/src/plugins/bidrl/
   index.tsx        one nav item; Feed / Auctions / Lots tabs; auction and lot views
@@ -85,10 +86,11 @@ stop the job rather than continuing into a ban.
 
 **Every v1 action is user-triggered.** Collection starts only from "add auction" or
 "collect" on a search/SITES hit, a scan starts only from "scan", search starts only from
-"search", SITES listing starts only from "refresh list" or as part of a search, pricing
-starts only inside that requested scan or from "reprice", bids refresh only from
-"refresh bids", a single-lot ItemData refresh only from "enrich", and expired-record
-deletion only from "Remove ended". There is no cron
+"search", intent matching starts only from "Ask" on the lots catalog, SITES listing starts
+only from "refresh list" or as part of a search, pricing starts only inside that
+requested scan or from "reprice", bids refresh only from "refresh bids", a single-lot
+ItemData refresh only from "enrich", and expired-record deletion only from "Remove ended".
+There is no cron
 or event-triggered work, and the backend manifest sets
 `Automated: false`. Jobs still make each requested operation durable, cancellable,
 budgeted, and subject to the host-capability kill switch.
@@ -157,7 +159,8 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 | `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` chat with a cited-price schema | pick a `$` amount already written in those hits |
-| `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, enrich, search, and SITES discovery |
+| `AI()` chat over stored identifications | match collected lots to a stated intent |
+| `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, enrich, search, intent, and SITES discovery |
 | `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.lot.enriched` |
 | `Store()` / `Blobs()` | lots, analyses, cached photos |
 | Budgets + host-capability kill switch | durable user-triggered work is still admitted, reserved, and cancellable |
@@ -172,21 +175,21 @@ right.
 
 | Surface | Contract |
 |---|---|
-| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
+| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings |
 | API | `GET /lots?q=&bucket=&category=&ending=soon`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
-| API | `POST/GET /search`, `GET /sites/auctions`, `POST /sites/refresh` |
-| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
+| API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
+| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
 | UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
 `https://www.bidrl.com/auction/42/bidgallery`, plus `POST /api/ItemData` and
 `GET /aucbeat/pusher/` fixtures. Before scanning, connect a provider and
-assign models to the plugin's two declared routes, `cheap-vision` (chat+vision) and
-`grounded-price` (chat). The plugin screen lists both by purpose; Models will
-too. Do not invent other names — the plugin asks for these two.
+assign models to the plugin's three declared routes, `cheap-vision` (chat+vision),
+`grounded-price` (chat), and `intent-match` (chat). The plugin screen lists each by
+purpose; Models will too. Do not invent other names — the plugin asks for these three.
 
 ---
 
@@ -217,6 +220,22 @@ can be collected from the list instead of a pasted URL.
 
 ---
 
+## Intent
+
+Intent matching is user-triggered (`POST/GET /intent`) from the lots catalog. It does not
+hit BidRL. It reads the stored photograph identifications of scanned lots, and the title
+and description of lots that have not been scanned yet, then asks a cheap chat model which
+of those lots would actually serve what the operator wants — camping gear from "things
+that would help me camp", not a keyword hit on the word camp.
+
+When photographs have been identified, those identifications win: BidRL titles still lie.
+When a lot is still pending a scan, the listing text is the evidence. Generic skipped
+commodities still count: a folding chair the deal pipeline discarded is still a camping
+chair. Each hit stores a score and a one-line reason from the model. The catalog's Find
+box stays lexical.
+
+---
+
 ## Feed
 
 The treasure-hunting feed lives at `/bidrl`. Auctions and the lot catalog have their own
@@ -243,9 +262,13 @@ current bid, a local countdown from stored `ends_at`, category, and a link back 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
 paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"
 deletes closed auctions, leftover closed lots, and stale SITES rows. `/bidrl/lots` is the
-catalog: local text, bucket, category, and ending-soon (open lots ending within 24 hours).
+catalog: intent matching over photograph identifications and, for unscanned lots, title
+and description; then local text, bucket, category, and ending-soon (open lots ending
+within 24 hours).
 Auction and lot views add a bidder card (high bidder, bid count, min bid, reserve,
-extended) and Open on BidRL.
+extended) and Open on BidRL. The lot page shows photos in a large stage with a thumbnail
+strip; arrow keys and Prev/Next move between them, and clicking the photo opens a
+full-window view.
 
 ---
 
@@ -270,10 +293,12 @@ extended) and Open on BidRL.
 - Collection rejects more than 500 lots per auction, more than 12 images per lot, an image
   over 10 MiB, or more than 100 MiB of images for one lot; rejected items are recorded with
   a visible reason.
-- Scan, reprice, bid-refresh, enrich, search, and SITES-discover job definitions are enqueue-only, have concurrency `1`
+- Scan, reprice, bid-refresh, enrich, search, intent, and SITES-discover job definitions are enqueue-only, have concurrency `1`
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
-  fails.
+  fails. Intent matching batches collected lots into chat calls on `intent-match`
+  and does not re-read photographs: scanned lots use stored identifications, unscanned
+  lots use title and description.
 - ItemData and pusher traffic to BidRL is paced at 400ms with one request in flight. Three
   consecutive HTTP 429 or 403 responses stop the job.
 - Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs, AI
