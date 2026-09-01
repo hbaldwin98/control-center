@@ -74,6 +74,7 @@ export function Settings() {
       <Stack>
         {oauthFlash ? <Callout tone={oauthFlash.tone}>{oauthFlash.text}</Callout> : null}
 
+        <ChangePasswordCard />
         <ReauthCard />
         <OAuthCard onChanged={creds.reload} />
         <CreateKeyCard onChanged={creds.reload} />
@@ -129,6 +130,88 @@ function ReauthNotice() {
       </a>{" "}
       at the top of this page, then try again.
     </Callout>
+  );
+}
+
+/**
+ * The administrator password. There is no reset flow, so this is the only way to rotate
+ * the one chosen at first-run setup. Unlike the credential cards this does not go through
+ * the reauth window: the endpoint takes the current password itself, and signs out every
+ * other session on success.
+ */
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setOk(false);
+    if (next !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post("/api/auth/password", { currentPassword: current, newPassword: next });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setOk(true);
+    } catch (err) {
+      setError(formatErr(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Administrator password">
+      <form onSubmit={onSubmit}>
+        <Stack>
+          <Hint>Changing the password signs out every other device. This session stays signed in.</Hint>
+          {error ? <Callout tone="danger">{error}</Callout> : null}
+          {ok ? <Callout tone="ok">Password changed. Other sessions were signed out.</Callout> : null}
+          <Field label="Current password">
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="New password" hint="At least 12 characters. There is no reset flow.">
+            <Input
+              type="password"
+              autoComplete="new-password"
+              minLength={12}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+            />
+          </Field>
+          <Row>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Changing…" : "Change password"}
+            </Button>
+          </Row>
+        </Stack>
+      </form>
+    </Card>
   );
 }
 

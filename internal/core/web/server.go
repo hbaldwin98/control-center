@@ -140,6 +140,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.authenticated(s.handleLogout))
 	s.mux.HandleFunc("POST /api/auth/reauth", s.authenticated(s.handleReauth))
+	s.mux.HandleFunc("POST /api/auth/password", s.authenticated(s.handleChangePassword))
 
 	s.mux.HandleFunc("GET /api/bootstrap", s.authenticated(s.handleShellBootstrap))
 	s.mux.HandleFunc("GET /api/stream", s.authenticated(s.handleStream))

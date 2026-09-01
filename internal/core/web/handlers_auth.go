@@ -178,6 +178,60 @@ func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+// handleChangePassword replaces the administrator password. It takes the current password
+// in the same request rather than leaning on the reauth window, so the change is always
+// bound to a fresh proof of knowledge. Every other session is signed out.
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if !s.limit.allow("password") {
+		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts")
+		return
+	}
+
+	var req changePasswordRequest
+	if !decodeJSON(w, r, maxAuthBody, &req) {
+		return
+	}
+	if len(req.NewPassword) < minPasswordLen {
+		writeError(w, http.StatusBadRequest, CodeBadRequest,
+			"password must be at least 12 characters")
+		return
+	}
+	if req.NewPassword == req.CurrentPassword {
+		writeError(w, http.StatusBadRequest, CodeBadRequest,
+			"new password must differ from the current one")
+		return
+	}
+
+	switch err := s.auth.checkPassword(r.Context(), req.CurrentPassword); {
+	case err == nil:
+	case errors.Is(err, errBadCredentials), errors.Is(err, errNoAdmin):
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid credentials")
+		return
+	default:
+		s.fail(w, "change password", err)
+		return
+	}
+
+	if err := s.auth.setPassword(r.Context(), req.NewPassword); err != nil {
+		s.fail(w, "change password", err)
+		return
+	}
+	s.limit.reset("password")
+
+	// A password change also revokes every other device's session.
+	sess := sessionFrom(r.Context())
+	if err := s.auth.deleteOthers(r.Context(), sess.ID); err != nil {
+		s.fail(w, "change password", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func setSessionCookie(w http.ResponseWriter, value string, maxAge time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,

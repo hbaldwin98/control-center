@@ -361,3 +361,34 @@ func randomToken(n int) string {
 
 // formatID renders an int64 event ID as the decimal string the wire format uses.
 func formatID(id int64) string { return strconv.FormatInt(id, 10) }
+
+// setPassword replaces the administrator password. It is rejected before bootstrap, so
+// there is no path that creates the admin row outside of the one-time token flow.
+func (a *authStore) setPassword(ctx context.Context, password string) error {
+	hash, err := hashPassword(password, defaultArgon2id)
+	if err != nil {
+		return err
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	res, err := a.db.Exec(ctx,
+		`UPDATE core_admin SET password_hash = ?, updated_at = ? WHERE id = ?`,
+		hash, now, adminRowID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errNoAdmin
+	}
+	return nil
+}
+
+// deleteOthers signs out every session but the one that changed the password, so a
+// password change also revokes sessions on devices the administrator no longer holds.
+func (a *authStore) deleteOthers(ctx context.Context, keepID string) error {
+	_, err := a.db.Exec(ctx, `DELETE FROM core_sessions WHERE id <> ?`, keepID)
+	return err
+}
