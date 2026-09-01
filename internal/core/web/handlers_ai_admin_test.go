@@ -8,7 +8,9 @@ import (
 
 	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/plugins/hello"
 )
 
 // newAIAdminHarness gives the server a live ai service with no providers and no routes,
@@ -211,5 +213,75 @@ func TestAIAdminNeedsASessionButNotReauth(t *testing.T) {
 	// The same session still may not touch a credential without reauthenticating.
 	if rec := h.do(http.MethodDelete, "/api/admin/credentials/fake-key", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("credential delete without reauth: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAIAssignUsesPluginDeclaredCapabilities(t *testing.T) {
+	h, _ := newAIAdminHarness(t)
+	h.createKey(t, "fake-key")
+
+	reg, err := pluginhost.New(context.Background(), h.store, pluginhost.Options{
+		DB: h.store, Policy: h.server.deps.Policy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterAll(hello.New()); err != nil {
+		t.Fatal(err)
+	}
+	h.server.deps.PluginHost = reg
+
+	if rec := h.do(http.MethodPut, "/api/admin/ai/providers/local", map[string]any{
+		"kind": "fake", "credentialId": "fake-key", "billing": "metered",
+	}); rec.Code != http.StatusNoContent {
+		t.Fatalf("provider: %d %s", rec.Code, rec.Body)
+	}
+
+	rec := h.do(http.MethodGet, "/api/admin/plugins", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("plugins: %d %s", rec.Code, rec.Body)
+	}
+	var plugins struct {
+		Data []pluginView `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &plugins); err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins.Data) != 1 || len(plugins.Data[0].Models) != 1 || plugins.Data[0].Models[0].Status != needMissing {
+		t.Fatalf("before assign: %+v", plugins.Data)
+	}
+
+	if rec := h.do(http.MethodPut, "/api/admin/ai/routes/cheap-chat/assign", map[string]any{
+		"provider": "local", "model": "echo",
+	}); rec.Code != http.StatusNoContent {
+		t.Fatalf("assign: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodPut, "/api/admin/ai/routes/cheap-vision/assign", map[string]any{
+		"provider": "local", "model": "echo",
+	}); rec.Code != http.StatusNotFound {
+		t.Fatalf("undeclared route: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = h.do(http.MethodGet, "/api/admin/plugins", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &plugins); err != nil {
+		t.Fatal(err)
+	}
+	need := plugins.Data[0].Models[0]
+	if need.Status != needReady || need.Provider != "local" || need.Model != "echo" {
+		t.Fatalf("after assign: %+v", need)
+	}
+
+	rec = h.do(http.MethodGet, "/api/admin/ai/routes", nil)
+	var routes struct {
+		Data []ai.RouteDescriptor `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &routes); err != nil {
+		t.Fatal(err)
+	}
+	if len(routes.Data) != 1 || routes.Data[0].LogicalName != "cheap-chat" || !routes.Data[0].Healthy {
+		t.Fatalf("routes = %+v", routes.Data)
+	}
+	if len(routes.Data[0].Capabilities) != 1 || routes.Data[0].Capabilities[0] != "chat" {
+		t.Fatalf("capabilities = %v", routes.Data[0].Capabilities)
 	}
 }

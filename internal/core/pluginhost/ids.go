@@ -52,6 +52,63 @@ func validName(s string) bool {
 	return true
 }
 
+// validRouteName matches the AI module's logical route names: lowercase letters,
+// digits, hyphen, underscore. Job names forbid hyphen; model names use it
+// (cheap-vision, grounded-price).
+func validRouteName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i, c := range s {
+		ok := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+		if i == 0 && (c < 'a' || c > 'z') {
+			return false
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+var knownModelCaps = map[string]struct{}{
+	"chat":      {},
+	"vision":    {},
+	"grounding": {},
+	"embed":     {},
+}
+
+func validateModelNeeds(pluginID string, needs []host.ModelNeed) error {
+	seen := map[string]struct{}{}
+	for i, n := range needs {
+		if !validRouteName(n.Name) {
+			return fmt.Errorf("%w: %s models[%d] name %q", ErrInvalidPlugin, pluginID, i, n.Name)
+		}
+		if _, dup := seen[n.Name]; dup {
+			return fmt.Errorf("%w: %s duplicate model %q", ErrInvalidPlugin, pluginID, n.Name)
+		}
+		seen[n.Name] = struct{}{}
+		purpose := strings.TrimSpace(n.Purpose)
+		if purpose == "" || len(purpose) > 200 {
+			return fmt.Errorf("%w: %s model %q needs a purpose of 1..200 characters", ErrInvalidPlugin, pluginID, n.Name)
+		}
+		if len(n.Capabilities) == 0 {
+			return fmt.Errorf("%w: %s model %q declares no capabilities", ErrInvalidPlugin, pluginID, n.Name)
+		}
+		seenCap := map[string]struct{}{}
+		for _, c := range n.Capabilities {
+			if _, ok := knownModelCaps[c]; !ok {
+				return fmt.Errorf("%w: %s model %q capability %q", ErrInvalidPlugin, pluginID, n.Name, c)
+			}
+			if _, dup := seenCap[c]; dup {
+				return fmt.Errorf("%w: %s model %q duplicate capability %q", ErrInvalidPlugin, pluginID, n.Name, c)
+			}
+			seenCap[c] = struct{}{}
+		}
+	}
+	return nil
+}
+
 func parseRoutePattern(pattern string) (method, path string, err error) {
 	pattern = strings.TrimSpace(pattern)
 	method, path, ok := strings.Cut(pattern, " ")

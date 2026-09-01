@@ -20,6 +20,7 @@ import {
   Metric,
   Page,
   PageHeader,
+  PluginAIHint,
   PluginDisabledError,
   RelativeTime,
   Sparkline,
@@ -173,6 +174,7 @@ function Usage() {
             password; the host types it into the login form.
           </Hint>
         )}
+        <PluginAIHint pluginId="tid" />
         {snap.status === "error" && !disabled ? (
           <Callout tone="danger">{snap.error.message}</Callout>
         ) : null}

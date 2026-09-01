@@ -40,7 +40,13 @@ type Admin interface {
     PutRoute(ctx context.Context, in RouteInput) error
     DeleteRoute(ctx context.Context, name string) error
 }
+```
 
+The web UI also offers `PUT /api/admin/ai/routes/{name}/assign`: a single-attempt route
+for a name some plugin declared on `Manifest.Models`. Capabilities come from that
+declaration, not the caller, so picking a model on a plugin screen cannot drop vision.
+
+```go
 type ProviderConfig struct {
     ID           string
     Kind         ProviderKind // openai_compatible | codex | fake

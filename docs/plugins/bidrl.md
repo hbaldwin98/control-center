@@ -156,8 +156,10 @@ right.
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
-`https://www.bidrl.com/auction/42/bidgallery`. Configure `cheap-vision` (chat+vision) and
-`grounded-price` (chat+grounding) routes before scanning.
+`https://www.bidrl.com/auction/42/bidgallery`. Before scanning, connect a provider and
+assign models to the plugin's two declared routes, `cheap-vision` (chat+vision) and
+`grounded-price` (chat+grounding). The plugin screen lists both by purpose; Models will
+too. Do not invent other names — the plugin asks for these two.
 
 ---
 

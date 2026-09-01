@@ -19,6 +19,7 @@ import {
   useSnapshot,
 } from "@cc/ui";
 import { ConfigForm } from "./ConfigForm";
+import { PluginAI } from "./PluginAI";
 import {
   BudgetForm,
   KillSwitch,
@@ -40,7 +41,7 @@ export function Plugins() {
     <Page>
       <PageHeader
         title="Plugins"
-        lede="The kill switch, budgets, health, and schema-backed config. Disabled plugins stay listed with the reason."
+        lede="Enable a plugin, give it a budget if it runs on its own, and point its AI names at a model. Disabled plugins stay listed with the reason."
       />
       <Async state={plugins} loading="Loading plugins…" empty="No plugins are registered yet.">
         {(list) => (
@@ -76,6 +77,8 @@ function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () =>
 
         <PluginProblems state={state} />
         {error ? <Callout tone="danger">{error}</Callout> : null}
+
+        <PluginAI state={state} onChanged={onChanged} />
 
         <SpendWindows state={state} />
 

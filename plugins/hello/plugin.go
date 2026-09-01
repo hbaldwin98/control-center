@@ -33,6 +33,11 @@ func (p *Plugin) Manifest() host.Manifest {
 		Version:     "0.1.0",
 		Description: "Validating plugin. Exercises every host capability; the kill-switch integration test.",
 		Automated:   true,
+		Models: []host.ModelNeed{{
+			Name:         "cheap-chat",
+			Capabilities: []string{"chat"},
+			Purpose:      "A tiny chat call on every tick.",
+		}},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
 				"type":"object",

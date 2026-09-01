@@ -37,6 +37,21 @@ export type PluginState = {
   health?: PluginHealth;
   config?: Record<string, unknown>;
   configSchema?: unknown;
+  models?: ModelNeed[];
+};
+
+export type ModelNeedStatus = "missing" | "ready" | "unhealthy" | "capability_mismatch";
+
+/** One logical AI route a plugin declared, with whether a matching route exists. */
+export type ModelNeed = {
+  name: string;
+  capabilities: string[];
+  purpose: string;
+  status: ModelNeedStatus;
+  healthy: boolean;
+  lastError?: string;
+  provider?: string;
+  model?: string;
 };
 
 export type JobState =

@@ -95,6 +95,9 @@ func inspect(p host.Plugin) (declaration, error) {
 	if err := validateConfigSpec(hostConfigSpec{Schema: m.Config.Schema, Defaults: m.Config.Defaults}); err != nil {
 		return declaration{}, fmt.Errorf("%s: %w", m.ID, err)
 	}
+	if err := validateModelNeeds(m.ID, m.Models); err != nil {
+		return declaration{}, err
+	}
 
 	d := declaration{manifest: m, jobs: p.Jobs(), subs: p.Subscriptions(), routes: p.Routes()}
 

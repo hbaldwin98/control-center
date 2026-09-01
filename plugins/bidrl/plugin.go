@@ -45,6 +45,18 @@ func (p *Plugin) Manifest() host.Manifest {
 		Version:     "0.1.0",
 		Description: "Scores BIDRL lots from photographs, searches SITES auctions first, and prices only when a model or barcode is cited.",
 		Automated:   false,
+		Models: []host.ModelNeed{
+			{
+				Name:         "cheap-vision",
+				Capabilities: []string{"chat", "vision"},
+				Purpose:      "Identify what the lot photographs actually show.",
+			},
+			{
+				Name:         "grounded-price",
+				Capabilities: []string{"chat", "grounding"},
+				Purpose:      "Cite a current market price from public listings.",
+			},
+		},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
 				"type":"object",
