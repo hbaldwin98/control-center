@@ -46,7 +46,10 @@ func (p *Plugin) Manifest() host.Manifest {
 		Name:        "BIDRL",
 		Version:     "0.1.0",
 		Description: "Scores BIDRL lots from photographs, searches SITES auctions first, and prices only when a model or barcode is cited.",
-		Automated:   false,
+		// Scheduled work exists, so this is true even while automation.enabled is
+		// false: the honest reading is that this plugin can start work without a
+		// person, and the budget that forces is the point.
+		Automated: true,
 		Models: []host.ModelNeed{
 			{
 				Name:         "cheap-vision",
@@ -91,10 +94,32 @@ func (p *Plugin) Manifest() host.Manifest {
 						"title":"Search scope",
 						"description":"prefer ranks SITES lots first, only hides the rest, all ignores location.",
 						"enum":["prefer","only","all"]
+					},
+					"automation":{
+						"type":"object",
+						"title":"Automation",
+						"description":"Scheduled collection and watchlist matching. Off by default; an empty location list also means nothing runs.",
+						"additionalProperties":false,
+						"properties":{
+							"enabled":{
+								"type":"boolean",
+								"title":"Run on a schedule",
+								"description":"When off, both scheduled ticks return without touching BidRL or spending anything."
+							},
+							"affiliateIds":{
+								"type":"array",
+								"title":"Locations to sweep",
+								"description":"Numeric BidRL affiliate ids. Empty means the sweep does nothing: an unscoped scheduled crawl is not something this plugin will do.",
+								"items":{"type":"string","pattern":"^[0-9]{1,8}$","maxLength":8},
+								"maxItems":20
+							},
+							"maxAuctionsPerSweep":{"type":"integer","title":"Auctions per tick","minimum":1,"maximum":20},
+							"maxNewLotsPerSweep":{"type":"integer","title":"New lots per tick","minimum":1,"maximum":2000}
+						}
 					}
 				}
 			}`),
-			Defaults: json.RawMessage(`{"preferredAffiliateIds":[],"searchScope":"prefer"}`),
+			Defaults: json.RawMessage(`{"preferredAffiliateIds":[],"searchScope":"prefer","automation":{"enabled":false,"affiliateIds":[],"maxAuctionsPerSweep":5,"maxNewLotsPerSweep":400}}`),
 		},
 	}
 }
@@ -111,6 +136,12 @@ func (p *Plugin) Jobs() []hostjobs.Def {
 		{Name: "intent", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.intentJob},
 		{Name: "discover", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.discoverJob},
 		{Name: "watch", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.watchJob},
+		// The only two scheduled jobs. Both check automation.enabled first and do
+		// nothing when it is off, which is the default.
+		{Name: "sweep", Timeout: jobTO, MaxAttempts: 1, Concurrency: 1, Backoff: backoff,
+			Schedule: sweepSchedule, TimeZone: cronTimeZone, Handler: p.sweepJob},
+		{Name: "match", Timeout: jobTO, MaxAttempts: 1, Concurrency: 1, Backoff: backoff,
+			Schedule: matchSchedule, TimeZone: cronTimeZone, Handler: p.matchJob},
 	}
 }
 
@@ -149,6 +180,8 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "GET /findings", Handler: http.HandlerFunc(p.handleListFindings)},
 		{Pattern: "POST /findings/{id}/accept", Handler: http.HandlerFunc(p.handleAcceptFinding)},
 		{Pattern: "POST /findings/{id}/reject", Handler: http.HandlerFunc(p.handleRejectFinding)},
+		{Pattern: "GET /automation", Handler: http.HandlerFunc(p.handleGetAutomation)},
+		{Pattern: "POST /automation/resume", Handler: http.HandlerFunc(p.handleResumeAutomation)},
 		{Pattern: "POST /search", Handler: http.HandlerFunc(p.handlePostSearch)},
 		{Pattern: "GET /search", Handler: http.HandlerFunc(p.handleGetSearch)},
 		{Pattern: "POST /intent", Handler: http.HandlerFunc(p.handlePostIntent)},

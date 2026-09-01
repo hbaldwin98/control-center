@@ -268,5 +268,19 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			CREATE INDEX bidrl_findings_state ON bidrl_findings(state, created_at);
 			CREATE INDEX bidrl_findings_lot ON bidrl_findings(lot_id);
 		`,
+	}, {
+		Version: 10,
+		Name:    "automation",
+		Up: `
+			CREATE TABLE bidrl_automation (
+				id               INTEGER PRIMARY KEY CHECK (id = 1),
+				last_sweep_at    TEXT NOT NULL DEFAULT '',
+				last_sweep_note  TEXT NOT NULL DEFAULT '',
+				last_match_at    TEXT NOT NULL DEFAULT '',
+				last_match_note  TEXT NOT NULL DEFAULT '',
+				throttled_until  TEXT NOT NULL DEFAULT ''
+			) STRICT;
+			INSERT INTO bidrl_automation(id) VALUES (1);
+		`,
 	}})
 }

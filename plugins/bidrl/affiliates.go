@@ -21,8 +21,9 @@ type pluginConfig struct {
 	// PreferredAffiliateIDs are numeric BidRL affiliate ids (the suffix of the
 	// landing-page slug: turlock-19 → "19"). Empty means every location on
 	// BidRL's SITES menu.
-	PreferredAffiliateIDs []string `json:"preferredAffiliateIds"`
-	SearchScope           string   `json:"searchScope"`
+	PreferredAffiliateIDs []string         `json:"preferredAffiliateIds"`
+	SearchScope           string           `json:"searchScope"`
+	Automation            automationConfig `json:"automation"`
 }
 
 func (p *Plugin) cfg() pluginConfig {
@@ -49,6 +50,7 @@ func (p *Plugin) cfg() pluginConfig {
 		out = append(out, id)
 	}
 	c.PreferredAffiliateIDs = out
+	c.Automation = c.Automation.normalized()
 	return c
 }
 

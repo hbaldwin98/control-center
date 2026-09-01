@@ -53,6 +53,7 @@ import {
   LOT_SORT_DEFAULTS,
   SITES_SORT_DEFAULTS,
   affiliateParam,
+  automationSummary,
   cents,
   cleanupMessage,
   comparableHint,
@@ -75,6 +76,7 @@ import {
   watchlistRules,
   type Auction,
   type AuctionPage,
+  type AutomationPage,
   type AuctionSortColumn,
   type AuctionIndex,
   type AuctionsPage,
@@ -195,6 +197,14 @@ function useFindings(state: string, watchlist: string): UseSnapshotResult<Findin
     const data = await api.get<FindingsPage>(`/findings${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [state, watchlist]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useAutomation(): UseSnapshotResult<AutomationPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<AutomationPage>("/automation", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -1178,6 +1188,7 @@ function Overview() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
+        <AutomationStrip />
         {snap.status === "loading" ? <Loading label="Loading…" /> : null}
         {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
         {stats != null && stats.lots === 0 ? (
@@ -1393,6 +1404,72 @@ function Auctions() {
         </Card>
       </Stack>
     </Page>
+  );
+}
+
+/**
+ * What the schedule is doing, on the page you open first. A latch is the one thing
+ * here that needs an answer, so it is the only state that offers a button.
+ */
+function AutomationStrip() {
+  const snap = useAutomation();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (snap.status !== "ready") return null;
+  const a = snap.data.automation;
+
+  const resume = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/automation/resume");
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not resume.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Automation"
+      actions={a.newFindings > 0 ? <Link to="/bidrl/findings">{a.newFindings} to review</Link> : null}
+    >
+      <Stack>
+        {a.throttled ? (
+          <Callout tone="warn">
+            BidRL refused repeated requests, so scheduled collection stopped and will not
+            start again on its own. Resume it once you are satisfied nothing is wrong.
+          </Callout>
+        ) : null}
+        <div className="bidrl-automation">
+          <Badge tone={a.throttled ? "warn" : a.enabled ? "ok" : "neutral"}>
+            {automationSummary(a)}
+          </Badge>
+          {a.lastSweepAt ? (
+            <Hint>
+              Last sweep {savedOn(a.lastSweepAt)}
+              {a.lastSweepNote ? ` — ${a.lastSweepNote}` : ""}
+            </Hint>
+          ) : null}
+          {a.lastMatchAt ? (
+            <Hint>
+              Last match {savedOn(a.lastMatchAt)}
+              {a.lastMatchNote ? ` — ${a.lastMatchNote}` : ""}
+            </Hint>
+          ) : null}
+        </div>
+        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {a.throttled ? (
+          <div className="bidrl-actions">
+            <Button variant="primary" disabled={busy} onClick={() => void resume()}>
+              Resume now
+            </Button>
+          </div>
+        ) : null}
+      </Stack>
+    </Card>
   );
 }
 

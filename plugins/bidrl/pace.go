@@ -2,10 +2,16 @@ package bidrl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 )
+
+// errThrottled marks the stop that BidRL itself asked for. A user-triggered job just
+// reports it; a scheduled one must also latch, because a cron that quietly retries
+// into a ban is the failure worth engineering against.
+var errThrottled = errors.New("bidrl: BidRL is refusing requests")
 
 const (
 	bidrlMinInterval = 400 * time.Millisecond
@@ -14,7 +20,10 @@ const (
 
 // pacer spaces BidRL origin requests so a collect cannot stampede /api/ItemData.
 type pacer struct {
-	min         time.Duration
+	min time.Duration
+	// backoff is the step waited after each refusal. A field only so a test can
+	// exercise the latch without sleeping through the real one.
+	backoff     time.Duration
 	mu          sync.Mutex
 	last        time.Time
 	consecutive int
@@ -24,7 +33,7 @@ func newPacer(min time.Duration) *pacer {
 	if min <= 0 {
 		min = bidrlMinInterval
 	}
-	return &pacer{min: min}
+	return &pacer{min: min, backoff: 2 * time.Second}
 }
 
 func (p *pacer) wait(ctx context.Context) error {
@@ -61,10 +70,9 @@ func (p *pacer) observe(ctx context.Context, status int) error {
 	n := p.consecutive
 	p.mu.Unlock()
 	if n >= rateLimitMax {
-		return fmt.Errorf("bidrl: HTTP %d from BidRL %d times; stopping to avoid a ban", status, n)
+		return fmt.Errorf("%w: HTTP %d %d times in a row; stopping rather than continuing into a ban", errThrottled, status, n)
 	}
-	backoff := time.Duration(n) * 2 * time.Second
-	t := time.NewTimer(backoff)
+	t := time.NewTimer(time.Duration(n) * p.backoff)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():

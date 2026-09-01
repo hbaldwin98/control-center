@@ -1,6 +1,6 @@
 # Plugin: `bidrl` — automation, findings, favorites, locations
 
-Status: steps 1–3 implemented; step 4 (cron) proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
+Status: implemented · see [`bidrl.md`](bidrl.md) for the current behaviour · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
 
 Four changes to the BIDRL plugin, in dependency order:
 
@@ -39,8 +39,8 @@ watching. The mitigations are not decoration — they are the reason this is def
   Disabling the plugin already cancels running jobs and closes browser sessions; the config
   flag makes stopping the schedule a smaller action than disabling the whole plugin.
 
-`bidrl.md`'s "Every v1 action is user-triggered" section gets rewritten rather than left
-to contradict this file.
+`bidrl.md`'s "Every v1 action is user-triggered" section has been rewritten rather than
+left to contradict this file.
 
 ---
 

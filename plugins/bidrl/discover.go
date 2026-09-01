@@ -43,7 +43,26 @@ func (p *Plugin) discoverJob(jc hostjobs.Context) error {
 }
 
 func (p *Plugin) discoverSites(jc hostjobs.Context, h host.Host, page hostbrowser.Page) (int, error) {
+	return p.discoverSitesFor(jc, h, page, nil)
+}
+
+// discoverSitesFor lists open auctions at the given locations, or at every location
+// the plugin config allows when the set is empty. A sweep always passes its own
+// explicit set: an unscoped scheduled discovery is a crawl, which is exactly what
+// this plugin will not do.
+func (p *Plugin) discoverSitesFor(jc hostjobs.Context, h host.Host, page hostbrowser.Page, only []string) (int, error) {
 	cfg := p.cfg()
+	allow := cfg.allowAffiliate
+	if len(only) > 0 {
+		wanted := make(map[string]struct{}, len(only))
+		for _, id := range only {
+			wanted[affiliateIDFromSlug(id)] = struct{}{}
+		}
+		allow = func(slug string) bool {
+			_, ok := wanted[affiliateIDFromSlug(slug)]
+			return ok
+		}
+	}
 	_ = jc.Progress(0.05, "listing SITES locations")
 	homes, err := p.fetchHomeAffiliates(jc, page)
 	if err != nil {
@@ -51,7 +70,7 @@ func (p *Plugin) discoverSites(jc hostjobs.Context, h host.Host, page hostbrowse
 	}
 	var want []homeAffiliate
 	for _, a := range homes {
-		if cfg.allowAffiliate(a.Slug) {
+		if allow(a.Slug) {
 			want = append(want, a)
 		}
 		if len(want) >= maxAffiliates {
@@ -76,7 +95,7 @@ func (p *Plugin) discoverSites(jc hostjobs.Context, h host.Host, page hostbrowse
 		}
 		stored = append(stored, listed...)
 	}
-	if err := p.replaceAffiliateAuctions(jc, h, stored, now); err != nil {
+	if err := p.replaceAffiliateAuctions(jc, h, stored, now, only); err != nil {
 		return 0, err
 	}
 	_ = jc.Logf("stored %d open auctions across %d SITES locations", len(stored), len(want))
@@ -124,9 +143,17 @@ func (p *Plugin) fetchLanding(jc hostjobs.Context, page hostbrowser.Page, aff ho
 	return parsed.Auctions, nil
 }
 
-func (p *Plugin) replaceAffiliateAuctions(jc hostjobs.Context, h host.Host, listed []landingAuction, now string) error {
+// replaceAffiliateAuctions rewrites the discovery cache. A scoped run replaces only
+// the locations it actually visited: clearing the whole table would delete listings
+// for locations this run never looked at, which then look closed.
+func (p *Plugin) replaceAffiliateAuctions(jc hostjobs.Context, h host.Host, listed []landingAuction, now string, only []string) error {
 	return h.Store().Tx(jc, func(tx hoststorage.Tx) error {
-		if _, err := tx.Exec(jc, `DELETE FROM bidrl_affiliate_auctions`); err != nil {
+		if len(only) == 0 {
+			if _, err := tx.Exec(jc, `DELETE FROM bidrl_affiliate_auctions`); err != nil {
+				return err
+			}
+		} else if _, err := tx.Exec(jc, `DELETE FROM bidrl_affiliate_auctions WHERE `+
+			inClause("affiliate_id", len(only)), anyStrings(cleanAffiliateIDs(only))...); err != nil {
 			return err
 		}
 		seen := map[string]struct{}{}

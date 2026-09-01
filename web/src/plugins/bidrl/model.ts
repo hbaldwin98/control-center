@@ -69,6 +69,39 @@ export type FavoritesPage = {
   latestEventId: number;
 };
 
+export type Automation = {
+  enabled: boolean;
+  locations: number;
+  sweepSchedule: string;
+  matchSchedule: string;
+  timeZone: string;
+  lastSweepAt: string;
+  lastSweepNote: string;
+  lastMatchAt: string;
+  lastMatchNote: string;
+  throttledUntil: string;
+  throttled: boolean;
+  newFindings: number;
+};
+
+export type AutomationPage = {
+  automation: Automation;
+  latestEventId: number;
+};
+
+/**
+ * What the automation strip says in one line. The three "it is doing nothing" cases
+ * are spelled out separately: an operator who turned automation on and chose no
+ * locations must not read the same sentence as one who turned it off.
+ */
+export function automationSummary(a: Automation): string {
+  if (a.throttled) return "Stopped: BidRL is refusing requests.";
+  if (!a.enabled) return "Off. Nothing runs on a schedule.";
+  if (a.locations === 0) return "On, but no locations chosen — the sweep does nothing.";
+  const where = `${a.locations} location${a.locations === 1 ? "" : "s"}`;
+  return `On, sweeping ${where} every six hours.`;
+}
+
 export type Watchlist = {
   id: string;
   name: string;
