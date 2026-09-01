@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -104,43 +105,103 @@ routes:
 	d1 := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
 	d2 := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	mux := http.NewServeMux()
-	loginHTML := `<!doctype html><app-root>
-<form method="post" action="/authentication/login">
-<input type="email" formControlName="email" autocomplete="email">
-<input type="password" formControlName="password" autocomplete="current-password">
-<button mat-flat-button color="primary" class="w-100" type="submit">Sign in</button>
-</form>
-</app-root>`
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, loginHTML)
-	})
-	mux.HandleFunc("GET /authentication/login", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, loginHTML)
-	})
-	mux.HandleFunc("POST /authentication/login", func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("email") != "me@tid.test" || r.Form.Get("password") != "secret" {
+	const tenant = "tenant-test"
+	step := 0
+	nextStep := func(w http.ResponseWriter, want int) bool {
+		step++
+		if step != want {
+			http.Error(w, fmt.Sprintf("request step %d, want %d", step, want), http.StatusConflict)
+			return false
+		}
+		return true
+	}
+	checkHeaders := func(w http.ResponseWriter, r *http.Request, auth bool) bool {
+		if r.Header.Get("ocx-tenant-id") != tenant {
+			http.Error(w, "tenant header", http.StatusBadRequest)
+			return false
+		}
+		if auth && r.Header.Get("Authorization") != "Bearer access-test" {
+			http.Error(w, "authorization header", http.StatusUnauthorized)
+			return false
+		}
+		return true
+	}
+	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if !nextStep(w, 1) || !checkHeaders(w, r, false) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["email"] != "person@example.test" || body["password"] != "secret" {
 			http.Error(w, "denied", http.StatusUnauthorized)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "ok", Path: "/"})
-		http.Redirect(w, r, "https://my.tid.org/usage/graphs", http.StatusFound)
+		_, _ = io.WriteString(w, `{"data":{"accessToken":"access-test","email":"person@example.test","username":"internal-test","firstName":"Test","lastName":"Person"}}`)
 	})
-	mux.HandleFunc("GET /usage/graphs", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := r.Cookie("sid"); err != nil {
-			http.Error(w, "no session", http.StatusForbidden)
+	mux.HandleFunc("GET /user/user-details", func(w http.ResponseWriter, r *http.Request) {
+		if !nextStep(w, 2) || !checkHeaders(w, r, true) {
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<app-root><table class="usage"><tr><th>Date</th><th>kWh</th></tr>
-<tr><td>%s</td><td>12.5</td></tr>
-<tr><td>%s</td><td>8</td></tr></table></app-root>`, d1, d2)
+		_, _ = io.WriteString(w, `{"userDetails":{"accounts":[{"accountId":"account-test"}]}}`)
+	})
+	mux.HandleFunc("POST /ouaf/get-active-services", func(w http.ResponseWriter, r *http.Request) {
+		if !nextStep(w, 3) || !checkHeaders(w, r, true) {
+			return
+		}
+		var body struct {
+			Payload  map[string]string `json:"payload"`
+			Username string            `json:"username"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Payload["accountId"] != "account-test" || body.Payload["action"] != "READ" || body.Username != "internal-test" {
+			http.Error(w, "active services request", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":{"premiseList":{"serviceAggrements":{"saId":"service-test","serviceType":"E","saRateSchedule":{"rateSchedule":"TEST"},"ServicePoints":{"meterId":"meter-test"}}}}}`)
+	})
+	mux.HandleFunc("POST /ouaf/get-bill-data-extract", func(w http.ResponseWriter, r *http.Request) {
+		if !nextStep(w, 4) || !checkHeaders(w, r, true) {
+			return
+		}
+		fmt.Fprintf(w, `{"data":{"billHistoryList":[{"usagePeriodStartDateTime":"%sT00:00:00-07:00","usagePeriodEndDateTime":"%sT23:59:59-07:00"}]}}`, d1, d2)
+	})
+	mux.HandleFunc("POST /ouaf/retrieve-usage-for-sa", func(w http.ResponseWriter, r *http.Request) {
+		if !nextStep(w, 5) || !checkHeaders(w, r, true) {
+			return
+		}
+		var body struct {
+			Payload                  map[string]string `json:"payload"`
+			SelectedServiceAgreement map[string]any    `json:"selectedServiceAgreement"`
+			Username                 string            `json:"username"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Payload["viewModeFlg"] != "D2BB" || body.Payload["personId"] != "" || body.Payload["saId"] != "service-test" || body.Username != "internal-test" {
+			http.Error(w, "usage request", http.StatusBadRequest)
+			return
+		}
+		if body.SelectedServiceAgreement["saId"] != "service-test" || body.SelectedServiceAgreement["saRateSchedule"] == nil {
+			http.Error(w, "selected service agreement", http.StatusBadRequest)
+			return
+		}
+		fmt.Fprintf(w, `{"status":"OK","data":{"usageList":[{"costDate":"%s","usage":"12.5"},{"costDate":"%s","usage":"8"}]}}`, d1, d2)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := server.Client()
+	transport := client.Transport
+	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = serverURL.Scheme
+		clone.URL.Host = serverURL.Host
+		return transport.RoundTrip(clone)
 	})
 
 	br, err := browser.New(bus, pol, browser.Options{
-		Engine: browser.NewFake(map[string]http.Handler{"my.tid.org": mux, "www.tid.org": mux, "tid.org": mux}),
+		Engine: browser.NewFake(map[string]http.Handler{"unused.test": mux}), Client: client,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +229,7 @@ routes:
 	if err := reg.Enable(ctx, "tid", "test", "go"); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.UpdateConfig(ctx, "tid", json.RawMessage(`{"username":"me@tid.test","credential_id":"tid-pass","cents_per_kwh":0,"usage_url":""}`), "test"); err != nil {
+	if err := reg.UpdateConfig(ctx, "tid", json.RawMessage(`{"tenant_id":"tenant-test","username":"person@example.test","credential_id":"tid-pass","cents_per_kwh":0}`), "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -228,6 +289,10 @@ routes:
 		t.Fatalf("summary days %+v want %s=12.5 %s=8", page.Days, d1, d2)
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestTIDUploadCSV(t *testing.T) {
 	ctx := context.Background()

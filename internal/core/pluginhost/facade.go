@@ -3,6 +3,7 @@ package pluginhost
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -67,6 +68,38 @@ func (a *browserAdapter) Open(ctx context.Context, opts hostbrowser.OpenOptions)
 		return nil, mapBrowserErr(err)
 	}
 	return browserSessionAdapter{inner: sess, creds: a.creds}, nil
+}
+
+func (a *browserAdapter) Do(ctx context.Context, opts hostbrowser.OpenOptions, req hostbrowser.Request) (hostbrowser.Resource, error) {
+	body := append([]byte(nil), req.Body...)
+	if req.Credential != nil {
+		if a.creds == nil {
+			return hostbrowser.Resource{}, fmt.Errorf("%w: credentials not configured", hostbrowser.ErrEngine)
+		}
+		if strings.TrimSpace(req.Credential.ID) == "" || strings.TrimSpace(req.Credential.Field) == "" {
+			return hostbrowser.Resource{}, fmt.Errorf("%w: invalid credential injection", hostbrowser.ErrEngine)
+		}
+		var object map[string]any
+		if err := json.Unmarshal(body, &object); err != nil {
+			return hostbrowser.Resource{}, fmt.Errorf("%w: credential body must be a JSON object", hostbrowser.ErrEngine)
+		}
+		secret, err := a.creds.Token(ctx, req.Credential.ID)
+		if err != nil {
+			return hostbrowser.Resource{}, err
+		}
+		object[req.Credential.Field] = secret
+		body, err = json.Marshal(object)
+		if err != nil {
+			return hostbrowser.Resource{}, fmt.Errorf("%w: encode credential body", hostbrowser.ErrEngine)
+		}
+	}
+	r, err := a.inner.Do(ctx, browser.OpenOptions{AllowedHosts: opts.AllowedHosts}, browser.Request{
+		Method: req.Method, URL: req.URL, Headers: req.Headers, Body: body,
+	})
+	if err != nil {
+		return hostbrowser.Resource{}, mapBrowserErr(err)
+	}
+	return hostbrowser.Resource{URL: r.URL, MIME: r.MIME, Body: r.Body, Status: r.Status}, nil
 }
 
 type browserSessionAdapter struct {
@@ -183,6 +216,9 @@ type disabledBrowser struct{}
 
 func (disabledBrowser) Open(context.Context, hostbrowser.OpenOptions) (hostbrowser.Session, error) {
 	return nil, hostpolicy.ErrPluginDisabled
+}
+func (disabledBrowser) Do(context.Context, hostbrowser.OpenOptions, hostbrowser.Request) (hostbrowser.Resource, error) {
+	return hostbrowser.Resource{}, hostpolicy.ErrPluginDisabled
 }
 
 type searchAdapter struct {

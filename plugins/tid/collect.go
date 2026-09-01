@@ -1,297 +1,214 @@
 package tid
 
 import (
-	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
-	"net/url"
+	"net/http"
 	"strings"
-	"time"
 
 	"github.com/hbaldwin98/control-center/host"
 	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
 )
 
-const (
-	portalHost = "my.tid.org"
-	loginURL   = "https://my.tid.org/authentication/login"
-	usageURL   = "https://my.tid.org/usage/graphs"
-)
+const apiBaseURL = "https://tid-ocx-prod-be.originsmartops.com"
 
-// Origin CX (Angular) hosts the SPA on my.tid.org, authenticates against Cognito via
-// POST /auth/login on the Origin backend, and loads usage with POST /ouaf/retrieve-usage-for-sa.
-// Those XHRs must be allowlisted or Playwright abort them and login never completes.
-var allowedHosts = []string{
-	"my.tid.org",
-	"www.tid.org",
-	"tid.org",
-	"tid-ocx-prod-be.originsmartops.com",
-	"us-east-1eaqzwamod.auth.us-east-1.amazoncognito.com",
-	"cognito-idp.us-east-1.amazonaws.com",
-	"fonts.gstatic.com",
-	"fonts.googleapis.com",
-	"www.googletagmanager.com",
-	"www.google-analytics.com",
-	"maps.googleapis.com",
+var apiHosts = []string{"tid-ocx-prod-be.originsmartops.com"}
+
+type loginData struct {
+	AccessToken string `json:"accessToken"`
+	Email       string `json:"email"`
+	Username    string `json:"username"`
+	FirstName   string `json:"firstName"`
+	LastName    string `json:"lastName"`
 }
 
-var userSelectors = []string{
-	`input[formControlName=email]`,
-	"#email",
-	"input[type=email]",
-	"input[name=email]",
-	"input[name=username]",
-	"input[name=user]",
-	"input[name=Email]",
-	"input[type=text]",
-}
-
-var passwordSelectors = []string{
-	`input[formControlName=password]`,
-	"input[type=password]",
-}
-
-// Sign-in is a Material mat-flat-button, not the first <button> on the page
-// (language, campaign close, and the password-visibility toggle all come first).
-var submitSelectors = []string{
-	"button[mat-flat-button]",
-	"button[type=submit]",
-	"input[type=submit]",
-	"button.w-100",
-}
-
-var usagePaths = []string{
-	"/usage/graphs",
-	"/usage/insights",
-	"/usage",
-	"/dashboard",
+type billPeriod struct {
+	UsageStart string `json:"usagePeriodStartDateTime"`
+	UsageEnd   string `json:"usagePeriodEndDateTime"`
 }
 
 func (p *Plugin) collect(jc hostjobs.Context, h host.Host, cfg settings) ([]Reading, error) {
-	if strings.TrimSpace(cfg.Username) == "" || strings.TrimSpace(cfg.CredentialID) == "" {
-		return nil, hostjobs.Permanent(fmt.Errorf("tid: set username and a password credential_id in plugin config"))
+	if strings.TrimSpace(cfg.Username) == "" || strings.TrimSpace(cfg.CredentialID) == "" || strings.TrimSpace(cfg.TenantID) == "" {
+		return nil, hostjobs.Permanent(fmt.Errorf("tid: set tenant_id, username, and a password credential_id in plugin config"))
 	}
 
-	sess, err := h.Browser().Open(jc, hostbrowser.OpenOptions{AllowedHosts: allowedHosts})
+	if err := jc.Progress(0.1, "signing in to TID"); err != nil {
+		return nil, err
+	}
+	loginBody, _ := json.Marshal(map[string]string{"email": cfg.Username})
+	loginResponse, err := apiRequest(jc, h.Browser(), cfg.TenantID, "", http.MethodPost, "/auth/login", loginBody, &hostbrowser.JSONCredential{
+		ID: cfg.CredentialID, Field: "password",
+	})
 	if err != nil {
+		return nil, fmt.Errorf("tid: login: %w", err)
+	}
+	var loginEnvelope struct {
+		Data loginData `json:"data"`
+	}
+	if err := json.Unmarshal(loginResponse, &loginEnvelope); err != nil {
+		return nil, fmt.Errorf("tid: decode login response: %w", err)
+	}
+	login := loginEnvelope.Data
+	if login.AccessToken == "" || login.Username == "" {
+		return nil, hostjobs.Permanent(fmt.Errorf("tid: login response omitted accessToken or username"))
+	}
+
+	if err := jc.Progress(0.25, "loading TID account"); err != nil {
 		return nil, err
 	}
-	defer sess.Close(jc)
-
-	page, err := sess.NewPage(jc)
+	userResponse, err := apiRequest(jc, h.Browser(), cfg.TenantID, login.AccessToken, http.MethodGet, "/user/user-details", nil, nil)
 	if err != nil {
+		return nil, fmt.Errorf("tid: user details: %w", err)
+	}
+	var userEnvelope struct {
+		UserDetails struct {
+			Accounts []struct {
+				AccountID string `json:"accountId"`
+			} `json:"accounts"`
+		} `json:"userDetails"`
+	}
+	if err := json.Unmarshal(userResponse, &userEnvelope); err != nil {
+		return nil, fmt.Errorf("tid: decode user details: %w", err)
+	}
+	if len(userEnvelope.UserDetails.Accounts) == 0 || userEnvelope.UserDetails.Accounts[0].AccountID == "" {
+		return nil, hostjobs.Permanent(fmt.Errorf("tid: user details contained no account"))
+	}
+	accountID := userEnvelope.UserDetails.Accounts[0].AccountID
+
+	activeBody, _ := json.Marshal(map[string]any{
+		"payload":  map[string]string{"accountId": accountID, "action": "READ"},
+		"username": login.Username,
+	})
+	activeResponse, err := apiRequest(jc, h.Browser(), cfg.TenantID, login.AccessToken, http.MethodPost, "/ouaf/get-active-services", activeBody, nil)
+	if err != nil {
+		return nil, fmt.Errorf("tid: active services: %w", err)
+	}
+	agreements, err := electricAgreements(activeResponse)
+	if err != nil {
+		return nil, fmt.Errorf("tid: active services response: %w", err)
+	}
+	if len(agreements) == 0 {
+		return nil, hostjobs.Permanent(fmt.Errorf("tid: account contained no electric service agreements"))
+	}
+
+	if err := jc.Progress(0.45, "loading current billing periods"); err != nil {
 		return nil, err
 	}
-	defer page.Close(jc)
-
-	if err := jc.Progress(0.1, "opening My TID"); err != nil {
-		return nil, err
-	}
-	_ = jc.Logf("opening login page %s", loginURL)
-	if err := page.Goto(jc, loginURL); err != nil {
-		_ = jc.Logf("login page did not load: %v", err)
-		return nil, fmt.Errorf("tid: login page: %w", err)
-	}
-	if err := waitAny(jc, page, passwordSelectors, 45*time.Second); err != nil {
-		_ = jc.Logf("no password field matched %d selectors within 45s: %v", len(passwordSelectors), err)
-		return nil, fmt.Errorf("tid: no password field on login page: %w", err)
-	}
-
-	userFilled := false
-	for _, sel := range userSelectors {
-		if err := page.Fill(jc, sel, cfg.Username); err == nil {
-			userFilled = true
-			break
-		}
-	}
-	if !userFilled {
-		_ = jc.Logf("no username field matched any of %d selectors; the login page markup has changed", len(userSelectors))
-		return nil, hostjobs.Permanent(fmt.Errorf("tid: could not find a username field on the login page"))
-	}
-	passFilled := false
-	for _, sel := range passwordSelectors {
-		if err := page.FillCredential(jc, sel, cfg.CredentialID); err == nil {
-			passFilled = true
-			break
-		}
-	}
-	if !passFilled {
-		_ = jc.Logf("no password field accepted credential %s across %d selectors", cfg.CredentialID, len(passwordSelectors))
-		return nil, fmt.Errorf("tid: password field")
-	}
-
-	clicked := false
-	for _, sel := range submitSelectors {
-		if err := page.Click(jc, sel); err == nil {
-			clicked = true
-			break
-		}
-	}
-	if !clicked {
-		_ = jc.Logf("no sign-in button matched any of %d selectors", len(submitSelectors))
-		return nil, hostjobs.Permanent(fmt.Errorf("tid: could not find a sign-in button"))
-	}
-	if err := jc.Progress(0.35, "signed in"); err != nil {
-		return nil, err
-	}
-	waitLogin(jc, page, 25*time.Second)
-
-	found := waitHarvest(jc, page, 20*time.Second)
-	_ = jc.Logf("after sign-in, harvested %d readings from the landing page", len(found))
-
-	if cfg.UsageURL != "" {
-		u, err := url.Parse(cfg.UsageURL)
-		if err != nil || u.Scheme != "https" {
-			return nil, hostjobs.Permanent(fmt.Errorf("tid: usage_url must be an https URL"))
-		}
-		res, err := page.Get(jc, cfg.UsageURL)
+	var readings []Reading
+	for _, agreement := range agreements {
+		saID := stringValue(agreement, "saId")
+		billBody, _ := json.Marshal(map[string]any{
+			"payload":                  map[string]string{"accountId": accountID, "action": "READ", "saId": saID},
+			"selectedServiceAgreement": agreement,
+			"username":                 login.Username,
+		})
+		billResponse, err := apiRequest(jc, h.Browser(), cfg.TenantID, login.AccessToken, http.MethodPost, "/ouaf/get-bill-data-extract", billBody, nil)
 		if err != nil {
-			_ = jc.Logf("configured usage_url %s failed: %v", cfg.UsageURL, err)
-			return nil, fmt.Errorf("tid: usage_url: %w", err)
+			return nil, fmt.Errorf("tid: bill data: %w", err)
 		}
-		_ = storeBlob(jc, h, "sync/override", res.MIME, res.Body)
-		got := Parse(res.Body, res.MIME)
-		_ = jc.Logf("configured usage_url returned %d bytes of %s, parsed %d readings", len(res.Body), res.MIME, len(got))
-		if len(got) > len(found) {
-			found = got
+		period, err := currentBillPeriod(billResponse)
+		if err != nil {
+			return nil, fmt.Errorf("tid: bill data response: %w", err)
 		}
-	}
 
-	if len(found) == 0 {
-		if err := jc.Progress(0.55, "opening usage graphs"); err != nil {
-			return nil, err
+		usageBody, _ := json.Marshal(map[string]any{
+			"payload": map[string]string{
+				"action": "READ", "username": login.Username, "firstname": login.FirstName,
+				"lastname": login.LastName, "emailAddress": login.Email, "accountId": accountID,
+				"personId": "", "saId": saID, "viewModeFlg": "D2BB",
+				"usagePeriodStartDateTime": period.UsageStart, "usagePeriodEndDateTime": period.UsageEnd,
+			},
+			"selectedServiceAgreement": agreement,
+			"username":                 login.Username,
+		})
+		usageResponse, err := apiRequest(jc, h.Browser(), cfg.TenantID, login.AccessToken, http.MethodPost, "/ouaf/retrieve-usage-for-sa", usageBody, nil)
+		if err != nil {
+			return nil, fmt.Errorf("tid: usage: %w", err)
 		}
-		_ = jc.Logf("no readings yet; opening usage graphs at %s", usageURL)
-		if err := page.Goto(jc, usageURL); err != nil {
-			_ = jc.Logf("usage graphs: %v", err)
-		}
-		found = waitHarvest(jc, page, 30*time.Second)
-		_ = jc.Logf("usage graphs yielded %d readings", len(found))
+		readings = append(readings, Parse(usageResponse, "application/json")...)
 	}
-
-	if len(found) == 0 {
-		if err := jc.Progress(0.7, "trying usage paths"); err != nil {
-			return nil, err
-		}
-		_ = jc.Logf("still empty; trying %d fallback usage paths", len(usagePaths))
-		for _, path := range usagePaths {
-			if jc.Err() != nil {
-				return nil, jc.Err()
-			}
-			if err := page.Goto(jc, "https://"+portalHost+path); err != nil {
-				_ = jc.Logf("path %s did not load: %v", path, err)
-				continue
-			}
-			got := waitHarvest(jc, page, 8*time.Second)
-			_ = jc.Logf("path %s yielded %d readings", path, len(got))
-			if len(got) > len(found) {
-				found = got
-			}
-			if len(found) > 0 {
-				break
-			}
-		}
+	readings = mergeDays(readings)
+	if len(readings) == 0 {
+		return nil, hostjobs.Permanent(fmt.Errorf("tid: current billing periods contained no daily readings"))
 	}
-
-	if len(found) == 0 {
-		_ = jc.Logf("exhausted every usage source and found no rows; saving page HTML for inspection")
-		if html, err := page.Content(jc); err == nil {
-			_ = storeBlob(jc, h, "sync/last.html", "text/html", []byte(html))
-		}
-		return nil, hostjobs.Permanent(fmt.Errorf("tid: signed in but found no usage rows; on My TID open Usage Graphs and paste the CSV export instead"))
-	}
-	if html, err := page.Content(jc); err == nil {
-		_ = storeBlob(jc, h, "sync/last.html", "text/html", []byte(html))
-	}
-	if resps, err := page.Responses(jc); err == nil {
-		for i := len(resps) - 1; i >= 0; i-- {
-			if len(Parse(resps[i].Body, resps[i].MIME)) > 0 {
-				_ = storeBlob(jc, h, "sync/last.json", resps[i].MIME, resps[i].Body)
-				break
-			}
-		}
-	}
-	_ = jc.Logf("parsed %d daily readings", len(found))
-	return found, nil
+	_ = jc.Logf("parsed %d current-period daily readings from %d electric service agreements", len(readings), len(agreements))
+	return readings, nil
 }
 
-func waitLogin(jc hostjobs.Context, page hostbrowser.Page, d time.Duration) {
-	deadline := time.Now().Add(d)
-	for {
-		if resps, err := page.Responses(jc); err == nil {
-			for _, r := range resps {
-				if r.Status < 400 && strings.Contains(r.URL, "/auth/login") {
-					return
-				}
+func apiRequest(ctx context.Context, browser hostbrowser.Browser, tenantID, token, method, path string, body []byte, credential *hostbrowser.JSONCredential) ([]byte, error) {
+	headers := map[string]string{"ocx-tenant-id": tenantID, "Accept": "application/json"}
+	if len(body) > 0 {
+		headers["Content-Type"] = "application/json"
+	}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	res, err := browser.Do(ctx, hostbrowser.OpenOptions{AllowedHosts: apiHosts}, hostbrowser.Request{
+		Method: method, URL: apiBaseURL + path, Headers: headers, Body: body, Credential: credential,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return nil, fmt.Errorf("unexpected HTTP status %d", res.Status)
+	}
+	return res.Body, nil
+}
+
+func electricAgreements(body []byte) ([]map[string]any, error) {
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	premises := values(envelope.Data["premiseList"])
+	var result []map[string]any
+	for _, premise := range premises {
+		object, ok := premise.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, value := range values(object["serviceAggrements"]) {
+			agreement, ok := value.(map[string]any)
+			if ok && strings.EqualFold(stringValue(agreement, "serviceType"), "E") && stringValue(agreement, "saId") != "" {
+				result = append(result, agreement)
 			}
 		}
-		if html, err := page.Content(jc); err == nil && !looksLikeLogin(html) {
-			return
-		}
-		if jc.Err() != nil || !time.Now().Before(deadline) {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
 	}
+	return result, nil
 }
 
-func looksLikeLogin(html string) bool {
-	low := strings.ToLower(html)
-	return strings.Contains(low, "formcontrolname=\"password\"") || strings.Contains(low, `type="password"`) || strings.Contains(low, "type=password")
+func values(value any) []any {
+	if list, ok := value.([]any); ok {
+		return list
+	}
+	if value == nil {
+		return nil
+	}
+	return []any{value}
 }
 
-func waitAny(jc hostjobs.Context, page hostbrowser.Page, selectors []string, d time.Duration) error {
-	var last error
-	per := d / time.Duration(len(selectors))
-	if per < 2*time.Second {
-		per = d
-	}
-	for _, sel := range selectors {
-		last = page.WaitFor(jc, sel, per)
-		if last == nil {
-			return nil
-		}
-	}
-	return last
+func stringValue(object map[string]any, key string) string {
+	value, _ := object[key].(string)
+	return value
 }
 
-func waitHarvest(jc hostjobs.Context, page hostbrowser.Page, d time.Duration) []Reading {
-	deadline := time.Now().Add(d)
-	var found []Reading
-	for {
-		if got := harvest(jc, page); len(got) > len(found) {
-			found = got
-		}
-		if len(found) > 0 || jc.Err() != nil || !time.Now().Before(deadline) {
-			return found
-		}
-		time.Sleep(200 * time.Millisecond)
+func currentBillPeriod(body []byte) (billPeriod, error) {
+	var envelope struct {
+		Data struct {
+			BillHistory []billPeriod `json:"billHistoryList"`
+		} `json:"data"`
 	}
-}
-
-func harvest(jc hostjobs.Context, page hostbrowser.Page) []Reading {
-	var best []Reading
-	consider := func(body []byte, mime string) {
-		got := Parse(body, mime)
-		if len(got) > len(best) {
-			best = got
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return billPeriod{}, err
+	}
+	for _, period := range envelope.Data.BillHistory {
+		if period.UsageStart != "" && period.UsageEnd != "" {
+			return period, nil
 		}
 	}
-	if resps, err := page.Responses(jc); err == nil {
-		for _, r := range resps {
-			consider(r.Body, r.MIME)
-		}
-	}
-	if html, err := page.Content(jc); err == nil {
-		consider([]byte(html), "text/html")
-	}
-	return best
-}
-
-func storeBlob(ctx hostjobs.Context, h host.Host, key, mime string, body []byte) error {
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-	_, err := h.Blobs().Put(ctx, key, bytes.NewReader(body), mime)
-	return err
+	return billPeriod{}, fmt.Errorf("no current usage period")
 }
