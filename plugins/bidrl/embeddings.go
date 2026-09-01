@@ -19,10 +19,27 @@ import (
 const (
 	embedBatch     = 32
 	minIntentScore = 0.30
+
+	// A lot near one of the expanded product types counts, but never quite as
+	// much as a lot near the words the user actually typed.
+	intentRelatedWeight = 0.88
+	// Weight of the keyword overlap folded on top of the vector score, so an
+	// exact title or model hit outranks a merely thematic neighbour.
+	intentLexicalWeight = 0.35
+	// Vector scores only mean anything relative to each other, so the tail is cut
+	// at a fraction of the best match rather than at a fixed cosine.
+	intentRelativeFloor = 0.72
+	// Descriptions are mostly boilerplate; past this the title stops carrying the
+	// vector.
+	maxDocDescription = 320
 )
 
+// lotDocument is what gets embedded for a lot. Title and identification come
+// first and the free text is clipped: a long boilerplate description otherwise
+// dominates the vector and buries what the lot actually is.
 func lotDocument(c intentCard) string {
-	parts := []string{c.Title, c.Description, c.Identification, c.Model, c.Category, c.Terms, c.Notes}
+	parts := []string{c.Title, c.Identification, c.Model, c.Category, c.Terms,
+		clipWords(c.Notes, maxDocDescription), clipWords(c.Description, maxDocDescription)}
 	var b strings.Builder
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
@@ -35,6 +52,18 @@ func lotDocument(c intentCard) string {
 		b.WriteString(p)
 	}
 	return b.String()
+}
+
+func clipWords(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	if i := strings.LastIndexAny(s, " \n\t"); i > max/2 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 func textHash(s string) string {
@@ -204,21 +233,46 @@ func (p *Plugin) embedTexts(ctx context.Context, h host.Host, inputs []string) (
 	return out, nil
 }
 
-func (p *Plugin) matchIntentSemantic(jc hostjobs.Context, h host.Host, queryDoc string, words []string, cards []intentCard) ([]intentMatch, error) {
-	qvecs, err := p.embedTexts(jc, h, []string{queryDoc})
+// matchIntentSemantic ranks lots against the typed query and each expanded
+// product type separately, then folds in the keyword overlap and keeps only
+// the lots that stay close to the best one.
+func (p *Plugin) matchIntentSemantic(jc hostjobs.Context, h host.Host, query string, words []string, cards []intentCard) ([]intentMatch, error) {
+	probes := intentProbes(query, words)
+	if len(probes) == 0 {
+		return nil, fmt.Errorf("bidrl: intent has nothing to embed")
+	}
+	pvecs, err := p.embedTexts(jc, h, probes)
 	if err != nil {
 		return nil, err
 	}
-	q := normalizeVector(qvecs[0])
-	if q == nil {
+	type probe struct {
+		text   string
+		vector []float64
+		weight float64
+	}
+	var qs []probe
+	for i, v := range pvecs {
+		n := normalizeVector(v)
+		if n == nil {
+			continue
+		}
+		weight := intentRelatedWeight
+		if i == 0 {
+			weight = 1
+		}
+		qs = append(qs, probe{text: probes[i], vector: n, weight: weight})
+	}
+	if len(qs) == 0 {
 		return nil, fmt.Errorf("bidrl: empty query embedding")
 	}
+	dims := len(qs[0].vector)
+
 	stored, err := p.loadLotEmbeddings(jc, h)
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range stored {
-		if e.dims != len(q) {
+		if e.dims != dims {
 			if err := p.clearLotEmbeddings(jc, h); err != nil {
 				return nil, err
 			}
@@ -233,7 +287,7 @@ func (p *Plugin) matchIntentSemantic(jc hostjobs.Context, h host.Host, queryDoc 
 	for i, c := range cards {
 		docs[i] = lotDocument(c)
 		hash := textHash(docs[i])
-		if e, ok := stored[c.ID]; ok && e.hash == hash && len(e.vector) == len(q) {
+		if e, ok := stored[c.ID]; ok && e.hash == hash && len(e.vector) == dims {
 			continue
 		}
 		stale = append(stale, c)
@@ -263,23 +317,66 @@ func (p *Plugin) matchIntentSemantic(jc hostjobs.Context, h host.Host, queryDoc 
 	}
 
 	var matches []intentMatch
+	var top float64
 	for _, c := range cards {
 		e, ok := stored[c.ID]
-		if !ok || len(e.vector) != len(q) {
+		if !ok || len(e.vector) != dims {
 			continue
 		}
-		score := cosine(q, e.vector)
-		if score < minIntentScore {
+		best, bestProbe := 0.0, ""
+		for _, q := range qs {
+			score := q.weight * cosine(q.vector, e.vector)
+			if score > best {
+				best, bestProbe = score, q.text
+			}
+		}
+		if best < minIntentScore {
 			continue
 		}
-		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: intentReason(queryDoc, words, c)})
+		score := best + intentLexicalWeight*lexicalAgreement(words, c)
+		if score > top {
+			top = score
+		}
+		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: intentReason(bestProbe, words, c)})
 	}
-	if len(matches) == 0 {
-		return nil, nil
-	}
-	return matches, nil
+	return trimIntentTail(matches, top), nil
 }
 
+// lexicalAgreement is the keyword overlap from the lexical pass squeezed into
+// 0–1, so a lot whose title actually says the word beats a lot that only sits
+// nearby in vector space.
+func lexicalAgreement(words []string, c intentCard) float64 {
+	score, _ := scoreIntentCard(words, c)
+	if score <= 0 {
+		return 0
+	}
+	if score >= lexicalFullMatch {
+		return 1
+	}
+	return score / lexicalFullMatch
+}
+
+const lexicalFullMatch = 6
+
+// trimIntentTail drops everything far behind the best match. Without it a
+// fixed cosine cut lets most of the catalog through in an order the user reads
+// as random.
+func trimIntentTail(matches []intentMatch, top float64) []intentMatch {
+	if len(matches) == 0 {
+		return nil
+	}
+	floor := top * intentRelativeFloor
+	out := matches[:0]
+	for _, m := range matches {
+		if m.Score < floor {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// intentReason names the words that connect the lot to the probe it matched.
 func intentReason(query string, words []string, c intentCard) string {
 	var qtoks []string
 	qtoks = append(qtoks, words...)

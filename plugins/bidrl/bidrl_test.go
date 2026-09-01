@@ -3,6 +3,7 @@ package bidrl
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -678,11 +679,72 @@ func TestDecodeIntentWordsUsesStructuredJSON(t *testing.T) {
 	}
 }
 
-func TestIntentQueryDocumentAddsRelatedGear(t *testing.T) {
+func TestIntentProbesKeepTheQuerySeparate(t *testing.T) {
 	t.Parallel()
-	doc := intentQueryDocument("camping", []string{"tent", "headlamp", "lantern", "canopy"})
-	if !strings.Contains(doc, "camping") || !strings.Contains(doc, "headlamp") || !strings.Contains(doc, "canopy") {
-		t.Fatalf("%q", doc)
+	probes := intentProbes("camping", []string{"tent", "headlamp", "camping", "lantern"})
+	if probes[0] != "camping" {
+		t.Fatalf("typed query must lead: %q", probes)
+	}
+	if len(probes) != 4 {
+		t.Fatalf("one probe per related word, no duplicate of the query: %q", probes)
+	}
+	for _, p := range probes[1:] {
+		if strings.Contains(p, "camping") {
+			t.Fatalf("related probes must not be glued to the query: %q", p)
+		}
+	}
+}
+
+func TestIntentProbesAreCapped(t *testing.T) {
+	t.Parallel()
+	var words []string
+	for i := 0; i < 40; i++ {
+		words = append(words, fmt.Sprintf("word%d", i))
+	}
+	if got := len(intentProbes("camping", words)); got != maxIntentProbes {
+		t.Fatalf("probes = %d, want %d", got, maxIntentProbes)
+	}
+}
+
+func TestLexicalAgreementRewardsTitleHits(t *testing.T) {
+	t.Parallel()
+	words := []string{"tent", "camping"}
+	hit := lexicalAgreement(words, intentCard{ID: "1", Title: "4-person camping tent"})
+	miss := lexicalAgreement(words, intentCard{ID: "2", Title: "Keurig K-Supreme Plus"})
+	if hit <= miss || miss != 0 {
+		t.Fatalf("hit=%v miss=%v", hit, miss)
+	}
+	if hit > 1 {
+		t.Fatalf("agreement must stay in 0-1: %v", hit)
+	}
+}
+
+func TestTrimIntentTailDropsTheLongTail(t *testing.T) {
+	t.Parallel()
+	in := []intentMatch{
+		{ID: "1", Score: 0.90},
+		{ID: "2", Score: 0.70},
+		{ID: "3", Score: 0.40},
+		{ID: "4", Score: 0.32},
+	}
+	got := trimIntentTail(in, 0.90)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Fatalf("%+v", got)
+	}
+	if trimIntentTail(nil, 0) != nil {
+		t.Fatal("no matches means no matches")
+	}
+}
+
+func TestLotDocumentClipsBoilerplateDescription(t *testing.T) {
+	t.Parallel()
+	c := intentCard{ID: "1", Title: "camping tent", Description: strings.Repeat("boilerplate ", 200)}
+	doc := lotDocument(c)
+	if !strings.HasPrefix(doc, "camping tent") {
+		t.Fatalf("title must lead the document: %q", doc[:40])
+	}
+	if len(doc) > 2*maxDocDescription {
+		t.Fatalf("description was not clipped: %d chars", len(doc))
 	}
 }
 

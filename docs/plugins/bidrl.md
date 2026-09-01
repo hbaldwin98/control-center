@@ -230,11 +230,20 @@ Intent matching is user-triggered (`POST/GET /intent`) from the lots catalog. It
 hit BidRL and does not look at photographs.
 
 Ask starts with one cheap `intent-expand` chat call: "camping" becomes related auction-title
-words (tent, headlamp, lantern, canopy, cooler). It then embeds that expanded query once
-and ranks collected lots by cosine similarity against vectors stored in SQLite
-(`bidrl_lot_embeddings`). Each lot is embedded from its title and description, plus
-identification, model, category, and search terms when a scan already exists. The vector
-is reused until that text changes. Photographs are never sent.
+words (tent, headlamp, lantern, canopy, cooler). The typed query and each related word are
+then embedded as separate probes (at most twelve), and every collected lot is scored against
+its closest probe using vectors stored in SQLite (`bidrl_lot_embeddings`). Related words
+count slightly less than the words the user typed. The probes are kept apart on purpose:
+embedding the query and its expansion as one string averages every related product into a
+vector that sits about the same distance from the whole catalog, which reads as random
+results. Each lot is embedded from its title, identification, model, category, and search
+terms, plus a clipped description — a long boilerplate description otherwise buries the
+title. The vector is reused until that text changes. Photographs are never sent.
+
+Keyword overlap is folded on top of the vector score, so a lot whose title actually says
+the word outranks a merely thematic neighbour, and the tail is cut relative to the best
+match rather than at a fixed cosine — a fixed cut admits most of the catalog in an order
+that looks arbitrary.
 
 A scan is not required. A title that says "camping tent" matches, and so does a headlamp
 that never uses the word camp, because expansion named it before embedding. Stored
@@ -351,8 +360,9 @@ full-window view.
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
   fails. Intent matching makes one `intent-expand` chat call to name related gear, embeds
-  that expanded query once, and embeds each collected lot whose title (or stored
-  identification) has changed, then cosine-ranks locally. It does not re-read
+  the query and each related word as its own probe, and embeds each collected lot whose
+  title (or stored identification) has changed, then ranks locally on the closest probe
+  plus keyword overlap and keeps only what stays close to the best match. It does not re-read
   photographs. Vectors live in `bidrl_lot_embeddings`, are skipped and dropped when a lot
   has ended, and are deleted with the lot on "Remove ended".
 - ItemData and pusher traffic to BidRL is paced at 400ms with one request in flight. Three

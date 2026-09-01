@@ -19,8 +19,9 @@ const (
 	maxIntentHits      = 80
 	maxIntentQuery     = 400
 	keepIntentSearches = 10
+	maxIntentProbes    = 12
 	intentMaxTokens    = 256
-	maxIntentWords     = 36
+	maxIntentWords     = 24
 	intentExpandModel  = "intent-expand"
 	intentEmbedModel   = "intent-match"
 )
@@ -221,7 +222,7 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 		return err
 	}
 
-	matches, err := p.matchIntentSemantic(jc, h, intentQueryDocument(q, words), words, cards)
+	matches, err := p.matchIntentSemantic(jc, h, q, words, cards)
 	if err != nil {
 		_ = jc.Logf("intent embed: %v; matching expanded words against titles", err)
 		matches = matchIntentLexical(words, cards)
@@ -329,13 +330,26 @@ func decodeIntentWords(resp *hostai.ChatResponse) []string {
 	return parsed.ItemWords
 }
 
-func intentQueryDocument(query string, words []string) string {
-	q := strings.TrimSpace(query)
-	extra := strings.Join(words, " ")
-	if extra == "" || strings.EqualFold(extra, q) {
-		return q
+// intentProbes are the texts embedded for one search. The typed query is
+// always first and stands alone: gluing the expansion words onto it averages
+// every related product into one vague vector that sits about the same
+// distance from the whole catalog, which is what made results look arbitrary.
+// Each related word is its own probe instead, and a lot only has to be near
+// one of them.
+func intentProbes(query string, words []string) []string {
+	q := strings.Join(strings.Fields(query), " ")
+	out := []string{}
+	if q != "" {
+		out = append(out, q)
 	}
-	return q + "\n" + extra
+	for _, w := range words {
+		w = strings.Join(strings.Fields(w), " ")
+		if w == "" || strings.EqualFold(w, q) {
+			continue
+		}
+		out = append(out, w)
+	}
+	return uniqueFold(out, maxIntentProbes)
 }
 
 func matchIntentLexical(words []string, cards []intentCard) []intentMatch {
