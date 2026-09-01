@@ -268,5 +268,37 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			CREATE INDEX bidrl_findings_state ON bidrl_findings(state, created_at);
 			CREATE INDEX bidrl_findings_lot ON bidrl_findings(lot_id);
 		`,
+	}, {
+		Version: 10,
+		Name:    "correct_ends_at",
+		Up:      rewriteStoredEndsAtSQL,
 	}})
 }
+
+// rewriteStoredEndsAtSQL is the one-time backfill for close times written by the
+// old parser. Collected lots stored BidRL unix as UTC (two hours early).
+// SITES listings stored a UTC wall clock labeled +0300. New writes already go
+// through parseEndTime; this SQL must not run against those (it is versioned).
+const rewriteStoredEndsAtSQL = `
+			UPDATE bidrl_lots
+			SET ends_at = strftime('%Y-%m-%dT%H:%M:%SZ', ends_at, '+2 hours')
+			WHERE ends_at LIKE '%Z'
+			  AND strftime('%Y-%m-%dT%H:%M:%SZ', ends_at, '+2 hours') IS NOT NULL;
+
+			UPDATE bidrl_auctions
+			SET ends_at = strftime('%Y-%m-%dT%H:%M:%SZ', ends_at, '+2 hours')
+			WHERE ends_at LIKE '%Z'
+			  AND strftime('%Y-%m-%dT%H:%M:%SZ', ends_at, '+2 hours') IS NOT NULL;
+
+			UPDATE bidrl_lots
+			SET ends_at = substr(ends_at, 1, 19) || 'Z'
+			WHERE substr(ends_at, 20) GLOB '[+-][0-9][0-9][0-9][0-9]';
+
+			UPDATE bidrl_auctions
+			SET ends_at = substr(ends_at, 1, 19) || 'Z'
+			WHERE substr(ends_at, 20) GLOB '[+-][0-9][0-9][0-9][0-9]';
+
+			UPDATE bidrl_affiliate_auctions
+			SET ends_at = substr(ends_at, 1, 19) || 'Z'
+			WHERE substr(ends_at, 20) GLOB '[+-][0-9][0-9][0-9][0-9]';
+		`

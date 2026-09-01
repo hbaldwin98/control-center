@@ -77,7 +77,14 @@ When ItemData succeeds, collection never `Goto`s the lot HTML page.
 **Live bids come from pusher, not a second ItemData pass.** "Refresh bids" GETs
 `/aucbeat/pusher/{auction_id}-{item_id}.json` — a tiny snapshot of current bid, minimum,
 increment, high bidder, bid count, end time, reserve, and whether bidding was extended.
-The UI countdown is local from the stored `ends_at`; it does not poll BidRL. Optional
+The UI countdown is local from the stored `ends_at`; it does not poll BidRL. BidRL's
+unix `end_time` is not UTC: remaining time is `end_time - (now + time_offset)`, and
+`time_offset` is `-7200` on live ItemData. Collection stores the corrected instant
+as RFC3339. A one-time migration rewrites already-stored close times the same way:
+unix-parsed `Z` values on lots and auctions shift two hours forward; SITES
+`+0300` strings become UTC wall clocks. Landing-page `ends` / `last_item_closes`
+strings carry a PHP server offset (`+0300`) on a UTC wall clock; that suffix is
+ignored so the calendar close matches BidRL's displayed Pacific time. Optional
 `POST /lots/{id}/enrich` re-POSTs ItemData for one lot when the operator wants a fuller
 record again.
 

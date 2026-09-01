@@ -43,7 +43,7 @@ export type {
   UseSnapshotResult,
 } from "./hooks";
 
-export { formatDateTime, formatProgress, formatRelative, formatRemaining, formatTime, formatUSD } from "./format";
+export { formatDateTime, formatProgress, formatRelative, formatRemaining, formatTime, formatUSD, parseInstant } from "./format";
 
 export {
   ActionsHeader,

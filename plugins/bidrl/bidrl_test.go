@@ -2,9 +2,11 @@ package bidrl
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
+	_ "modernc.org/sqlite"
 )
 
 func TestParseAuctionURL(t *testing.T) {
@@ -166,7 +169,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 9 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") || !strings.Contains(mig.migrations[8].Up, "bidrl_watchlists") {
+	if len(mig.migrations) != 10 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") || !strings.Contains(mig.migrations[8].Up, "bidrl_watchlists") || !strings.Contains(mig.migrations[9].Up, "strftime") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -422,7 +425,7 @@ func TestParseItemData(t *testing.T) {
 			"id":"25808125","auction_id":"191465","title":"DeWalt 20V Drill",
 			"lot_number":"TKD1","description":"<p>A drill</p>","current_bid":"12.50",
 			"minimum_bid":"13.00","highbidder_username":"goldwing44","bid_count":"9",
-			"end_time":"1788396360","current_increment":"0.25","reserve_met":false,
+			"end_time":"1788396360","time_offset":-7200,"current_increment":"0.25","reserve_met":false,
 			"item_url":"https://www.bidrl.com/auction/191465/item/dewalt-25808125/",
 			"images":[{"image_url":"https://d3ugkdpeq35ojy.cloudfront.net/photos/a.jpg"}]
 		},
@@ -449,6 +452,119 @@ func TestParseItemData(t *testing.T) {
 	}
 	if got.Description != "A drill" {
 		t.Fatalf("description %q", got.Description)
+	}
+}
+
+func TestParseEndTimeMatchesBidRLDisplay(t *testing.T) {
+	t.Parallel()
+	// Live Turlock ItemData: unix 1788306048, time_offset -7200, end_time_display
+	// "Tue, Sep 1, 2026 at 06:40:48 pm PT". Treating the unix value as UTC is two
+	// hours early (4:40 PM PDT). BidRL remaining time is end_time - (now + offset).
+	raw := []byte(`{
+		"id":"25814632","auction_id":"191466","title":"Curtain Track",
+		"end_time":"1788306048","time_offset":-7200,"current_bid":"4.26",
+		"timezone":"America/Los_Angeles",
+		"end_time_display":"Tue, Sep 1, 2026 at 06:40:48 pm  PT"
+	}`)
+	got, ok := parseItemData("191466", "25814632", raw)
+	if !ok {
+		t.Fatal("parseItemData rejected a live-shaped payload")
+	}
+	if got.EndsAt != "2026-09-02T01:40:48Z" {
+		t.Fatalf("endsAt %q, want the instant BidRL displays as 6:40:48 PM PT", got.EndsAt)
+	}
+
+	// Pusher snapshots omit time_offset; they use the same unix timebase.
+	snap, ok := parsePusher([]byte(`{"item":{"end_time":"1788306048","current_bid":4.26,"bid_count":5}}`))
+	if !ok {
+		t.Fatal("parsePusher rejected a live snapshot")
+	}
+	if snap.EndsAt != "2026-09-02T01:40:48Z" {
+		t.Fatalf("pusher endsAt %q, want the same instant as ItemData", snap.EndsAt)
+	}
+}
+
+func TestParseEndTimeLandingISOIsUTCWallClock(t *testing.T) {
+	t.Parallel()
+	// BidRL landing pages stamp a PHP server offset (+0300) onto a UTC wall clock.
+	// Honoring that offset is three hours early vs the Google-calendar close time.
+	raw := `{
+		"result":"success",
+		"affiliate":{"affiliate_id":"19","aff_company_name":"Turlock","aff_city":"Turlock","landing_page_slug":"turlock-19"},
+		"auctions":{
+			"3":{"id":"191466","title":"General Merchandise","auction_id_slug":"191466","item_count":"208","city":"Turlock","auction_group_type":"1","ends":"2026-09-02T01:00:00+0300","last_item_closes":"2026-09-02T03:04:12+0300"}
+		}
+	}`
+	got, ok := parseLandingPage("turlock-19", []byte(raw))
+	if !ok || len(got.Auctions) != 1 {
+		t.Fatalf("parseLandingPage = %#v ok=%v", got, ok)
+	}
+	if got.Auctions[0].EndsAt != "2026-09-02T03:04:12Z" {
+		t.Fatalf("last_item_closes stored as %q, want UTC wall clock 2026-09-02T03:04:12Z", got.Auctions[0].EndsAt)
+	}
+}
+
+func TestRewriteStoredEndsAtSQL(t *testing.T) {
+	t.Parallel()
+	db, err := sql.Open("sqlite", filepath.ToSlash(filepath.Join(t.TempDir(), "ends.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE bidrl_lots (id TEXT PRIMARY KEY, ends_at TEXT NOT NULL)`,
+		`CREATE TABLE bidrl_auctions (id TEXT PRIMARY KEY, ends_at TEXT NOT NULL)`,
+		`CREATE TABLE bidrl_affiliate_auctions (id TEXT PRIMARY KEY, ends_at TEXT NOT NULL)`,
+		`INSERT INTO bidrl_lots(id, ends_at) VALUES
+			('unix', '2026-09-01T23:40:48Z'),
+			('empty', ''),
+			('landing', '2026-09-02T03:04:12+0300')`,
+		`INSERT INTO bidrl_auctions(id, ends_at) VALUES ('unix', '2026-09-01T22:00:00Z')`,
+		`INSERT INTO bidrl_affiliate_auctions(id, ends_at) VALUES
+			('offset', '2026-09-02T03:04:12+0300'),
+			('z', '2026-09-01T19:00:00Z')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(rewriteStoredEndsAtSQL); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"lots/unix":     "2026-09-02T01:40:48Z",
+		"lots/empty":    "",
+		"lots/landing":  "2026-09-02T03:04:12Z",
+		"auctions/unix": "2026-09-02T00:00:00Z",
+		"sites/offset":  "2026-09-02T03:04:12Z",
+		"sites/z":       "2026-09-01T19:00:00Z",
+	}
+	got := map[string]string{}
+	scan := func(q, prefix string) {
+		t.Helper()
+		rows, err := db.Query(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, ends string
+			if err := rows.Scan(&id, &ends); err != nil {
+				t.Fatal(err)
+			}
+			got[prefix+"/"+id] = ends
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan(`SELECT id, ends_at FROM bidrl_lots`, "lots")
+	scan(`SELECT id, ends_at FROM bidrl_auctions`, "auctions")
+	scan(`SELECT id, ends_at FROM bidrl_affiliate_auctions`, "sites")
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s = %q, want %q", k, got[k], w)
+		}
 	}
 }
 

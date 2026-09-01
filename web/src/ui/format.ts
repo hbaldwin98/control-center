@@ -24,14 +24,31 @@ export function formatUSD(microUsd: number, options: { compact?: boolean } = {})
 
 /** Full local date and time. For anything that may be older than today. */
 export function formatDateTime(iso: string): string {
-  const d = new Date(iso);
+  const d = new Date(parseInstant(iso));
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 /** Local time only. For live logs, where the date is almost always today. */
 export function formatTime(iso: string): string {
-  const d = new Date(iso);
+  const d = new Date(parseInstant(iso));
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString();
+}
+
+/**
+ * Milliseconds since epoch for a stored instant.
+ *
+ * RFC3339 with `Z` or a colon offset is taken at its word. A trailing numeric
+ * offset without a colon (`+0300`) is a UTC wall clock with a PHP server-zone
+ * suffix — honoring that offset would shift BidRL close times by hours.
+ */
+export function parseInstant(iso: string): number {
+  const s = iso.trim();
+  const m = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})[+-]\d{4}$/.exec(s);
+  const wall = m?.[1];
+  if (wall) {
+    return Date.parse(`${wall.replace(" ", "T")}Z`);
+  }
+  return Date.parse(iso);
 }
 
 /** A progress fraction and its message as one cell of text. */

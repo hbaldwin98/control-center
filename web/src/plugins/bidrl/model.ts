@@ -1,4 +1,4 @@
-import type { Event } from "@cc/ui";
+import { parseInstant, type Event } from "@cc/ui";
 
 export type Auction = {
   id: string;
@@ -300,7 +300,7 @@ export type OverviewPage = {
 /** True when a close time falls inside the window ahead. No end time is never "soon". */
 export function endsWithin(endsAt: string, now: number, windowMs: number): boolean {
   if (!endsAt) return false;
-  const ms = Date.parse(endsAt);
+  const ms = parseInstant(endsAt);
   if (!Number.isFinite(ms)) return false;
   return ms > now && ms - now <= windowMs;
 }
@@ -332,7 +332,7 @@ export function pct(score: number | null | undefined): string {
 /** A lot whose close time has passed. No end time means still open, not ended. */
 export function hasEnded(endsAt: string, now: number): boolean {
   if (!endsAt) return false;
-  const ms = Date.parse(endsAt);
+  const ms = parseInstant(endsAt);
   if (!Number.isFinite(ms)) return false;
   return ms <= now;
 }

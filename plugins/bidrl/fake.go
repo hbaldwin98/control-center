@@ -116,7 +116,7 @@ func fakeItemJSON(id, auctionID, title, lotCode, bid, min, endUnix string, bids 
 			"id":"` + id + `","auction_id":"` + auctionID + `","title":"` + title + `","lot_number":"` + lotCode + `",
 			"description":"<p>` + title + `</p>","current_bid":"` + bid + `","minimum_bid":"` + min + `",
 			"highbidder_username":"` + bidder + `","bid_count":"` + strconv.Itoa(bids) + `","end_time":"` + endUnix + `",
-			"current_increment":"1.00","reserve_met":false,"bidding_extended":false,
+			"time_offset":-7200,"current_increment":"1.00","reserve_met":false,"bidding_extended":false,
 			"item_url":"https://www.bidrl.com/auction/` + auctionID + `/item/` + id + `/",
 			"images":[{"image_url":"https://www.bidrl.com/img/1.png","thumb_url":"https://www.bidrl.com/img/1.png"}]
 		},

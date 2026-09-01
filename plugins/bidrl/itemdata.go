@@ -86,9 +86,10 @@ func parseItemData(auctionID, itemID string, body []byte) (itemRecord, bool) {
 	rec.BidCents = firstMoney(item, "current_bid", "currentBid", "bid")
 	rec.MinBidCents = firstMoney(item, "minimum_bid", "min_bid", "next_bid")
 	rec.IncrementCents = firstMoney(item, "current_increment", "bid_increment", "increment")
-	rec.EndsAt = parseEndTime(firstRaw(item, "end_time", "ends_at", "endTime", "closes"))
+	offset := itemTimeOffset(item, auction)
+	rec.EndsAt = parseEndTime(firstRaw(item, "end_time", "ends_at", "endTime", "closes"), offset)
 	if rec.EndsAt == "" {
-		rec.EndsAt = parseEndTime(firstRaw(auction, "end_time", "last_item_closes", "ends"))
+		rec.EndsAt = parseEndTime(firstRaw(auction, "end_time", "last_item_closes", "ends"), offset)
 	}
 	if rec.Title == "" && len(rec.Images) == 0 && rec.EndsAt == "" && rec.BidCents == nil {
 		return itemRecord{}, false
@@ -237,8 +238,26 @@ func jsonBool(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &b) == nil && b
 }
 
-func parseEndTime(raw json.RawMessage) string {
-	s := jsonString(raw)
+// bidrlUnixOffset is BidRL's time_offset when a payload omits it (pusher
+// snapshots). Their countdown is end_time - (now + time_offset); live ItemData
+// reports -7200, and applying it matches end_time_display in Pacific time.
+const bidrlUnixOffset = -7200
+
+func itemTimeOffset(maps ...map[string]json.RawMessage) int {
+	for _, m := range maps {
+		if n, ok := jsonInt(m["time_offset"]); ok {
+			return n
+		}
+	}
+	return bidrlUnixOffset
+}
+
+func parseEndTime(raw json.RawMessage, offsetSec int) string {
+	return parseEndTimeString(jsonString(raw), offsetSec)
+}
+
+func parseEndTimeString(s string, offsetSec int) string {
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
@@ -246,14 +265,53 @@ func parseEndTime(raw json.RawMessage) string {
 		if n > 1_000_000_000_000 {
 			n = n / 1000
 		}
-		return time.Unix(n, 0).UTC().Format(time.RFC3339)
+		return time.Unix(n-int64(offsetSec), 0).UTC().Format(time.RFC3339)
 	}
-	for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t.UTC().Format(time.RFC3339)
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC().Format(time.RFC3339)
+	}
+	// BidRL landing pages use PHP gmdate plus date('O'): a UTC wall clock with a
+	// colon-less offset such as +0300. Honoring that offset shifts the instant
+	// by hours. RFC3339 (colon offset or Z) was already tried above.
+	if t, ok := parseUTCWallWithNumericOffset(s); ok {
+		return t.UTC().Format(time.RFC3339)
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
 		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
 			return t.UTC().Format(time.RFC3339)
 		}
 	}
 	return ""
+}
+
+func parseUTCWallWithNumericOffset(s string) (time.Time, bool) {
+	if len(s) < 24 {
+		return time.Time{}, false
+	}
+	sep := s[10]
+	if sep != 'T' && sep != ' ' {
+		return time.Time{}, false
+	}
+	base, extra := s[:19], s[19:]
+	if len(extra) < 5 || (extra[0] != '+' && extra[0] != '-') {
+		return time.Time{}, false
+	}
+	for i := 1; i <= 4; i++ {
+		if extra[i] < '0' || extra[i] > '9' {
+			return time.Time{}, false
+		}
+	}
+	if len(extra) > 5 && extra[5] == ':' {
+		return time.Time{}, false
+	}
+	t, err := time.ParseInLocation("2006-01-02T15:04:05", base[:10]+"T"+base[11:], time.UTC)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func itemDataURL() string {

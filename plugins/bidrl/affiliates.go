@@ -166,6 +166,9 @@ func parseLandingPage(slug string, body []byte) (landingPage, bool) {
 		if ends == "" {
 			ends = strings.TrimSpace(a.Ends)
 		}
+		if canon := parseEndTimeString(ends, bidrlUnixOffset); canon != "" {
+			ends = canon
+		}
 		out.Auctions = append(out.Auctions, landingAuction{
 			ID: id, URL: pageURL, Title: title, Affiliate: affID, Name: aff.Name,
 			City: strings.TrimSpace(a.City), ItemCount: atoiNumber(a.ItemCount), EndsAt: ends,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRemaining, formatRelative, formatUSD } from "./format";
+import { formatRemaining, formatRelative, formatUSD, parseInstant } from "./format";
 
 const NOW = 1_700_000_000_000;
 
@@ -30,6 +30,14 @@ describe("formatRelative", () => {
 
   it("does not run backwards on a clock that is slightly ahead", () => {
     expect(formatRelative(NOW + 5_000, NOW)).toBe("just now");
+  });
+});
+
+describe("parseInstant", () => {
+  it("treats a colon-less offset as a UTC wall clock", () => {
+    // BidRL landing pages label UTC instants with a PHP server offset like +0300.
+    expect(parseInstant("2026-09-02T03:04:12+0300")).toBe(Date.parse("2026-09-02T03:04:12Z"));
+    expect(parseInstant("2026-09-02T01:40:48Z")).toBe(Date.parse("2026-09-02T01:40:48Z"));
   });
 });
 

@@ -215,11 +215,9 @@ func parseEndsAt(s string) (time.Time, bool) {
 	if s == "" {
 		return time.Time{}, false
 	}
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return t, true
-	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, true
+	if canon := parseEndTimeString(s, bidrlUnixOffset); canon != "" {
+		t, err := time.Parse(time.RFC3339, canon)
+		return t, err == nil
 	}
 	return time.Time{}, false
 }

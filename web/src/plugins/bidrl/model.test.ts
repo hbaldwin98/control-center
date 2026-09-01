@@ -324,6 +324,11 @@ describe("hasEnded", () => {
     expect(hasEnded("", now)).toBe(false);
     expect(hasEnded("soon", now)).toBe(false);
   });
+
+  it("reads BidRL's colon-less offset as a UTC wall clock", () => {
+    expect(hasEnded("2026-01-01T00:00:00+0300", now)).toBe(true);
+    expect(hasEnded("2026-01-03T00:00:00+0300", now)).toBe(false);
+  });
 });
 
 function lotAt(id: string, over: Partial<Lot> = {}): Lot {

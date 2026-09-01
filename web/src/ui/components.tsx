@@ -7,7 +7,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
-import { formatDateTime, formatRelative, formatRemaining, formatTime, formatUSD } from "./format";
+import { formatDateTime, formatRelative, formatRemaining, formatTime, formatUSD, parseInstant } from "./format";
 import { useNow } from "./hooks";
 
 function cx(...parts: (string | false | null | undefined)[]): string {
@@ -151,7 +151,7 @@ export function RelativeTime({
 }) {
   const now = useNow();
   if (at === null) return <Dash />;
-  const ms = typeof at === "number" ? at : Date.parse(at);
+  const ms = typeof at === "number" ? at : parseInstant(at);
   if (!Number.isFinite(ms)) return <>{String(at)}</>;
   const iso = new Date(ms).toISOString();
   return (
@@ -166,7 +166,7 @@ export function RelativeTime({
 export function Countdown({ iso }: { iso: string }) {
   const now = useNow();
   if (!iso) return <Dash />;
-  const ms = Date.parse(iso);
+  const ms = parseInstant(iso);
   if (!Number.isFinite(ms)) return <>{iso}</>;
   const remaining = ms - now;
   const cls =
