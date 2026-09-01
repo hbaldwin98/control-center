@@ -41,10 +41,18 @@ type analysisResult struct {
 }
 
 func (p *Plugin) analyzeUnseen(jc hostjobs.Context, h host.Host, auctionID string) error {
-	lots, err := p.lotsNeedingAnalysis(jc, h, auctionID)
+	lots, err := p.lotsNeedingAnalysis(jc, h, `l.auction_id = ?`, auctionID)
 	if err != nil {
 		return err
 	}
+	return p.analyzeLots(jc, h, lots)
+}
+
+// analyzeLots runs the vision pass over an explicit set of lots. A scan hands it a
+// whole auction; a watchlist run hands it only the few lots that survived its funnel,
+// which is the difference between paying for a warehouse and paying for what you asked
+// for.
+func (p *Plugin) analyzeLots(jc hostjobs.Context, h host.Host, lots []lotRow) error {
 	if len(lots) == 0 {
 		_ = jc.Logf("no lots left to analyze")
 		return nil
@@ -100,11 +108,11 @@ type lotRow struct {
 	BidCents  *int64
 }
 
-func (p *Plugin) lotsNeedingAnalysis(jc hostjobs.Context, h host.Host, auctionID string) ([]lotRow, error) {
+func (p *Plugin) lotsNeedingAnalysis(jc hostjobs.Context, h host.Host, where string, args ...any) ([]lotRow, error) {
 	rows, err := h.Store().Query(jc, `SELECT l.id, l.auction_id, l.url, l.title, l.lot_code, l.current_bid_cents
 		FROM bidrl_lots l
-		WHERE l.auction_id = ? AND NOT EXISTS (SELECT 1 FROM bidrl_analyses a WHERE a.lot_id = l.id)
-		ORDER BY l.id`, auctionID)
+		WHERE (`+where+`) AND NOT EXISTS (SELECT 1 FROM bidrl_analyses a WHERE a.lot_id = l.id)
+		ORDER BY l.id`, args...)
 	if err != nil {
 		return nil, err
 	}

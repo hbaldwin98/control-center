@@ -244,13 +244,21 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 }
 
 func (p *Plugin) loadIntentCards(ctx context.Context, h host.Host) ([]intentCard, int, error) {
+	return p.loadCards(ctx, h, "1=1")
+}
+
+// loadCards reads the text a lot is matched on. The predicate is how a watchlist
+// applies its free rules — locations, categories, a price ceiling — before anything
+// costs a call.
+func (p *Plugin) loadCards(ctx context.Context, h host.Host, where string, args ...any) ([]intentCard, int, error) {
 	now := h.Clock().Now()
 	rows, err := h.Store().Query(ctx, `SELECT l.id, l.title, IFNULL(l.description,''), IFNULL(a.identification,''),
 		IFNULL(a.model_or_sku,''), IFNULL(a.category,''), IFNULL(a.search_terms,''), IFNULL(a.notes,''), IFNULL(l.ends_at,'')
 		FROM bidrl_lots l
+		LEFT JOIN bidrl_auctions au ON au.id = l.auction_id
 		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
-		WHERE l.bucket != 'rejected'
-		ORDER BY l.id`)
+		WHERE l.bucket != 'rejected' AND (`+where+`)
+		ORDER BY l.id`, args...)
 	if err != nil {
 		return nil, 0, err
 	}

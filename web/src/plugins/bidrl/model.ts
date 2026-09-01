@@ -69,6 +69,79 @@ export type FavoritesPage = {
   latestEventId: number;
 };
 
+export type Watchlist = {
+  id: string;
+  name: string;
+  query: string;
+  enabled: boolean;
+  affiliateIds: string[];
+  categories: string[];
+  maxBidCents: number | null;
+  minScore: number;
+  status: string;
+  lastError: string;
+  lastRunAt: string;
+  createdAt: string;
+  newFindings: number;
+};
+
+export type Finding = {
+  id: string;
+  watchlistId: string;
+  watchlist: string;
+  score: number;
+  reason: string;
+  state: string;
+  createdAt: string;
+  lot: Lot;
+};
+
+export type FindingsPage = {
+  findings: Finding[];
+  watchlists: Watchlist[];
+  state: string;
+  latestEventId: number;
+};
+
+export type WatchlistsPage = {
+  watchlists: Watchlist[];
+  latestEventId: number;
+};
+
+/**
+ * Findings grouped by the watchlist that found them. A queue you work through reads
+ * better in runs of one topic than interleaved: deciding on ten camping items in a row
+ * is one judgement, alternating between camping and scooters is ten.
+ */
+export function groupFindings(findings: Finding[]): { id: string; label: string; findings: Finding[] }[] {
+  const map = new Map<string, { id: string; label: string; findings: Finding[] }>();
+  const order: string[] = [];
+  for (const f of findings) {
+    let group = map.get(f.watchlistId);
+    if (!group) {
+      group = { id: f.watchlistId, label: f.watchlist || "Watchlist", findings: [] };
+      map.set(f.watchlistId, group);
+      order.push(f.watchlistId);
+    }
+    group.findings.push(f);
+  }
+  return order.map((id) => map.get(id)!);
+}
+
+/** What a watchlist narrows to, in a line, so a card says its rules without a form. */
+export function watchlistRules(
+  w: Watchlist,
+  locationLabels: Map<string, string>,
+): string {
+  const parts: string[] = [];
+  if (w.affiliateIds.length > 0) {
+    parts.push(w.affiliateIds.map((id) => locationLabels.get(id) ?? id).join(", "));
+  }
+  if (w.categories.length > 0) parts.push(w.categories.join(", "));
+  if (w.maxBidCents != null) parts.push(`under ${cents(w.maxBidCents)}`);
+  return parts.length > 0 ? parts.join(" · ") : "Anywhere, any category, any price";
+}
+
 export type FeedPage = {
   filter: string;
   q: string;

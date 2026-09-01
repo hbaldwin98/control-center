@@ -232,5 +232,41 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 				created_at  TEXT NOT NULL
 			) STRICT;
 		`,
+	}, {
+		Version: 9,
+		Name:    "watchlists",
+		Up: `
+			CREATE TABLE bidrl_watchlists (
+				id             TEXT PRIMARY KEY,
+				name           TEXT NOT NULL,
+				query          TEXT NOT NULL,
+				enabled        INTEGER NOT NULL DEFAULT 1,
+				affiliate_ids  TEXT NOT NULL DEFAULT '[]',
+				categories     TEXT NOT NULL DEFAULT '[]',
+				max_bid_cents  INTEGER,
+				min_score      REAL NOT NULL DEFAULT 0.55,
+				expansion      TEXT NOT NULL DEFAULT '[]',
+				expanded_at    TEXT NOT NULL DEFAULT '',
+				status         TEXT NOT NULL DEFAULT 'idle',
+				last_error     TEXT NOT NULL DEFAULT '',
+				last_run_at    TEXT NOT NULL DEFAULT '',
+				created_at     TEXT NOT NULL
+			) STRICT;
+
+			CREATE TABLE bidrl_findings (
+				id            TEXT PRIMARY KEY,
+				watchlist_id  TEXT NOT NULL,
+				lot_id        TEXT NOT NULL,
+				score         REAL NOT NULL,
+				reason        TEXT NOT NULL DEFAULT '',
+				state         TEXT NOT NULL DEFAULT 'new'
+					CHECK (state IN ('new','accepted','rejected')),
+				decided_at    TEXT NOT NULL DEFAULT '',
+				created_at    TEXT NOT NULL,
+				UNIQUE (watchlist_id, lot_id)
+			) STRICT;
+			CREATE INDEX bidrl_findings_state ON bidrl_findings(state, created_at);
+			CREATE INDEX bidrl_findings_lot ON bidrl_findings(lot_id);
+		`,
 	}})
 }

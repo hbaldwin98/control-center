@@ -16,12 +16,14 @@ import {
   pct,
   groupSimilarLots,
   affiliateParam,
+  groupFindings,
   locationLabel,
   locationLabelOrEmpty,
   parseAffiliateParam,
   sortAuctions,
   sortLotGroups,
   sortLots,
+  watchlistRules,
   type Lot,
 } from "./model";
 
@@ -406,5 +408,43 @@ describe("locations", () => {
       "c",
       "b",
     ]);
+  });
+});
+
+describe("watchlists", () => {
+  const base = {
+    id: "wl-1",
+    name: "Camping",
+    query: "camping gear",
+    enabled: true,
+    affiliateIds: [] as string[],
+    categories: [] as string[],
+    maxBidCents: null as number | null,
+    minScore: 0.55,
+    status: "ready",
+    lastError: "",
+    lastRunAt: "",
+    createdAt: "",
+    newFindings: 0,
+  };
+
+  it("says what a watchlist narrows to, in location names rather than ids", () => {
+    const labels = new Map([["19", "SITES Turlock"]]);
+    expect(watchlistRules(base, labels)).toBe("Anywhere, any category, any price");
+    expect(
+      watchlistRules({ ...base, affiliateIds: ["19", "7"], categories: ["outdoor"], maxBidCents: 8000 }, labels),
+    ).toBe("SITES Turlock, 7 · outdoor · under $80.00");
+  });
+
+  it("groups findings by watchlist, keeping the order they arrived in", () => {
+    const mk = (id: string, wl: string, name: string) =>
+      ({ id, watchlistId: wl, watchlist: name, score: 1, reason: "", state: "new", createdAt: "", lot: fakeLot({ id }) });
+    const groups = groupFindings([
+      mk("1", "wl-1", "Camping"),
+      mk("2", "wl-2", "Scooter"),
+      mk("3", "wl-1", "Camping"),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(["Camping", "Scooter"]);
+    expect(groups[0]?.findings.map((f) => f.id)).toEqual(["1", "3"]);
   });
 });

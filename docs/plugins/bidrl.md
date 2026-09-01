@@ -177,24 +177,26 @@ right.
 
 | Surface | Contract |
 |---|---|
-| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
+| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
 | API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
+| API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |
+| API | `GET /findings?state=&watchlist=`, `POST /findings/{id}/accept`, `POST /findings/{id}/reject` |
 | API | `GET /locations` — the SITES locations you have lots at, with lot counts |
 | API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
 | Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
-| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/findings`, `/bidrl/watchlists`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
 `https://www.bidrl.com/auction/42/bidgallery`, plus `POST /api/ItemData` and
 `GET /aucbeat/pusher/` fixtures. Before scanning, connect a provider and
-assign models to the plugin's four declared routes, `cheap-vision` (chat+vision),
-`grounded-price` (chat), `intent-expand` (chat), and `intent-match` (embed). The plugin
-screen lists each by purpose; Models will too. Do not invent other names — the plugin
-asks for these four. Assign `intent-expand` to a cheap chat model and `intent-match` to
+assign models to the plugin's five declared routes, `cheap-vision` (chat+vision),
+`grounded-price` (chat), `intent-expand` (chat), `intent-match` (embed), and
+`watch-judge` (chat). The plugin screen lists each by purpose; Models will too. Do not
+invent other names — the plugin asks for these five. Assign `intent-expand` to a cheap chat model and `intent-match` to
 an embedding model (for example `text-embedding-3-small`).
 
 ---
@@ -225,6 +227,44 @@ electronics, appliances, outdoor, automotive, sporting, household, collectibles,
 can be collected from the list instead of a pasted URL.
 
 ---
+
+## Watchlists and findings
+
+A watchlist is a saved intent plus the rules that keep its queue short: locations,
+categories, a price ceiling, and a score floor. Running one is still user-triggered
+(`POST /watchlists/{id}/run`) — there is no cron yet.
+
+A run is a **funnel, cheapest stage first**, so its cost tracks what you asked for rather
+than how much BidRL listed:
+
+| Stage | Cost | Drops |
+|---|---|---|
+| Rules | free, SQL | Lots outside the watchlist's locations, categories, or price ceiling — and any lot already decided for it |
+| Embedding rank | one embed per changed lot | Everything below the watchlist's `minScore`, then everything past the judge cap of 40 |
+| `watch-judge` | one cheap chat call per survivor | Listings that merely share a word with what you described |
+| Vision, then pricing | the existing scan path | — runs only on what came through all three |
+
+That ordering is the whole cost argument: a 400-lot warehouse auction costs one embed per
+lot and a handful of chat calls, not 400 vision calls.
+
+The judge is a **filter, not a scorer**, and it sees text only — never photographs. Asking
+a cheap chat model to rank things it cannot see produces confident noise, the same failure
+this plugin already refuses for pricing. Its sentence is stored and shown as the model's
+words, attributed. A judge that errors does not silently drop its candidate: the ranking
+already liked it, so it stays with the ranking's own reason.
+
+The expansion is cached on the watchlist and refreshed only when the query text changes or
+the cache passes 30 days, so a repeated run does not pay `intent-expand` again to be told
+"tent, lantern, cooler".
+
+`UNIQUE (watchlist_id, lot_id)` is what makes the queue usable: a lot decided once never
+returns to it, and the rules stage excludes decided lots before they cost anything.
+Accepting a finding also saves the lot — accepting something and then hunting for it in
+another tab is the obvious wrong flow. Accept and reject are direct writes, not jobs.
+
+An undecided finding pins its lot against "Remove ended", the same way a save does: a
+finding is the record of what a watchlist turned up, and deleting the lot before you have
+looked would empty the queue of exactly what it exists to show you.
 
 ## Intent
 

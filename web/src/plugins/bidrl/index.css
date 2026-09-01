@@ -631,3 +631,82 @@ tr.bidrl-similar-row td:first-child {
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* A finding is a decision, not a listing: photo, what it is, why it surfaced, and the
+   two buttons — laid out so the eye lands on the reason and then on Accept. */
+.bidrl-finding {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.bidrl-finding__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bidrl-finding__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.bidrl-finding__reason {
+  margin: 0;
+  color: var(--text);
+}
+
+.bidrl-finding__said {
+  color: var(--text-muted);
+}
+
+.bidrl-finding__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.bidrl-finding-group__name {
+  margin: var(--space-3) 0 0;
+  font-size: 15px;
+}
+
+.bidrl-watchlist {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.bidrl-watchlist__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  /* Stack rather than squeeze: the buttons must stay full-width targets. */
+  .bidrl-finding,
+  .bidrl-watchlist {
+    flex-wrap: wrap;
+  }
+
+  .bidrl-finding__actions {
+    width: 100%;
+  }
+
+  .bidrl-finding__actions button {
+    flex: 1;
+  }
+}

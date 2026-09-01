@@ -61,6 +61,7 @@ import {
   filterLabel,
   gapTone,
   groupByLocation,
+  groupFindings,
   groupSimilarLots,
   hasEnded,
   locationLabel,
@@ -71,6 +72,7 @@ import {
   sortAuctions,
   sortLotGroups,
   sortSitesAuctions,
+  watchlistRules,
   type Auction,
   type AuctionPage,
   type AuctionSortColumn,
@@ -79,6 +81,8 @@ import {
   type CleanupResult,
   type FavoritesPage,
   type FeedPage,
+  type Finding,
+  type FindingsPage,
   type IntentPage,
   type LocationGroup,
   type LocationsPage,
@@ -92,6 +96,7 @@ import {
   type SitesSortColumn,
   type SortDir,
   type SortState,
+  type WatchlistsPage,
 } from "./model";
 import "./index.css";
 
@@ -178,6 +183,26 @@ function useFavorites(
     const data = await api.get<FavoritesPage>(`/favorites${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [q, category, affiliate]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useFindings(state: string, watchlist: string): UseSnapshotResult<FindingsPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (state) params.set("state", state);
+    if (watchlist) params.set("watchlist", watchlist);
+    const qs = params.toString();
+    const data = await api.get<FindingsPage>(`/findings${qs ? `?${qs}` : ""}`, signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, [state, watchlist]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useWatchlists(): UseSnapshotResult<WatchlistsPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<WatchlistsPage>("/watchlists", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -466,6 +491,11 @@ const BIDRL_TABS = [
     to: "/bidrl/lots",
     label: "Lots",
     owns: (path: string) => path === "/bidrl/lots" || path.startsWith("/bidrl/lot/"),
+  },
+  {
+    to: "/bidrl/findings",
+    label: "Findings",
+    owns: (path: string) => path === "/bidrl/findings" || path === "/bidrl/watchlists",
   },
   { to: "/bidrl/saved", label: "Saved", owns: (path: string) => path === "/bidrl/saved" },
   { to: "/bidrl/intent", label: "Intent", owns: (path: string) => path === "/bidrl/intent" },
@@ -1366,6 +1396,397 @@ function Auctions() {
   );
 }
 
+const FINDING_STATES = [
+  { value: "new", label: "To review" },
+  { value: "accepted", label: "Accepted" },
+  { value: "rejected", label: "Rejected" },
+  { value: "all", label: "Everything" },
+] as const;
+
+/**
+ * One finding, as a decision rather than a listing. The judge's sentence is shown as
+ * the model's words, attributed — it is why this reached the queue, not a fact about
+ * the lot.
+ */
+function FindingRow({
+  finding,
+  onDecide,
+  busy,
+}: {
+  finding: Finding;
+  onDecide: (state: "accepted" | "rejected") => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="bidrl-finding">
+      <LotThumbLink lot={finding.lot} />
+      <div className="bidrl-finding__body">
+        <LotTitle lot={finding.lot} />
+        <div className="bidrl-finding__meta">
+          {cents(finding.lot.currentBidCents)}
+          {finding.lot.endsAt ? (
+            <>
+              {" · "}
+              <Countdown iso={finding.lot.endsAt} />
+            </>
+          ) : null}
+          <LotLocation lot={finding.lot} />
+          <LotMeta lot={finding.lot} />
+        </div>
+        {finding.reason ? (
+          <p className="bidrl-finding__reason">
+            <span className="bidrl-finding__said">Matched because</span> {finding.reason}
+          </p>
+        ) : null}
+      </div>
+      {finding.state === "new" ? (
+        <div className="bidrl-finding__actions">
+          <Button variant="primary" size="sm" disabled={busy} onClick={() => onDecide("accepted")}>
+            Accept
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => onDecide("rejected")}>
+            Reject
+          </Button>
+        </div>
+      ) : (
+        <div className="bidrl-finding__actions">
+          <Badge tone={finding.state === "accepted" ? "ok" : "neutral"}>{finding.state}</Badge>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The review queue. Grouped by watchlist, newest first, with Accept and Reject as
+ * direct writes — they are instant and local, so they do not queue a job.
+ *
+ * Accepting saves the lot as well as clearing it, because accepting something and then
+ * hunting for it in another tab is the obvious wrong flow. A rejection is permanent:
+ * the same lot never comes back to this queue for the same watchlist, and later runs
+ * skip it before it costs a call.
+ */
+function Findings() {
+  const [state, setState] = useQueryState("state", "new");
+  const [watchlist, setWatchlist] = useQueryState("watchlist");
+  const snap = useFindings(state, watchlist);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const disabled = snap.error instanceof PluginDisabledError;
+
+  const decide = async (id: string, next: "accepted" | "rejected") => {
+    setBusy(id);
+    setError(null);
+    try {
+      await api.post(`/findings/${encodeURIComponent(id)}/${next === "accepted" ? "accept" : "reject"}`);
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not record that.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const groups = snap.status === "ready" ? groupFindings(snap.data.findings) : [];
+  const watchlists = snap.status === "ready" ? snap.data.watchlists : [];
+
+  return (
+    <Page>
+      <PageHeader
+        title="Findings"
+        lede="What your watchlists turned up, waiting on you. Accepting saves the lot; rejecting is permanent, and the same lot never costs another call for that watchlist."
+      />
+      <Stack>
+        <BidrlTabs />
+        <Notices message={null} error={error} disabled={disabled} />
+        <Card
+          title="Review queue"
+          actions={<Link to="/bidrl/watchlists">Watchlists</Link>}
+        >
+          <Toolbar>
+            <Field label="Show">
+              <Select value={state} onChange={(e) => setState(e.target.value)} aria-label="State">
+                {FINDING_STATES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Watchlist">
+              <Select
+                value={watchlist}
+                onChange={(e) => setWatchlist(e.target.value)}
+                aria-label="Watchlist"
+              >
+                <option value="">All watchlists</option>
+                {watchlists.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </Select>
+            </Field>
+          </Toolbar>
+          {snap.status === "loading" ? <Loading label="Loading findings…" /> : null}
+          {snap.status === "error" && !disabled ? (
+            <Callout tone="danger">{snap.error.message}</Callout>
+          ) : null}
+          {snap.status === "ready" && snap.data.findings.length === 0 ? (
+            <EmptyState>
+              {watchlists.length === 0
+                ? "No watchlists yet. Describe what you are looking for and run it — nothing happens on its own."
+                : state === "new"
+                  ? "Nothing waiting. Run a watchlist to look again."
+                  : "No findings in that state."}
+            </EmptyState>
+          ) : null}
+          {groups.map((group) => (
+            <div key={group.id} className="bidrl-finding-group">
+              <h3 className="bidrl-finding-group__name">
+                {group.label} <Hint>{group.findings.length}</Hint>
+              </h3>
+              {group.findings.map((f) => (
+                <FindingRow
+                  key={f.id}
+                  finding={f}
+                  busy={busy === f.id}
+                  onDecide={(next) => void decide(f.id, next)}
+                />
+              ))}
+            </div>
+          ))}
+        </Card>
+      </Stack>
+    </Page>
+  );
+}
+
+/**
+ * Watchlists: a description of what you want, plus the rules that keep the queue short.
+ * Running one is a job — it embeds, judges, and may read photographs — so the button
+ * says what it queued rather than pretending the work is done.
+ */
+function Watchlists() {
+  const snap = useWatchlists();
+  const locations = useLocations();
+  const [name, setName] = useState("");
+  const [query, setQuery] = useState("");
+  const [maxBid, setMaxBid] = useState("");
+  const [affiliates, setAffiliates] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const disabled = snap.error instanceof PluginDisabledError;
+
+  const labels = useMemo(() => {
+    const map = new Map<string, string>();
+    if (locations.status === "ready") {
+      for (const loc of locations.data.locations) map.set(loc.id, locationLabel(loc));
+    }
+    return map;
+  }, [locations]);
+
+  const toggle = (list: string[], set: (next: string[]) => void, value: string) => {
+    set(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+  };
+
+  const create = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const dollars = Number.parseFloat(maxBid);
+      await api.post("/watchlists", {
+        name: name.trim(),
+        query: q,
+        affiliateIds: affiliates,
+        categories,
+        maxBidCents: Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : null,
+      });
+      setName("");
+      setQuery("");
+      setMaxBid("");
+      setAffiliates([]);
+      setCategories([]);
+      setNotice("Watchlist saved. Run it to look through what you have collected.");
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save that watchlist.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (fn: () => Promise<unknown>, message: string) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+      setNotice(message);
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Page>
+      <PageHeader
+        title="Watchlists"
+        lede="Describe what you are after and how far you would drive for it. Running one costs a little: it ranks your collected lots locally, asks a cheap model about the few that survive, and only then reads photographs."
+      />
+      <Stack>
+        <BidrlTabs />
+        <Notices message={notice} error={error} disabled={disabled} />
+        <Card title="New watchlist">
+          <Stack>
+            <Toolbar>
+              <Field label="Name">
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Camping"
+                  aria-label="Watchlist name"
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label="Looking for">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void create();
+                  }}
+                  placeholder="camping gear — tent, stove, sleeping bag"
+                  aria-label="Watchlist query"
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label="Max bid ($)">
+                <Input
+                  value={maxBid}
+                  onChange={(e) => setMaxBid(e.target.value)}
+                  placeholder="80"
+                  inputMode="decimal"
+                  aria-label="Max bid"
+                  disabled={disabled}
+                />
+              </Field>
+            </Toolbar>
+            {locations.status === "ready" && locations.data.locations.length > 0 ? (
+              <Field label="Locations">
+                <div className="bidrl-loc-filter">
+                  {locations.data.locations.map((loc) => (
+                    <Button
+                      key={loc.id}
+                      size="sm"
+                      pressed={affiliates.includes(loc.id)}
+                      disabled={disabled}
+                      onClick={() => toggle(affiliates, setAffiliates, loc.id)}
+                    >
+                      {locationLabel(loc)}
+                    </Button>
+                  ))}
+                </div>
+              </Field>
+            ) : null}
+            <Field label="Categories">
+              <div className="bidrl-loc-filter">
+                {LOT_CATEGORIES.map((c) => (
+                  <Button
+                    key={c}
+                    size="sm"
+                    pressed={categories.includes(c)}
+                    disabled={disabled}
+                    onClick={() => toggle(categories, setCategories, c)}
+                  >
+                    {c}
+                  </Button>
+                ))}
+              </div>
+            </Field>
+            <Hint>
+              Leaving locations or categories unchosen means every one of them. A category
+              only narrows lots a scan has already looked at.
+            </Hint>
+            <div className="bidrl-actions">
+              <Button variant="primary" disabled={disabled || busy || !query.trim()} onClick={() => void create()}>
+                Save watchlist
+              </Button>
+            </div>
+          </Stack>
+        </Card>
+        <Card title="Your watchlists">
+          {snap.status === "loading" ? <Loading label="Loading watchlists…" /> : null}
+          {snap.status === "ready" && snap.data.watchlists.length === 0 ? (
+            <EmptyState>Nothing watched yet.</EmptyState>
+          ) : null}
+          {snap.status === "ready"
+            ? snap.data.watchlists.map((w) => (
+                <div key={w.id} className="bidrl-watchlist">
+                  <div className="bidrl-watchlist__body">
+                    <strong>{w.name}</strong>
+                    {w.enabled ? null : <Badge>paused</Badge>}
+                    {w.newFindings > 0 ? (
+                      <Link to={`/bidrl/findings?watchlist=${encodeURIComponent(w.id)}`}>
+                        <Badge tone="ok">{w.newFindings} to review</Badge>
+                      </Link>
+                    ) : null}
+                    <Hint>{w.query}</Hint>
+                    <Hint>{watchlistRules(w, labels)}</Hint>
+                    {w.lastError ? <Callout tone="danger">{w.lastError}</Callout> : null}
+                  </div>
+                  <div className="bidrl-finding__actions">
+                    <Button
+                      size="sm"
+                      disabled={disabled || busy}
+                      onClick={() =>
+                        void act(
+                          () => api.post(`/watchlists/${encodeURIComponent(w.id)}/run`),
+                          `Queued a run of “${w.name}”.`,
+                        )
+                      }
+                    >
+                      Run now
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={disabled || busy}
+                      onClick={() =>
+                        void act(
+                          () => api.patch(`/watchlists/${encodeURIComponent(w.id)}`, { enabled: !w.enabled }),
+                          w.enabled ? `Paused “${w.name}”.` : `Resumed “${w.name}”.`,
+                        )
+                      }
+                    >
+                      {w.enabled ? "Pause" : "Resume"}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={disabled || busy}
+                      onClick={() =>
+                        void act(
+                          () => api.del(`/watchlists/${encodeURIComponent(w.id)}`),
+                          `Deleted “${w.name}” and its findings.`,
+                        )
+                      }
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))
+            : null}
+        </Card>
+      </Stack>
+    </Page>
+  );
+}
+
 /**
  * Saved lots. The same card/table browser and the same location and category filters as
  * the catalog, because it is the same kind of list — what differs is that you chose
@@ -2075,6 +2496,8 @@ const bidrl: PluginModule = {
     { path: "/bidrl", element: <Overview /> },
     { path: "/bidrl/auctions", element: <Auctions /> },
     { path: "/bidrl/lots", element: <LotsCatalog /> },
+    { path: "/bidrl/findings", element: <Findings /> },
+    { path: "/bidrl/watchlists", element: <Watchlists /> },
     { path: "/bidrl/saved", element: <SavedLots /> },
     { path: "/bidrl/intent", element: <IntentSearch /> },
     { path: "/bidrl/auction/:id", element: <AuctionView /> },

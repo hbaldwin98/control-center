@@ -137,6 +137,8 @@ export type PluginApi = {
   ): Promise<BufferedSnapshot<T>>;
   post<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
+  /** Partial update. Sends only the fields the caller names. */
+  patch<T>(path: string, body?: unknown): Promise<T>;
   del<T>(path: string): Promise<T>;
 };
 
@@ -181,6 +183,10 @@ export function pluginApi(pluginId: string): PluginApi {
       request<T>(at(path), body === undefined
         ? { method: "PUT", pluginId }
         : { method: "PUT", body, pluginId }),
+    patch: <T,>(path: string, body?: unknown) =>
+      request<T>(at(path), body === undefined
+        ? { method: "PATCH", pluginId }
+        : { method: "PATCH", body, pluginId }),
     del: <T,>(path: string) => request<T>(at(path), { method: "DELETE", pluginId }),
   };
 }

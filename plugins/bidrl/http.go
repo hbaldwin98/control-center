@@ -303,17 +303,21 @@ type auctionCleanup struct {
 // is kept as its shell — the lot keeps its photos, comparable, and location — while its
 // unsaved ended lots still go. Explicitly deleting the auction still takes everything,
 // saved lots included; that was asked for.
+//
+// An undecided finding pins its lot the same way. A finding is the record of what a
+// watchlist turned up, and deleting the lot out from under it before you have looked
+// would empty the queue of exactly the things it was built to show you.
 func cleanupPlan(a cleanupAuction, now time.Time) auctionCleanup {
 	var plan auctionCleanup
 	lotEnds := make([]string, 0, len(a.Lots))
-	saved := 0
+	pinned := 0
 	for _, lot := range a.Lots {
 		lotEnds = append(lotEnds, lot.EndsAt)
-		if lot.Favorite {
-			saved++
+		if lot.Favorite || lot.Pending {
+			pinned++
 		}
 	}
-	if auctionEnded(a.EndsAt, lotEnds, now) && saved == 0 {
+	if auctionEnded(a.EndsAt, lotEnds, now) && pinned == 0 {
 		plan.DropAuction = true
 		return plan
 	}
@@ -321,7 +325,7 @@ func cleanupPlan(a cleanupAuction, now time.Time) auctionCleanup {
 		if !hasEnded(lot.EndsAt, now) {
 			continue
 		}
-		if lot.Favorite {
+		if lot.Favorite || lot.Pending {
 			plan.Kept++
 			continue
 		}
@@ -338,6 +342,7 @@ type cleanupAuction struct {
 type cleanupLot struct {
 	ID, EndsAt string
 	Favorite   bool
+	Pending    bool
 }
 
 func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanupAuction, error) {
@@ -359,7 +364,8 @@ func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanu
 		return nil, err
 	}
 	for i := range auctions {
-		lotRows, err := h.Store().Query(ctx, `SELECT l.id, l.ends_at, f.lot_id IS NOT NULL
+		lotRows, err := h.Store().Query(ctx, `SELECT l.id, l.ends_at, f.lot_id IS NOT NULL,
+			EXISTS (SELECT 1 FROM bidrl_findings d WHERE d.lot_id = l.id AND d.state = 'new')
 			FROM bidrl_lots l
 			LEFT JOIN bidrl_favorites f ON f.lot_id = l.id
 			WHERE l.auction_id = ?`, auctions[i].ID)
@@ -368,12 +374,13 @@ func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanu
 		}
 		for lotRows.Next() {
 			var lot cleanupLot
-			var fav int
-			if err := lotRows.Scan(&lot.ID, &lot.EndsAt, &fav); err != nil {
+			var fav, pending int
+			if err := lotRows.Scan(&lot.ID, &lot.EndsAt, &fav, &pending); err != nil {
 				_ = lotRows.Close()
 				return nil, err
 			}
 			lot.Favorite = fav != 0
+			lot.Pending = pending != 0
 			auctions[i].Lots = append(auctions[i].Lots, lot)
 		}
 		_ = lotRows.Close()
@@ -412,6 +419,9 @@ func (p *Plugin) deleteAuction(ctx context.Context, h host.Host, id string) erro
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_favorites WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_findings WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE auction_id = ?`, id); err != nil {
@@ -457,6 +467,9 @@ func (p *Plugin) deleteLot(ctx context.Context, h host.Host, auctionID, lotID st
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_favorites WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_findings WHERE lot_id = ?`, lotID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE id = ?`, lotID); err != nil {

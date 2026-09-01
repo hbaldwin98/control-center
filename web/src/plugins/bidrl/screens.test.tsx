@@ -11,7 +11,37 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bidrl from "./index";
-import type { Lot } from "./model";
+import type { Finding, Lot } from "./model";
+
+const WATCHLIST = {
+  id: "wl-1",
+  name: "Camping",
+  query: "camping gear",
+  enabled: true,
+  affiliateIds: ["19"],
+  categories: [] as string[],
+  maxBidCents: 8000,
+  minScore: 0.55,
+  status: "ready",
+  lastError: "",
+  lastRunAt: "2026-08-31T00:00:00Z",
+  createdAt: "2026-08-30T00:00:00Z",
+  newFindings: 1,
+};
+
+function finding(over: Partial<Finding> = {}): Finding {
+  return {
+    id: "wl-1-1001",
+    watchlistId: "wl-1",
+    watchlist: "Camping",
+    score: 1.2,
+    reason: "a two-burner camp stove, which is camping gear",
+    state: "new",
+    createdAt: "2026-09-01T00:00:00Z",
+    lot: lot(),
+    ...over,
+  };
+}
 
 /** Every field the Go handler emits, so a screen never sees a shape the server cannot send. */
 function lot(over: Partial<Lot> = {}): Lot {
@@ -74,6 +104,15 @@ const routes = new Map<string, unknown>([
   ["/api/plugins/bidrl/intent", { search: null, lots: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/sites/auctions", { auctions: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/lots/1001/favorite", { lotId: "1001", favorite: true, note: "" }],
+  ["/api/plugins/bidrl/findings", {
+    findings: [finding()],
+    watchlists: [WATCHLIST],
+    state: "new",
+    latestEventId: 1,
+  }],
+  ["/api/plugins/bidrl/watchlists", { watchlists: [WATCHLIST], latestEventId: 1 }],
+  ["/api/plugins/bidrl/findings/wl-1-1001/accept", { id: "wl-1-1001", state: "accepted", lotId: "1001" }],
+  ["/api/plugins/bidrl/findings/wl-1-1001/reject", { id: "wl-1-1001", state: "rejected", lotId: "1001" }],
   ["/api/plugins/bidrl/favorites", {
     lots: [lot({ id: "2002", title: "Coleman two-burner stove", favorite: true, savedAt: "2026-08-20T00:00:00Z", favoriteNote: "check the regulator" })],
     latestEventId: 1,
@@ -139,6 +178,8 @@ describe("bidrl screens", () => {
     ["/bidrl", "BIDRL"],
     ["/bidrl/auctions", "Auctions"],
     ["/bidrl/lots", "Lots"],
+    ["/bidrl/findings", "Findings"],
+    ["/bidrl/watchlists", "Watchlists"],
     ["/bidrl/saved", "Saved"],
     ["/bidrl/intent", "Intent"],
     ["/bidrl/auction/42", "Test Warehouse"],
@@ -151,7 +192,7 @@ describe("bidrl screens", () => {
   it("shows every section tab on each screen, with the current one marked", async () => {
     await renderAt("/bidrl/lots");
     const tabs = [...container.querySelectorAll(".cc-tabs a")].map((a) => a.textContent);
-    expect(tabs).toEqual(["Overview", "Auctions", "Lots", "Saved", "Intent"]);
+    expect(tabs).toEqual(["Overview", "Auctions", "Lots", "Findings", "Saved", "Intent"]);
     expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
   });
 
@@ -217,6 +258,40 @@ describe("bidrl screens", () => {
       calls.some((c) => c.url.endsWith("/lots/1001/favorite") && c.method === "POST"),
     ).toBe(true);
     expect(container.querySelector(".bidrl-star")?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("shows why a finding surfaced, as the reason rather than a bare score", async () => {
+    await renderAt("/bidrl/findings");
+    expect(container.textContent).toContain("Camping");
+    expect(container.textContent).toContain("a two-burner camp stove, which is camping gear");
+  });
+
+  it("records a decision by POSTing rather than queueing a job", async () => {
+    await renderAt("/bidrl/findings");
+    const accept = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "Accept",
+    );
+    expect(accept).toBeDefined();
+    await act(async () => {
+      accept?.click();
+    });
+    const calls = fetchMock.mock.calls.map(
+      (c) => ({ url: String(c[0]), method: (c[1] as RequestInit | undefined)?.method }),
+    );
+    expect(
+      calls.some((c) => c.url.endsWith("/findings/wl-1-1001/accept") && c.method === "POST"),
+    ).toBe(true);
+  });
+
+  it("keeps the Findings tab current while you are editing watchlists", async () => {
+    await renderAt("/bidrl/watchlists");
+    expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Findings");
+  });
+
+  it("says what a watchlist narrows to without opening a form", async () => {
+    await renderAt("/bidrl/watchlists");
+    expect(container.textContent).toContain("camping gear");
+    expect(container.textContent).toContain("under $80.00");
   });
 
   it("offers the overview's counts as links into the catalog that proves them", async () => {

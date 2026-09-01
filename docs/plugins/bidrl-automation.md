@@ -1,6 +1,6 @@
 # Plugin: `bidrl` — automation, findings, favorites, locations
 
-Status: steps 1–2 (locations, favorites) implemented; steps 3–4 proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
+Status: steps 1–3 implemented; step 4 (cron) proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
 
 Four changes to the BIDRL plugin, in dependency order:
 
@@ -278,8 +278,9 @@ Each step is independently useful and independently shippable.
    opening it" ask on its own.
 2. **Favorites** (§4, partial) — *done.* Table, star, Saved tab, per-lot note. No AI, no
    cron. Cleanup keeps saved lots instead of snapshotting them (see §4).
-3. **Watchlists + manual run** (§2) — the funnel, `watch-judge` route, findings table,
-   Findings tab, `POST /watchlists/{id}/run`. Everything works, still user-triggered.
+3. **Watchlists + manual run** (§2) — *done.* The funnel, `watch-judge` route, findings
+   table, Findings and Watchlists tabs, `POST /watchlists/{id}/run`. Everything works,
+   still user-triggered: nothing runs until you press Run now.
 4. **Cron** (§3) — `sweep` and `match` schedules, `Automated: true`, budget, throttle latch,
    automation strip. Only now does the plugin touch BIDRL unattended, and by then every part
    of what it will do has been watched doing it by hand.
