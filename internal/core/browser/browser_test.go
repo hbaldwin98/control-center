@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,6 +122,41 @@ func TestGotoAllowlistAndFetch(t *testing.T) {
 	html, err := page.Content(h.ctxHello())
 	if err != nil || !strings.Contains(html, "hello") {
 		t.Fatalf("content %q %v", html, err)
+	}
+}
+
+func TestPostFormAllowlisted(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/ItemData", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "form", http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("item_id") != "1" || r.Form.Get("auction_id") != "9" {
+			http.Error(w, "fields", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"item":{"id":"1","title":"ok"}}`)
+	})
+	h := newHarness(t, map[string]http.Handler{"hello.test": mux})
+	ctx := h.ctxHello()
+	sess, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close(ctx)
+	page, err := sess.NewPage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Close(ctx)
+	if _, err := page.Post(ctx, "https://evil.test/api/ItemData", url.Values{"item_id": {"1"}}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("off allowlist: %v", err)
+	}
+	res, err := page.Post(ctx, "https://hello.test/api/ItemData", url.Values{"item_id": {"1"}, "auction_id": {"9"}})
+	if err != nil || res.Status != 200 || !strings.Contains(string(res.Body), `"ok"`) {
+		t.Fatalf("post: %+v %v", res, err)
 	}
 }
 

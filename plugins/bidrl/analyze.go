@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,22 +18,26 @@ import (
 var analysisSchema = json.RawMessage(`{
 	"type":"object",
 	"additionalProperties":false,
-	"required":["identification","basis","model_or_sku","title_agreement","notes"],
+	"required":["identification","basis","model_or_sku","category","search_terms","title_agreement","notes"],
 	"properties":{
 		"identification":{"type":"string","description":"What the photographs actually show"},
 		"basis":{"type":"string","enum":["exact_text","barcode","distinctive_visual_match","product_family","category_only"],"description":"exact_text: a model or SKU is legible in a photo. barcode: a barcode, UPC, or SKU. distinctive_visual_match: a named product with no readable model. product_family: a brand or line without a specific model. category_only: a generic item with no brand or model."},
 		"model_or_sku":{"type":"string","description":"The readable model, barcode, or empty"},
+		"category":{"type":"string","enum":["tools","furniture","electronics","appliances","outdoor","automotive","sporting","household","collectibles","other"],"description":"What kind of thing the photographs show, independent of identification quality"},
+		"search_terms":{"type":"array","items":{"type":"string"},"description":"Brand, model nicknames, and other words someone would type to find this lot"},
 		"title_agreement":{"type":"number","description":"0-1 how well the listing title matches the photographs"},
 		"notes":{"type":"string","description":"Short evidence taken from the photographs"}
 	}
 }`)
 
 type analysisResult struct {
-	Identification string  `json:"identification"`
-	Basis          string  `json:"basis"`
-	ModelOrSKU     string  `json:"model_or_sku"`
-	TitleAgreement float64 `json:"title_agreement"`
-	Notes          string  `json:"notes"`
+	Identification string   `json:"identification"`
+	Basis          string   `json:"basis"`
+	ModelOrSKU     string   `json:"model_or_sku"`
+	Category       string   `json:"category"`
+	SearchTerms    []string `json:"search_terms"`
+	TitleAgreement float64  `json:"title_agreement"`
+	Notes          string   `json:"notes"`
 }
 
 func (p *Plugin) analyzeUnseen(jc hostjobs.Context, h host.Host, auctionID string) error {
@@ -129,6 +134,8 @@ Reply with JSON:
 - identification: what the photos show
 - basis: exact_text (model/SKU legible in a photo), barcode, distinctive_visual_match (named product, no readable model), product_family (brand or line only), category_only (generic item)
 - model_or_sku: the readable model or barcode, or empty
+- category: tools, furniture, electronics, appliances, outdoor, automotive, sporting, household, collectibles, or other
+- search_terms: brand names, model nicknames, and other words someone would type to find this
 - title_agreement: 0-1 how well the title matches the photos
 - notes: short evidence from the photos
 
@@ -153,6 +160,8 @@ Photos: %d`, lot.Title, lot.LotCode, lot.URL, len(images))
 		_ = jc.Logf("lot %s: cheap-vision returned no JSON (%d chars); defaulting to category_only", lot.ID, len(resp.Text))
 	}
 	parsed.Basis = normalizeBasis(parsed.Basis)
+	parsed.Category = normalizeCategory(parsed.Category)
+	parsed.SearchTerms = cleanSearchTerms(parsed.SearchTerms)
 	if parsed.TitleAgreement < 0 {
 		parsed.TitleAgreement = 0
 	}
@@ -161,20 +170,21 @@ Photos: %d`, lot.Title, lot.LotCode, lot.URL, len(images))
 	}
 	bucket := bucketFor(parsed.Basis)
 	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
+	terms, _ := json.Marshal(parsed.SearchTerms)
 	return h.Store().Tx(jc, func(tx hoststorage.Tx) error {
-		if _, err := tx.Exec(jc, `UPDATE bidrl_lots SET bucket = ? WHERE id = ?`, bucket, lot.ID); err != nil {
+		if _, err := tx.Exec(jc, `UPDATE bidrl_lots SET bucket = ?, category = ? WHERE id = ?`, bucket, parsed.Category, lot.ID); err != nil {
 			return err
 		}
 		if err := h.Events().PublishTx(jc, tx, "lot.analyzed", lot.ID, map[string]any{
 			"lotId": lot.ID, "auctionId": lot.AuctionID, "title": lot.Title,
-			"identification": parsed.Identification, "basis": parsed.Basis, "bucket": bucket,
+			"identification": parsed.Identification, "basis": parsed.Basis, "bucket": bucket, "category": parsed.Category,
 		}); err != nil {
 			return err
 		}
-		_, err := tx.Exec(jc, `INSERT INTO bidrl_analyses(lot_id, identification, basis, model_or_sku, title_agreement, notes, input_tokens, output_tokens, cost_micro_usd, created_at, event_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		_, err := tx.Exec(jc, `INSERT INTO bidrl_analyses(lot_id, identification, basis, model_or_sku, title_agreement, notes, input_tokens, output_tokens, cost_micro_usd, created_at, event_id, category, search_terms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 			lot.ID, parsed.Identification, parsed.Basis, parsed.ModelOrSKU, parsed.TitleAgreement, parsed.Notes,
-			resp.Usage.InputTokens, resp.Usage.OutputTokens, int64(resp.Usage.CostMicroUSD), now)
+			resp.Usage.InputTokens, resp.Usage.OutputTokens, int64(resp.Usage.CostMicroUSD), now, parsed.Category, string(terms))
 		return err
 	})
 }
@@ -306,6 +316,23 @@ func normalizeBasis(s string) string {
 	default:
 		return "category_only"
 	}
+}
+
+func normalizeCategory(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "tools", "furniture", "electronics", "appliances", "outdoor", "automotive", "sporting", "household", "collectibles":
+		return strings.ToLower(strings.TrimSpace(s))
+	default:
+		return "other"
+	}
+}
+
+func cleanSearchTerms(in []string) []string {
+	out := uniqueFold(in, 12)
+	if out == nil {
+		return []string{}
+	}
+	return out
 }
 
 func bucketFor(basis string) string {

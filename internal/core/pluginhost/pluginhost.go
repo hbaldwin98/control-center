@@ -21,6 +21,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
 
@@ -58,6 +59,7 @@ type Options struct {
 	Jobs    *jobs.Queue
 	AI      *ai.Service
 	Browser *browser.Service
+	Search  *search.Service
 	Creds   credentials.Runtime
 	Refs    credentials.ReferenceStore
 	Log     *slog.Logger

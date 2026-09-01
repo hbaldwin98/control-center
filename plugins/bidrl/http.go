@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/hbaldwin98/control-center/host"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
@@ -20,6 +22,7 @@ type auctionView struct {
 	LotCount    int    `json:"lotCount"`
 	LastError   string `json:"lastError"`
 	CollectedAt string `json:"collectedAt"`
+	EndsAt      string `json:"endsAt"`
 }
 
 type lotView struct {
@@ -28,7 +31,16 @@ type lotView struct {
 	URL             string   `json:"url"`
 	LotCode         string   `json:"lotCode"`
 	Title           string   `json:"title"`
+	Description     string   `json:"description"`
 	CurrentBidCents *int64   `json:"currentBidCents"`
+	MinBidCents     *int64   `json:"minBidCents"`
+	IncrementCents  *int64   `json:"bidIncrementCents"`
+	BidCount        int      `json:"bidCount"`
+	HighBidder      string   `json:"highBidder"`
+	EndsAt          string   `json:"endsAt"`
+	BiddingExtended bool     `json:"biddingExtended"`
+	ReserveMet      bool     `json:"reserveMet"`
+	Category        string   `json:"category"`
 	Bucket          string   `json:"bucket"`
 	Identification  string   `json:"identification"`
 	Basis           string   `json:"basis"`
@@ -40,6 +52,8 @@ type lotView struct {
 	SourceURL       string   `json:"sourceUrl"`
 	CitedText       string   `json:"citedText"`
 	SourceTitle     string   `json:"sourceTitle"`
+	SourceClass     string   `json:"sourceClass"`
+	SourceLabel     string   `json:"sourceLabel"`
 	RetrievedAt     string   `json:"retrievedAt"`
 	DealScore       *float64 `json:"dealScore"`
 	ThumbURL        string   `json:"thumbUrl"`
@@ -75,7 +89,7 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
-	rows, err := h.Store().Query(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at FROM bidrl_auctions ORDER BY created_at DESC`)
+	rows, err := h.Store().Query(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at FROM bidrl_auctions ORDER BY created_at DESC`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
@@ -84,7 +98,7 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 	out := []auctionView{}
 	for rows.Next() {
 		var a auctionView
-		if err := rows.Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
@@ -101,8 +115,8 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	var a auctionView
-	if err := h.Store().QueryRow(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at FROM bidrl_auctions WHERE id = ?`, id).
-		Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt); err != nil {
+	if err := h.Store().QueryRow(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at FROM bidrl_auctions WHERE id = ?`, id).
+		Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt); err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "auction not found")
 		return
 	}
@@ -186,6 +200,65 @@ func (p *Plugin) handleReprice(w http.ResponseWriter, r *http.Request) {
 	p.enqueueNamed(w, r, "reprice", repriceArgs{LotID: r.PathValue("id")}, "reprice-"+r.PathValue("id"))
 }
 
+func (p *Plugin) handleEnrich(w http.ResponseWriter, r *http.Request) {
+	p.enqueueNamed(w, r, "enrich", enrichArgs{LotID: r.PathValue("id")}, "enrich-"+r.PathValue("id"))
+}
+
+func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	bucket := r.URL.Query().Get("bucket")
+	category := r.URL.Query().Get("category")
+	ending := r.URL.Query().Get("ending")
+	where := "1=1"
+	var args []any
+	if bucket != "" && bucket != "all" {
+		where += ` AND l.bucket = ?`
+		args = append(args, bucket)
+	}
+	if category != "" && category != "all" {
+		where += ` AND l.category = ?`
+		args = append(args, category)
+	}
+	if ending == "soon" {
+		where += ` AND l.ends_at != ''`
+	}
+	lots, err := p.queryLots(h, r, where, args...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	if q != "" {
+		filtered := lots[:0]
+		for _, lot := range lots {
+			score, _ := matchScore(q, lot.Title, lot.Identification, lot.ModelOrSKU, lot.Category, lot.Description)
+			if score > 0 {
+				filtered = append(filtered, lot)
+			}
+		}
+		lots = filtered
+	}
+	if ending == "soon" {
+		sort.SliceStable(lots, func(i, j int) bool {
+			if lots[i].EndsAt == lots[j].EndsAt {
+				return lots[i].Title < lots[j].Title
+			}
+			if lots[i].EndsAt == "" {
+				return false
+			}
+			if lots[j].EndsAt == "" {
+				return true
+			}
+			return lots[i].EndsAt < lots[j].EndsAt
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+}
+
 func (p *Plugin) enqueueNamed(w http.ResponseWriter, r *http.Request, name string, args any, key string) {
 	h, ok := p.host()
 	if !ok {
@@ -227,7 +300,7 @@ func (p *Plugin) handleGetLot(w http.ResponseWriter, r *http.Request) {
 		}
 		lot.PhotoURLs = append(lot.PhotoURLs, h.Blobs().URL(key))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": lot.ID, "auctionId": lot.AuctionID, "url": lot.URL, "lotCode": lot.LotCode, "title": lot.Title, "currentBidCents": lot.CurrentBidCents, "bucket": lot.Bucket, "identification": lot.Identification, "basis": lot.Basis, "modelOrSku": lot.ModelOrSKU, "titleAgreement": lot.TitleAgreement, "mislabelScore": lot.MislabelScore, "priceCents": lot.PriceCents, "priceKind": lot.PriceKind, "sourceUrl": lot.SourceURL, "citedText": lot.CitedText, "sourceTitle": lot.SourceTitle, "retrievedAt": lot.RetrievedAt, "dealScore": lot.DealScore, "thumbUrl": lot.ThumbURL, "photoUrls": lot.PhotoURLs, "latestEventId": latestEventID(r.Context(), h)})
+	writeJSON(w, http.StatusOK, lotPayload(lot, latestEventID(r.Context(), h)))
 }
 
 func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
@@ -262,7 +335,8 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...any) ([]lotView, error) {
-	q := `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, l.current_bid_cents, l.bucket,
+	q := `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, IFNULL(l.description,''), l.current_bid_cents, l.min_bid_cents, l.bid_increment_cents,
+		l.bid_count, l.high_bidder, l.ends_at, l.bidding_extended, l.reserve_met, l.category, l.bucket,
 		IFNULL(a.identification,''), IFNULL(a.basis,''), IFNULL(a.model_or_sku,''), IFNULL(a.title_agreement, 0),
 		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''),
 		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)
@@ -280,16 +354,25 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 	for rows.Next() {
 		var l lotView
 		var thumb *string
-		if err := rows.Scan(&l.ID, &l.AuctionID, &l.URL, &l.LotCode, &l.Title, &l.CurrentBidCents, &l.Bucket,
+		var ext, reserve int
+		if err := rows.Scan(&l.ID, &l.AuctionID, &l.URL, &l.LotCode, &l.Title, &l.Description, &l.CurrentBidCents, &l.MinBidCents, &l.IncrementCents,
+			&l.BidCount, &l.HighBidder, &l.EndsAt, &ext, &reserve, &l.Category, &l.Bucket,
 			&l.Identification, &l.Basis, &l.ModelOrSKU, &l.TitleAgreement,
 			&l.PriceCents, &l.PriceKind, &l.SourceURL, &l.CitedText, &l.SourceTitle, &l.RetrievedAt, &thumb); err != nil {
 			return nil, err
 		}
+		l.BiddingExtended = ext != 0
+		l.ReserveMet = reserve != 0
 		l.MislabelScore = mislabelScore(l.TitleAgreement)
 		if l.PriceCents != nil {
 			if d, ok := dealScore(l.CurrentBidCents, *l.PriceCents); ok {
 				l.DealScore = &d
 			}
+		}
+		if l.SourceURL != "" {
+			src := classifySource(l.SourceURL)
+			l.SourceClass = src.Class
+			l.SourceLabel = src.Label
 		}
 		if thumb != nil && *thumb != "" {
 			l.ThumbURL = h.Blobs().URL(*thumb)
@@ -334,4 +417,19 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]any{
 		"error": map[string]string{"code": code, "message": msg},
 	})
+}
+
+func lotPayload(lot lotView, eventID int64) map[string]any {
+	return map[string]any{
+		"id": lot.ID, "auctionId": lot.AuctionID, "url": lot.URL, "lotCode": lot.LotCode, "title": lot.Title,
+		"description": lot.Description, "currentBidCents": lot.CurrentBidCents, "minBidCents": lot.MinBidCents,
+		"bidIncrementCents": lot.IncrementCents, "bidCount": lot.BidCount, "highBidder": lot.HighBidder,
+		"endsAt": lot.EndsAt, "biddingExtended": lot.BiddingExtended, "reserveMet": lot.ReserveMet,
+		"category": lot.Category, "bucket": lot.Bucket, "identification": lot.Identification, "basis": lot.Basis,
+		"modelOrSku": lot.ModelOrSKU, "titleAgreement": lot.TitleAgreement, "mislabelScore": lot.MislabelScore,
+		"priceCents": lot.PriceCents, "priceKind": lot.PriceKind, "sourceUrl": lot.SourceURL, "citedText": lot.CitedText,
+		"sourceTitle": lot.SourceTitle, "sourceClass": lot.SourceClass, "sourceLabel": lot.SourceLabel,
+		"retrievedAt": lot.RetrievedAt, "dealScore": lot.DealScore,
+		"thumbUrl": lot.ThumbURL, "photoUrls": lot.PhotoURLs, "latestEventId": eventID,
+	}
 }

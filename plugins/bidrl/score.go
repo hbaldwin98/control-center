@@ -1,7 +1,7 @@
 package bidrl
 
 // dealScore is (estimate - bid) / estimate. A high score is a cheap lot relative to
-// the cited market price. Missing either number yields no score.
+// the comparable. Missing either number yields no score.
 func dealScore(bidCents *int64, estimateCents int64) (float64, bool) {
 	if bidCents == nil || *bidCents < 0 || estimateCents <= 0 {
 		return 0, false

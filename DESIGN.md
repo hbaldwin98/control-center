@@ -28,6 +28,7 @@ The interfaces translate directly to Rust if that changes; the layering does not
 Module specs: [storage](docs/modules/storage.md) · [events](docs/modules/events.md) ·
 [policy](docs/modules/policy.md) · [credentials](docs/modules/credentials.md) ·
 [ai](docs/modules/ai.md) · [jobs](docs/modules/jobs.md) · [browser](docs/modules/browser.md) ·
+[search](docs/modules/search.md) ·
 [notifications](docs/modules/notifications.md) · [pluginhost](docs/modules/pluginhost.md)
 
 The whole process, including the frontend, is one image: `docker compose up --build`.
@@ -41,7 +42,7 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 ### In v1
 
 - Web shell for one administrator, reachable on loopback or over TLS.
-- Nine core modules (below).
+- Ten core modules (below).
 - A plugin host that mounts compiled-in plugins through a scoped facade.
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
@@ -72,7 +73,7 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
    attribution, the kill switch, budgets, and audit.
 3. **Modules emit events; they do not call each other sideways.** The bus is the spine.
 4. **Enforcement lives at host capability boundaries.** Disabling a plugin rejects new
-   host-managed work, AI dispatches, browser sessions, event handlers, HTTP requests,
+   host-managed work, AI dispatches, browser sessions, search queries, event handlers, HTTP requests,
    event publications, and storage/blob mutations, and cancels admitted contexts. Browser
    sessions are closed, not asked to finish. Reads and diagnostic logs remain available.
    Trusted in-process code can ignore cancellation or use direct networking; hard
@@ -95,7 +96,7 @@ There is one structural rule, and it replaces any dependency matrix:
        │
   L4  pluginhost     registry · lifecycle · Host facade construction
        │
-  L3  capabilities   ai · jobs · browser · notifications
+  L3  capabilities   ai · jobs · browser · search · notifications
        │
   L2  support        policy · credentials
        │
@@ -106,7 +107,7 @@ There is one structural rule, and it replaces any dependency matrix:
 
 Siblings never import each other, which is what keeps the layers real:
 
-- `ai`, `jobs`, and `browser` do not know about each other. All three use `policy`.
+- `ai`, `jobs`, `browser`, and `search` do not know about each other. All four use `policy`.
 - No capability module calls notifications to send. It subscribes to `events`, its web
   admin surface manages rules/channels, and it reads channel secrets through the
   lower-layer `credentials` interface.
@@ -121,7 +122,7 @@ Siblings never import each other, which is what keeps the layers real:
 `pluginhost → ai → pluginhost`.
 
 So plugin state, budgets, spend counters, and the gate are extracted into `policy` at L2.
-`ai`, `jobs`, `browser`, and `pluginhost` all depend on it; it depends on none of them.
+`ai`, `jobs`, `browser`, `search`, and `pluginhost` all depend on it; it depends on none of them.
 
 ---
 
@@ -136,6 +137,7 @@ So plugin state, budgets, spend counters, and the gate are extracted into `polic
 | L3 | [ai](docs/modules/ai.md) | Route logical model names to administrator-configured providers, discover what those providers serve, and record usage and cost. |
 | L3 | [jobs](docs/modules/jobs.md) | Durable queue with cron, retries, cancellation, and progress. |
 | L3 | [browser](docs/modules/browser.md) | Own headless browser sessions, allowlists, and teardown for plugins. |
+| L3 | [search](docs/modules/search.md) | Own web lookup for plugins: admit the query, call SearXNG or the fake engine, return public HTTPS hits. |
 | L3 | [notifications](docs/modules/notifications.md) | Turn events into deliveries via rules and channels, using credential entries for channel secrets. |
 | L4 | [pluginhost](docs/modules/pluginhost.md) | Register plugins, own validated plugin config, run lifecycle, and build each scoped `Host`. |
 
@@ -175,13 +177,14 @@ calls `notifications`, and never reports its own cost.
  2  pluginhost → policy    Admin.Disable("bidrl", reason)
  3  policy                 commits state and core.plugin.disabled together
  4  host                   rejects new jobs, AI dispatches, browser sessions,
-                           event handlers, HTTP requests, event publications, and
-                           storage/blob mutations; cancels admitted contexts;
-                           closes admitted browser sessions
+                           search queries, event handlers, HTTP requests, event
+                           publications, and storage/blob mutations; cancels
+                           admitted contexts; closes admitted browser sessions
  5  new AI request         admission → ErrPluginDisabled, no provider call
  6  admitted AI request    may finish; usage and actual cost are still recorded
  7  new Browser().Open     admission → ErrPluginDisabled, no engine call
  8  admitted browser       context cancelled, pages and session closed
+ 8b new Search().Query     admission → ErrPluginDisabled, no SearXNG call
  9  web                    /api/plugins/bidrl/* → 503
 ```
 

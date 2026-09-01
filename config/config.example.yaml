@@ -60,3 +60,11 @@ browser:
   # playwright: host-owned Chromium. Plugins never select an engine.
   # Plugins that read real sites (bidrl, tid) need playwright: fake runs no JavaScript.
   engine: fake
+
+search:
+  # fake: in-process fixtures (default, tests).
+  # searxng: host-owned JSON API against a private SearXNG sidecar. Plugins never
+  # choose the engine or see this URL. Docker Compose sets CC_SEARCH_ENGINE=searxng.
+  engine: fake
+  searxng:
+    url: "http://127.0.0.1:8888"

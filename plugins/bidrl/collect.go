@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,12 +20,20 @@ type collectArgs struct {
 }
 
 type collectedLot struct {
-	ID       string
-	URL      string
-	Title    string
-	LotCode  string
-	BidCents *int64
-	Images   []storedImage
+	ID             string
+	URL            string
+	Title          string
+	LotCode        string
+	Description    string
+	BidCents       *int64
+	MinBidCents    *int64
+	IncrementCents *int64
+	BidCount       int
+	HighBidder     string
+	EndsAt         string
+	BiddingExt     bool
+	ReserveMet     bool
+	Images         []storedImage
 }
 
 type storedImage struct {
@@ -56,7 +65,7 @@ func (p *Plugin) collectJob(jc hostjobs.Context) error {
 		return err
 	}
 
-	lots, title, err := p.harvest(jc, h, canonical, hostName, auctionID)
+	lots, title, endsAt, err := p.harvest(jc, h, canonical, hostName, auctionID)
 	if err != nil {
 		_ = p.failAuction(jc, h, auctionID, err.Error(), now)
 		return err
@@ -64,7 +73,7 @@ func (p *Plugin) collectJob(jc hostjobs.Context) error {
 	if title == "" {
 		title = "Auction " + auctionID
 	}
-	if err := p.storeCollected(jc, h, auctionID, canonical, hostName, title, lots, now); err != nil {
+	if err := p.storeCollected(jc, h, auctionID, canonical, hostName, title, lots, endsAt, now); err != nil {
 		_ = p.failAuction(jc, h, auctionID, err.Error(), now)
 		return err
 	}
@@ -77,24 +86,24 @@ func (p *Plugin) collectJob(jc hostjobs.Context) error {
 	return jc.Progress(1, "collected")
 }
 
-func (p *Plugin) harvest(jc hostjobs.Context, h host.Host, auctionURL, hostName, auctionID string) ([]collectedLot, string, error) {
+func (p *Plugin) harvest(jc hostjobs.Context, h host.Host, auctionURL, hostName, auctionID string) ([]collectedLot, string, string, error) {
 	sess, err := h.Browser().Open(jc, hostbrowser.OpenOptions{AllowedHosts: allowedHosts})
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	defer sess.Close(jc)
 	page, err := sess.NewPage(jc)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	defer page.Close(jc)
 
 	title, listed, err := p.enumerateLots(jc, page, auctionURL, hostName, auctionID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if len(listed) == 0 {
-		return nil, title, hostjobs.Permanent(fmt.Errorf(
+		return nil, title, "", hostjobs.Permanent(fmt.Errorf(
 			"bidrl: found no lots on %s: the gallery served no item feed and its markup carries no lot links",
 			auctionURL))
 	}
@@ -103,25 +112,14 @@ func (p *Plugin) harvest(jc hostjobs.Context, h host.Host, auctionURL, hostName,
 		listed = listed[:maxLotsPerAuction]
 	}
 
-	out := make([]collectedLot, 0, len(listed))
-	for i, raw := range listed {
-		if err := jc.Err(); err != nil {
-			return nil, "", err
-		}
-		if err := jc.Progress(0.1+0.8*float64(i)/float64(len(listed)), raw.Title); err != nil {
-			return nil, "", err
-		}
-		lot, err := p.collectOne(jc, h, page, auctionID, raw)
-		if err != nil {
-			_ = jc.Logf("lot %s failed: %v", raw.URL, err)
-			if stopCollect(err) {
-				return nil, "", err
-			}
-			continue
-		}
-		out = append(out, lot)
+	out, itemTitle, endsAt, err := p.collectListed(jc, h, page, auctionID, listed)
+	if err != nil {
+		return nil, "", "", err
 	}
-	return out, title, nil
+	if itemTitle != "" {
+		title = itemTitle
+	}
+	return out, title, endsAt, nil
 }
 
 func (p *Plugin) enumerateLots(jc hostjobs.Context, page hostbrowser.Page, auctionURL, hostName, auctionID string) (string, []parsedLot, error) {
@@ -303,44 +301,150 @@ func (p *Plugin) enumerateViaHTML(jc hostjobs.Context, page hostbrowser.Page, au
 	return title, listed, nil
 }
 
-func (p *Plugin) collectOne(jc hostjobs.Context, h host.Host, page hostbrowser.Page, auctionID string, raw parsedLot) (collectedLot, error) {
-	id := lotIDFromPath(raw.URL)
-	if id == "" {
-		id = blobSafe(raw.URL)
-	}
-	lot := collectedLot{ID: id, URL: raw.URL, Title: raw.Title, LotCode: raw.LotCode, BidCents: raw.BidCents}
-	images := raw.Images
-	if len(images) == 0 {
-		// Only a scraped lot needs its own page opened; the item feed already carried
-		// the title, bid, and photographs.
-		if err := page.Goto(jc, raw.URL); err != nil {
-			return lot, fmt.Errorf("bidrl: lot page: %w", err)
+func (p *Plugin) collectListed(jc hostjobs.Context, h host.Host, page hostbrowser.Page, auctionID string, listed []parsedLot) ([]collectedLot, string, string, error) {
+	pace := newPacer(bidrlMinInterval)
+	out := make([]collectedLot, 0, len(listed))
+	var title, endsAt string
+	for i, raw := range listed {
+		if err := jc.Err(); err != nil {
+			return nil, "", "", err
 		}
-		_ = page.WaitFor(jc, "body", 15*time.Second)
-		html, err := page.Content(jc)
+		itemID := strings.TrimSpace(raw.ItemID)
+		if itemID == "" {
+			itemID = lotIDFromPath(raw.URL)
+		}
+		aid := strings.TrimSpace(raw.AuctionID)
+		if aid == "" {
+			aid = auctionID
+		}
+		label := raw.Title
+		if label == "" {
+			label = itemID
+		}
+		if err := jc.Progress(0.1+0.8*float64(i)/float64(len(listed)), label); err != nil {
+			return nil, "", "", err
+		}
+		rec, err := p.fetchItemData(jc, page, pace, aid, itemID)
 		if err != nil {
-			return lot, err
+			_ = jc.Logf("ItemData %s/%s: %v", aid, itemID, err)
+			if stopCollect(err) {
+				return nil, "", "", err
+			}
+			continue
 		}
-		parsed := parseLotHTML(raw.URL, html)
-		if parsed.Title != "" {
-			lot.Title = parsed.Title
+		if title == "" && rec.AuctionTitle != "" {
+			title = rec.AuctionTitle
 		}
-		if parsed.BidCents != nil {
-			lot.BidCents = parsed.BidCents
+		if rec.EndsAt != "" && rec.EndsAt > endsAt {
+			endsAt = rec.EndsAt
 		}
-		if lot.LotCode == "" && len(parsed.Lots) > 0 {
-			lot.LotCode = parsed.Lots[0].LotCode
+		lot := rec.toCollected(itemID, aid, raw)
+		photos := rec.Images
+		if len(photos) == 0 {
+			photos = raw.Images
 		}
-		images = parsed.Images
+		imgs, err := p.downloadPhotos(jc, h, page, auctionID, lot.ID, photos)
+		if err != nil {
+			_ = jc.Logf("photos %s: %v", lot.ID, err)
+			if stopCollect(err) {
+				return nil, "", "", err
+			}
+		} else {
+			lot.Images = imgs
+		}
+		out = append(out, lot)
 	}
+	return out, title, endsAt, nil
+}
 
-	var total int64
+func (rec itemRecord) toCollected(itemID, auctionID string, raw parsedLot) collectedLot {
+	id := rec.ItemID
+	if id == "" {
+		id = itemID
+	}
+	lotURL := rec.URL
+	if lotURL == "" {
+		lotURL = raw.URL
+	}
+	title := rec.Title
+	if title == "" {
+		title = raw.Title
+	}
+	if title == "" {
+		title = "Lot " + id
+	}
+	code := rec.LotCode
+	if code == "" {
+		code = raw.LotCode
+	}
+	bid := rec.BidCents
+	if bid == nil {
+		bid = raw.BidCents
+	}
+	return collectedLot{
+		ID: id, URL: lotURL, Title: title, LotCode: code, Description: rec.Description,
+		BidCents: bid, MinBidCents: rec.MinBidCents, IncrementCents: rec.IncrementCents,
+		BidCount: rec.BidCount, HighBidder: rec.HighBidder, EndsAt: rec.EndsAt,
+		BiddingExt: rec.BiddingExt, ReserveMet: rec.ReserveMet,
+	}
+}
+
+func (p *Plugin) fetchItemData(jc hostjobs.Context, page hostbrowser.Page, pace *pacer, auctionID, itemID string) (itemRecord, error) {
+	if itemID == "" || auctionID == "" {
+		return itemRecord{}, fmt.Errorf("bidrl: ItemData needs auction and item id")
+	}
+	if err := pace.wait(jc); err != nil {
+		return itemRecord{}, err
+	}
+	res, err := page.Post(jc, itemDataURL(), url.Values{"item_id": {itemID}, "auction_id": {auctionID}})
+	if err != nil {
+		return itemRecord{}, err
+	}
+	if err := pace.observe(jc, res.Status); err != nil {
+		return itemRecord{}, err
+	}
+	if res.Status >= 400 {
+		return itemRecord{}, fmt.Errorf("bidrl: ItemData HTTP %d", res.Status)
+	}
+	rec, ok := parseItemData(auctionID, itemID, res.Body)
+	if !ok {
+		return itemRecord{}, fmt.Errorf("bidrl: unreadable ItemData for item %s", itemID)
+	}
+	return rec, nil
+}
+
+func (p *Plugin) fetchPusher(jc hostjobs.Context, page hostbrowser.Page, pace *pacer, auctionID, itemID string) (pusherSnapshot, error) {
+	if err := pace.wait(jc); err != nil {
+		return pusherSnapshot{}, err
+	}
+	res, err := page.Get(jc, pusherURL(auctionID, itemID))
+	if err != nil {
+		return pusherSnapshot{}, err
+	}
+	if err := pace.observe(jc, res.Status); err != nil {
+		return pusherSnapshot{}, err
+	}
+	if res.Status >= 400 {
+		return pusherSnapshot{}, fmt.Errorf("bidrl: pusher HTTP %d", res.Status)
+	}
+	snap, ok := parsePusher(res.Body)
+	if !ok {
+		return pusherSnapshot{}, fmt.Errorf("bidrl: unreadable pusher for item %s", itemID)
+	}
+	return snap, nil
+}
+
+func (p *Plugin) downloadPhotos(jc hostjobs.Context, h host.Host, page hostbrowser.Page, auctionID, lotID string, images []string) ([]storedImage, error) {
+	var (
+		out   []storedImage
+		total int64
+	)
 	for _, imgURL := range images {
 		if err := jc.Err(); err != nil {
-			return lot, err
+			return out, err
 		}
-		if len(lot.Images) >= maxImagesPerLot {
-			_ = p.reject(jc, h, auctionID, id, "image_cap", "more than 12 images")
+		if len(out) >= maxImagesPerLot {
+			_ = p.reject(jc, h, auctionID, lotID, "image_cap", "more than 12 images")
 			break
 		}
 		res, err := page.Get(jc, imgURL)
@@ -352,28 +456,22 @@ func (p *Plugin) collectOne(jc hostjobs.Context, h host.Host, page hostbrowser.P
 			continue
 		}
 		if int64(len(res.Body)) > maxImageBytes {
-			_ = p.reject(jc, h, auctionID, id, "image_size", fmt.Sprintf("%s is %d bytes", imgURL, len(res.Body)))
+			_ = p.reject(jc, h, auctionID, lotID, "image_size", fmt.Sprintf("%s is %d bytes", imgURL, len(res.Body)))
 			continue
 		}
 		if total+int64(len(res.Body)) > maxLotImageBytes {
-			_ = p.reject(jc, h, auctionID, id, "lot_image_budget", "more than 100 MiB of images")
+			_ = p.reject(jc, h, auctionID, lotID, "lot_image_budget", "more than 100 MiB of images")
 			break
 		}
-		key := "auctions/" + blobSafe(auctionID) + "/lots/" + blobSafe(id) + "/" + fmt.Sprintf("%d.%s", len(lot.Images)+1, imageExt(res.MIME))
+		key := "auctions/" + blobSafe(auctionID) + "/lots/" + blobSafe(lotID) + "/" + fmt.Sprintf("%d.%s", len(out)+1, imageExt(res.MIME))
 		ref, err := h.Blobs().Put(jc, key, bytes.NewReader(res.Body), res.MIME)
 		if err != nil {
-			return lot, fmt.Errorf("bidrl: store image: %w", err)
+			return out, fmt.Errorf("bidrl: store image: %w", err)
 		}
-		lot.Images = append(lot.Images, storedImage{Key: key, URL: imgURL, MIME: res.MIME, Size: ref.Size})
+		out = append(out, storedImage{Key: key, URL: imgURL, MIME: res.MIME, Size: ref.Size})
 		total += ref.Size
 	}
-	if lot.Title == "" {
-		lot.Title = raw.Title
-	}
-	if lot.Title == "" {
-		lot.Title = "Lot " + id
-	}
-	return lot, nil
+	return out, nil
 }
 
 func (p *Plugin) upsertAuction(jc hostjobs.Context, h host.Host, id, pageURL, hostName, status, now string) error {
@@ -390,17 +488,28 @@ func (p *Plugin) failAuction(jc hostjobs.Context, h host.Host, id, lastError, no
 	return err
 }
 
-func (p *Plugin) storeCollected(jc hostjobs.Context, h host.Host, auctionID, pageURL, hostName, title string, lots []collectedLot, now string) error {
+func (p *Plugin) storeCollected(jc hostjobs.Context, h host.Host, auctionID, pageURL, hostName, title string, lots []collectedLot, endsAt, now string) error {
 	return h.Store().Tx(jc, func(tx hoststorage.Tx) error {
-		if _, err := tx.Exec(jc, `UPDATE bidrl_auctions SET title = ?, url = ?, host = ?, lot_count = ?, status = 'ready', last_error = '', collected_at = ? WHERE id = ?`,
-			title, pageURL, hostName, len(lots), now, auctionID); err != nil {
+		if _, err := tx.Exec(jc, `UPDATE bidrl_auctions SET title = ?, url = ?, host = ?, lot_count = ?, status = 'ready', last_error = '', collected_at = ?, ends_at = ? WHERE id = ?`,
+			title, pageURL, hostName, len(lots), now, endsAt, auctionID); err != nil {
 			return err
 		}
 		for _, lot := range lots {
-			if _, err := tx.Exec(jc, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, current_bid_cents, currency, bucket, created_at)
-				VALUES (?, ?, ?, ?, ?, ?, 'USD', 'pending', ?)
-				ON CONFLICT(id) DO UPDATE SET url = excluded.url, lot_code = excluded.lot_code, title = excluded.title, current_bid_cents = excluded.current_bid_cents`,
-				lot.ID, auctionID, lot.URL, lot.LotCode, lot.Title, lot.BidCents, now); err != nil {
+			ext, reserve := 0, 0
+			if lot.BiddingExt {
+				ext = 1
+			}
+			if lot.ReserveMet {
+				reserve = 1
+			}
+			if _, err := tx.Exec(jc, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, current_bid_cents, currency, bucket, created_at, ends_at, bid_count, high_bidder, min_bid_cents, bid_increment_cents, bidding_extended, reserve_met, description, itemdata_at)
+				VALUES (?, ?, ?, ?, ?, ?, 'USD', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(id) DO UPDATE SET url = excluded.url, lot_code = excluded.lot_code, title = excluded.title, current_bid_cents = excluded.current_bid_cents,
+					ends_at = excluded.ends_at, bid_count = excluded.bid_count, high_bidder = excluded.high_bidder, min_bid_cents = excluded.min_bid_cents,
+					bid_increment_cents = excluded.bid_increment_cents, bidding_extended = excluded.bidding_extended, reserve_met = excluded.reserve_met,
+					description = excluded.description, itemdata_at = excluded.itemdata_at`,
+				lot.ID, auctionID, lot.URL, lot.LotCode, lot.Title, lot.BidCents, now, lot.EndsAt, lot.BidCount, lot.HighBidder,
+				lot.MinBidCents, lot.IncrementCents, ext, reserve, lot.Description, now); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(jc, `DELETE FROM bidrl_images WHERE lot_id = ?`, lot.ID); err != nil {

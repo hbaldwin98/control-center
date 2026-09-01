@@ -43,6 +43,9 @@ func (Fake) Chat(_ context.Context, d Dispatch, req ChatRequest) (providerResult
 // inspectable citations when they asked for grounding. Echo remains the default so
 // existing cheap-chat tests keep seeing "echo: …".
 func fakeReply(req ChatRequest, prompt string) (string, json.RawMessage, []Citation, []Source) {
+	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), "price_cents") {
+		return fakePrice(prompt)
+	}
 	if req.Grounding != nil {
 		return fakeGrounded(prompt)
 	}
@@ -81,6 +84,31 @@ func fakeAnalysis(prompt string) (string, json.RawMessage, []Citation, []Source)
 	}
 	raw, _ := json.Marshal(out)
 	return string(raw), raw, nil, nil
+}
+
+func fakePrice(prompt string) (string, json.RawMessage, []Citation, []Source) {
+	model := fieldAfter(prompt, "Model:")
+	if model == "" {
+		model = "K-Supreme Plus"
+	}
+	srcURL := fieldAfter(prompt, "URL:")
+	if srcURL == "" || !strings.HasPrefix(srcURL, "https://") {
+		srcURL = "https://example-market.test/" + strings.ReplaceAll(strings.ToLower(model), " ", "-")
+	}
+	kind, cents := "sold", int64(12900)
+	if strings.Contains(strings.ToLower(prompt), "asking") {
+		kind, cents = "asking", 8900
+	}
+	text := "Sold listing for " + model + " at $129 used."
+	parsed, _ := json.Marshal(map[string]any{
+		"price_cents":   cents,
+		"currency":      "USD",
+		"condition":     "used",
+		"kind":          kind,
+		"model_or_code": model,
+		"source_url":    srcURL,
+	})
+	return text, parsed, nil, nil
 }
 
 func fakeGrounded(prompt string) (string, json.RawMessage, []Citation, []Source) {

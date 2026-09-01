@@ -15,6 +15,7 @@ import (
 	"github.com/hbaldwin98/control-center/host/browser"
 	"github.com/hbaldwin98/control-center/host/events"
 	"github.com/hbaldwin98/control-center/host/jobs"
+	"github.com/hbaldwin98/control-center/host/search"
 	"github.com/hbaldwin98/control-center/host/storage"
 )
 
@@ -102,6 +103,7 @@ type Host interface {
 
 	AI() ai.AI
 	Browser() browser.Browser // headless sessions; the host owns the engine
+	Search() search.Search    // web lookup; the host owns SearXNG / the fake engine
 	Jobs() jobs.Jobs
 	Events() Events
 	Store() storage.DB

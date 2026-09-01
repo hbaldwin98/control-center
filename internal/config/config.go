@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,7 @@ type Config struct {
 	Blobs   Blobs   `yaml:"blobs"`
 	AI      AI      `yaml:"ai"`
 	Browser Browser `yaml:"browser"`
+	Search  Search  `yaml:"search"`
 }
 
 // Server describes the HTTP listener.
@@ -75,6 +77,21 @@ type Browser struct {
 	Engine string `yaml:"engine"`
 }
 
+// Search selects the web-lookup engine. Plugins never choose this or see the URL.
+type Search struct {
+	// Engine is "fake" (in-process fixtures) or "searxng" (sidecar JSON API). Empty
+	// defaults to fake.
+	Engine string `yaml:"engine"`
+	// SearXNG is the private instance the host queries. Required when Engine is searxng.
+	SearXNG SearXNG `yaml:"searxng"`
+}
+
+// SearXNG is the sidecar the host calls. Result pages stay on the public web; this
+// URL is only the search engine itself.
+type SearXNG struct {
+	URL string `yaml:"url"`
+}
+
 // Blobs bounds filesystem blob storage. Limits must be finite.
 type Blobs struct {
 	MaxObjectBytes int64 `yaml:"maxObjectBytes"`
@@ -101,6 +118,7 @@ func Default() Config {
 		},
 		AI:      AI{Models: "config/models.yaml"},
 		Browser: Browser{Engine: "fake"},
+		Search:  Search{Engine: "fake"},
 	}
 }
 
@@ -144,6 +162,12 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("CC_BROWSER_ENGINE"); v != "" {
 		c.Browser.Engine = v
 	}
+	if v := os.Getenv("CC_SEARCH_ENGINE"); v != "" {
+		c.Search.Engine = v
+	}
+	if v := os.Getenv("CC_SEARCH_SEARXNG_URL"); v != "" {
+		c.Search.SearXNG.URL = v
+	}
 	if v := os.Getenv("CC_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
@@ -184,6 +208,9 @@ func (c *Config) derive() {
 	if c.Browser.Engine == "" {
 		c.Browser.Engine = "fake"
 	}
+	if c.Search.Engine == "" {
+		c.Search.Engine = "fake"
+	}
 }
 
 // Validate enforces the invariants the rest of the system relies on.
@@ -209,6 +236,15 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("config: browser.engine %q is not supported (fake or playwright)", c.Browser.Engine)
 	}
+	switch strings.ToLower(c.Search.Engine) {
+	case "fake":
+	case "searxng":
+		if err := validateSearxngURL(c.Search.SearXNG.URL); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("config: search.engine %q is not supported (fake or searxng)", c.Search.Engine)
+	}
 	return nil
 }
 
@@ -223,6 +259,18 @@ func (c Config) LoopbackOnly() bool {
 		return false
 	}
 	return isLoopbackHost(host)
+}
+
+func validateSearxngURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return errors.New("config: search.searxng.url is required when search.engine is searxng")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return fmt.Errorf("config: search.searxng.url %q must be an http(s) URL with a host", raw)
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {

@@ -53,8 +53,8 @@ func (p *Plugin) Manifest() host.Manifest {
 			},
 			{
 				Name:         "grounded-price",
-				Capabilities: []string{"chat", "grounding"},
-				Purpose:      "Cite a current market price from public listings.",
+				Capabilities: []string{"chat"},
+				Purpose:      "Pick a dollar amount already written on an eBay, retail, or marketplace search hit.",
 			},
 		},
 		Config: host.ConfigSpec{
@@ -89,6 +89,7 @@ func (p *Plugin) Jobs() []hostjobs.Def {
 		{Name: "scan", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.scanJob},
 		{Name: "reprice", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.repriceJob},
 		{Name: "refresh", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.refreshJob},
+		{Name: "enrich", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.enrichJob},
 		{Name: "search", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.searchJob},
 		{Name: "discover", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.discoverJob},
 	}
@@ -110,8 +111,10 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "DELETE /auctions/{id}", Handler: http.HandlerFunc(p.handleDeleteAuction)},
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
+		{Pattern: "GET /lots", Handler: http.HandlerFunc(p.handleListLots)},
 		{Pattern: "GET /lots/{id}", Handler: http.HandlerFunc(p.handleGetLot)},
 		{Pattern: "POST /lots/{id}/reprice", Handler: http.HandlerFunc(p.handleReprice)},
+		{Pattern: "POST /lots/{id}/enrich", Handler: http.HandlerFunc(p.handleEnrich)},
 		{Pattern: "POST /search", Handler: http.HandlerFunc(p.handlePostSearch)},
 		{Pattern: "GET /search", Handler: http.HandlerFunc(p.handleGetSearch)},
 		{Pattern: "GET /sites/auctions", Handler: http.HandlerFunc(p.handleListSites)},

@@ -1,6 +1,7 @@
 package bidrl
 
 import (
+	"encoding/json"
 	"strings"
 	"unicode"
 )
@@ -96,7 +97,7 @@ func isModelToken(t string) bool {
 // matchScore ranks a lot against the original query. Identification is the
 // vision pass: a chair titled "office mesh" that the photos named as an Aeron
 // should still rise for "herman miller".
-func matchScore(query, title, ident, model string) (float64, string) {
+func matchScore(query, title, ident, model, category, terms string) (float64, string) {
 	qtoks := contentTokens(query)
 	if len(qtoks) == 0 {
 		return 0, ""
@@ -104,7 +105,9 @@ func matchScore(query, title, ident, model string) (float64, string) {
 	titleLow := strings.ToLower(title)
 	identLow := strings.ToLower(ident)
 	modelLow := strings.ToLower(model)
-	hay := titleLow + " " + identLow + " " + modelLow
+	catLow := strings.ToLower(category)
+	termsLow := strings.ToLower(terms)
+	hay := titleLow + " " + identLow + " " + modelLow + " " + catLow + " " + termsLow
 
 	var (
 		score   float64
@@ -116,17 +119,25 @@ func matchScore(query, title, ident, model string) (float64, string) {
 		inTitle := strings.Contains(titleLow, low)
 		inIdent := identLow != "" && strings.Contains(identLow, low)
 		inModel := modelLow != "" && strings.Contains(modelLow, low)
-		if !inTitle && !inIdent && !inModel && !strings.Contains(hay, low) {
+		inCat := catLow != "" && strings.Contains(catLow, low)
+		inTerms := termsLow != "" && strings.Contains(termsLow, low)
+		if !inTitle && !inIdent && !inModel && !inCat && !inTerms && !strings.Contains(hay, low) {
 			continue
 		}
 		hit++
 		switch {
-		case isModelToken(t) && (inModel || inTitle || inIdent):
+		case isModelToken(t) && (inModel || inTitle || inIdent || inTerms):
 			score += 3
 			reasons = append(reasons, "model "+t)
 		case inIdent && !inTitle:
 			score += 2
 			reasons = append(reasons, "photos: "+t)
+		case inTerms && !inTitle:
+			score += 2
+			reasons = append(reasons, "alias: "+t)
+		case inCat:
+			score += 1
+			reasons = append(reasons, "category "+t)
 		default:
 			score += 1
 		}
@@ -154,6 +165,12 @@ func contentTokens(q string) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+func notesAndTerms(termsJSON, notes string) string {
+	var terms []string
+	_ = json.Unmarshal([]byte(termsJSON), &terms)
+	return strings.TrimSpace(strings.Join(terms, " ") + " " + notes)
 }
 
 func uniqueFold(in []string, max int) []string {

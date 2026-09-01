@@ -488,6 +488,34 @@ func (p *page) Get(ctx context.Context, raw string) (Resource, error) {
 	return res, nil
 }
 
+func (p *page) Post(ctx context.Context, raw string, form url.Values) (Resource, error) {
+	if err := p.admit(ctx); err != nil {
+		return Resource{}, err
+	}
+	u, err := p.check(ctx, raw)
+	if err != nil {
+		return Resource{}, err
+	}
+	if form == nil {
+		form = url.Values{}
+	}
+	op, cancel := p.opCtx(ctx, p.sess.svc.opts.NavigationTimeout)
+	defer cancel()
+	res, err := p.engine.Post(op, u, form, func(next *url.URL) error {
+		return p.gateURL(ctx, next)
+	})
+	if err != nil {
+		if op.Err() != nil && !errors.Is(err, ErrDenied) {
+			return Resource{}, op.Err()
+		}
+		return Resource{}, err
+	}
+	if len(res.Body) > p.sess.svc.opts.MaxResourceBytes {
+		return Resource{}, ErrLimit
+	}
+	return res, nil
+}
+
 func (p *page) Responses(ctx context.Context) ([]Resource, error) {
 	if err := p.admit(ctx); err != nil {
 		return nil, err

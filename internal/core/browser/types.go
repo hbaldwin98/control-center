@@ -28,6 +28,7 @@ type Page interface {
 	WaitFor(ctx context.Context, selector string, d time.Duration) error
 	Content(ctx context.Context) (string, error)
 	Get(ctx context.Context, url string) (Resource, error)
+	Post(ctx context.Context, url string, form url.Values) (Resource, error)
 	Responses(ctx context.Context) ([]Resource, error)
 	Fill(ctx context.Context, selector, value string) error
 	Click(ctx context.Context, selector string) error
@@ -60,6 +61,7 @@ type EngineSession interface {
 type EnginePage interface {
 	Goto(ctx context.Context, u *url.URL, check func(*url.URL) error) (doc string, final *url.URL, err error)
 	Get(ctx context.Context, u *url.URL, check func(*url.URL) error) (Resource, error)
+	Post(ctx context.Context, u *url.URL, form url.Values, check func(*url.URL) error) (Resource, error)
 	Resources() []Resource
 	Fill(ctx context.Context, selector, value string) error
 	Click(ctx context.Context, selector string, check func(*url.URL) error) (doc string, final *url.URL, err error)

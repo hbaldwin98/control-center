@@ -70,12 +70,16 @@ func (it apiItem) toParsedLot() (parsedLot, bool) {
 	}
 	lot := parsedLot{
 		URL:          u.String(),
+		ItemID:       strings.TrimSpace(it.ID),
 		Title:        truncateRunes(collapseText(html.UnescapeString(it.Title)), 200),
 		LotCode:      strings.TrimSpace(it.LotNumber),
 		AuctionID:    strings.TrimSpace(it.AuctionID),
 		AuctionTitle: truncateRunes(collapseText(html.UnescapeString(it.Auction)), 200),
 		BidCents:     dollarsToCents(it.CurrentBid),
 		Images:       itemImages(it.Images),
+	}
+	if lot.ItemID == "" {
+		lot.ItemID = lotIDFromPath(u.Path)
 	}
 	if lot.AuctionID == "" {
 		lot.AuctionID = auctionIDFromPath(u.Path)

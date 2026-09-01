@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cents, eventBoundary, filterLabel } from "./model";
+import { LOT_CATEGORIES, cents, comparableHint, eventBoundary, filterLabel } from "./model";
 
 describe("cents", () => {
   it("formats integer cents as USD", () => {
@@ -17,6 +17,26 @@ describe("eventBoundary", () => {
 
 describe("filterLabel", () => {
   it("describes the deals filter", () => {
-    expect(filterLabel("deals")).toMatch(/cited market price/);
+    expect(filterLabel("deals")).toMatch(/eBay sold/);
+  });
+});
+
+describe("comparableHint", () => {
+  it("names the sold-or-asking site", () => {
+    expect(
+      comparableHint({
+        priceKind: "sold",
+        sourceLabel: "eBay",
+        sourceUrl: "https://www.ebay.com/itm/1",
+      }),
+    ).toBe("sold · eBay");
+  });
+});
+
+describe("LOT_CATEGORIES", () => {
+  it("lists the vision category enum", () => {
+    expect(LOT_CATEGORIES).toContain("tools");
+    expect(LOT_CATEGORIES).toContain("collectibles");
+    expect(LOT_CATEGORIES).toHaveLength(10);
   });
 });

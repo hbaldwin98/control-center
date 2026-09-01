@@ -48,6 +48,10 @@ type Page interface {
     // session's cookie jar and the same SSRF checks as Goto. Bounded by max-resource.
     Get(ctx context.Context, url string) (Resource, error)
 
+    // Post sends application/x-www-form-urlencoded to an allowlisted URL. Same
+    // cookie jar, SSRF checks, and size bound as Get. Form is the only body.
+    Post(ctx context.Context, url string, form url.Values) (Resource, error)
+
     // Responses are JSON/CSV bodies the page fetched (XHR/fetch), already
     // allowlisted. An SPA that POSTs usage to its API with a bearer token in
     // localStorage shows up here; Get cannot replay that. Bounded by max-resource.
@@ -75,7 +79,7 @@ Conversation and DOM state belong to the `Page`. The plugin parses HTML and capt
 XHR bodies itself; v1 does not expose `Evaluate`, screenshots, or a raw CDP handle.
 Those would leak the engine into plugin code and make the allowlist unenforceable.
 
-`Open`, `NewPage`, `Goto`, `WaitFor`, `Content`, `Get`, `Responses`, `Fill`, and `Click` all require a plugin identity
+`Open`, `NewPage`, `Goto`, `WaitFor`, `Content`, `Get`, `Post`, `Responses`, `Fill`, and `Click` all require a plugin identity
 on the context (stamped by the scoped facade) and call `policy.Gate.CheckWork` before
 doing work. A cancelled context does not leave a Chromium context behind: `Session.Close`
 and plugin disable both close the underlying browser context.

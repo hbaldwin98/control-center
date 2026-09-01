@@ -115,7 +115,7 @@ func (p *Plugin) searchJob(jc hostjobs.Context) error {
 
 func (p *Plugin) searchLocal(jc hostjobs.Context, h host.Host, query string, preferred map[string]landingAuction) ([]searchHit, error) {
 	rows, err := h.Store().Query(jc, `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, l.current_bid_cents,
-		IFNULL(a.identification,''), IFNULL(a.model_or_sku,''), IFNULL(auc.title,''), IFNULL(s.affiliate_id,''), IFNULL(s.affiliate_name,'')
+		IFNULL(a.identification,''), IFNULL(a.model_or_sku,''), IFNULL(a.category,''), IFNULL(a.search_terms,''), IFNULL(a.notes,''), IFNULL(auc.title,''), IFNULL(s.affiliate_id,''), IFNULL(s.affiliate_name,'')
 		FROM bidrl_lots l
 		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
 		LEFT JOIN bidrl_auctions auc ON auc.id = l.auction_id
@@ -127,14 +127,14 @@ func (p *Plugin) searchLocal(jc hostjobs.Context, h host.Host, query string, pre
 	var out []searchHit
 	for rows.Next() {
 		var (
-			hit                          searchHit
-			ident, model, affID, affName string
+			hit                                                searchHit
+			ident, model, category, terms, notes, affID, affName string
 		)
 		if err := rows.Scan(&hit.LotID, &hit.AuctionID, &hit.URL, &hit.LotCode, &hit.Title, &hit.BidCents,
-			&ident, &model, &hit.AuctionTitle, &affID, &affName); err != nil {
+			&ident, &model, &category, &terms, &notes, &hit.AuctionTitle, &affID, &affName); err != nil {
 			return nil, err
 		}
-		score, reason := matchScore(query, hit.Title, ident, model)
+		score, reason := matchScore(query, hit.Title, ident, model, category, notesAndTerms(terms, notes))
 		if score <= 0 {
 			continue
 		}
@@ -247,7 +247,7 @@ func mergeHits(query string, cfg pluginConfig, local []searchHit, live []parsedL
 		add(h)
 	}
 	for _, lot := range live {
-		score, reason := matchScore(query, lot.Title, "", "")
+		score, reason := matchScore(query, lot.Title, "", "", "", "")
 		if score <= 0 {
 			score, reason = 0.2, "BidRL keyword hit"
 		}

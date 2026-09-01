@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	hostevents "github.com/hbaldwin98/control-center/host/events"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
 	hostpolicy "github.com/hbaldwin98/control-center/host/policy"
+	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/browser"
@@ -24,6 +26,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
 
@@ -31,6 +34,7 @@ type scopedHost struct {
 	pluginID string
 	ai       hostai.AI
 	browser  hostbrowser.Browser
+	search   hostsearch.Search
 	jobs     hostjobs.Jobs
 	events   host.Events
 	store    hoststorage.DB
@@ -43,6 +47,7 @@ type scopedHost struct {
 func (h *scopedHost) PluginID() string             { return h.pluginID }
 func (h *scopedHost) AI() hostai.AI                { return h.ai }
 func (h *scopedHost) Browser() hostbrowser.Browser { return h.browser }
+func (h *scopedHost) Search() hostsearch.Search    { return h.search }
 func (h *scopedHost) Jobs() hostjobs.Jobs          { return h.jobs }
 func (h *scopedHost) Events() host.Events          { return h.events }
 func (h *scopedHost) Store() hoststorage.DB        { return h.store }
@@ -101,6 +106,14 @@ func (p browserPageAdapter) Content(ctx context.Context) (string, error) {
 
 func (p browserPageAdapter) Get(ctx context.Context, url string) (hostbrowser.Resource, error) {
 	r, err := p.inner.Get(ctx, url)
+	if err != nil {
+		return hostbrowser.Resource{}, mapBrowserErr(err)
+	}
+	return hostbrowser.Resource{URL: r.URL, MIME: r.MIME, Body: r.Body, Status: r.Status}, nil
+}
+
+func (p browserPageAdapter) Post(ctx context.Context, raw string, form url.Values) (hostbrowser.Resource, error) {
+	r, err := p.inner.Post(ctx, raw, form)
 	if err != nil {
 		return hostbrowser.Resource{}, mapBrowserErr(err)
 	}
@@ -172,6 +185,46 @@ func (disabledBrowser) Open(context.Context, hostbrowser.OpenOptions) (hostbrows
 	return nil, hostpolicy.ErrPluginDisabled
 }
 
+type searchAdapter struct {
+	inner search.Search
+}
+
+func (a *searchAdapter) Query(ctx context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
+	hits, err := a.inner.Query(ctx, search.Request{
+		Query: req.Query, MaxResults: req.MaxResults, AllowedDomains: req.AllowedDomains,
+	})
+	if err != nil {
+		return nil, mapSearchErr(err)
+	}
+	out := make([]hostsearch.Hit, len(hits))
+	for i, h := range hits {
+		out[i] = hostsearch.Hit{URL: h.URL, Title: h.Title, Snippet: h.Snippet}
+	}
+	return out, nil
+}
+
+func mapSearchErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	err = mapPolicyErr(err)
+	switch {
+	case errors.Is(err, search.ErrUnavailable):
+		return errors.Join(hostsearch.ErrUnavailable, err)
+	case errors.Is(err, search.ErrInvalid):
+		return errors.Join(hostsearch.ErrInvalid, err)
+	case errors.Is(err, search.ErrDenied):
+		return errors.Join(hostsearch.ErrDenied, err)
+	}
+	return err
+}
+
+type disabledSearch struct{}
+
+func (disabledSearch) Query(context.Context, hostsearch.Request) ([]hostsearch.Hit, error) {
+	return nil, hostpolicy.ErrPluginDisabled
+}
+
 func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
 	id := m.ID
 	var aiHandle hostai.AI
@@ -186,10 +239,17 @@ func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
 	} else {
 		browserHandle = disabledBrowser{}
 	}
+	var searchHandle hostsearch.Search
+	if r.opts.Search != nil {
+		searchHandle = &searchAdapter{inner: search.Scoped(r.opts.Search, id)}
+	} else {
+		searchHandle = disabledSearch{}
+	}
 	return &scopedHost{
 		pluginID: id,
 		ai:       aiHandle,
 		browser:  browserHandle,
+		search:   searchHandle,
 		jobs:     &jobsAdapter{inner: jobs.Scoped(r.opts.Jobs, id)},
 		events:   &gatedEvents{inner: events.Scoped(r.opts.Events, id), db: r.opts.DB, gate: r.opts.Policy, pluginID: id},
 		store:    &gatedStore{db: r.opts.DB, inner: storage.Prefixed(r.opts.DB, id), gate: r.opts.Policy, pluginID: id},

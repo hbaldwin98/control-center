@@ -440,6 +440,95 @@ func (p *pwPage) Get(ctx context.Context, u *url.URL, check func(*url.URL) error
 	return Resource{}, fmt.Errorf("%w: too many redirects", ErrEngine)
 }
 
+func (p *pwPage) Post(ctx context.Context, u *url.URL, form url.Values, check func(*url.URL) error) (Resource, error) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return Resource{}, ErrClosed
+	}
+	p.check = check
+	page := p.page
+	p.mu.Unlock()
+
+	if form == nil {
+		form = url.Values{}
+	}
+	encoded := form.Encode()
+	posted := false
+	current := *u
+	for hops := 0; hops <= maxRedirects; hops++ {
+		if ctx.Err() != nil {
+			return Resource{}, ctx.Err()
+		}
+		if check != nil {
+			if err := check(&current); err != nil {
+				return Resource{}, err
+			}
+		}
+		if err := p.sess.proxy.checkHost(ctx, current.Hostname()); err != nil {
+			return Resource{}, err
+		}
+		var (
+			resp playwright.APIResponse
+			err  error
+		)
+		if !posted {
+			posted = true
+			resp, err = page.Request().Post(current.String(), playwright.APIRequestContextPostOptions{
+				Data:             encoded,
+				Headers:          map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+				FailOnStatusCode: playwright.Bool(false),
+				MaxRedirects:     playwright.Int(0),
+				Timeout:          timeoutMS(ctx),
+			})
+		} else {
+			resp, err = page.Request().Get(current.String(), playwright.APIRequestContextGetOptions{
+				FailOnStatusCode: playwright.Bool(false),
+				MaxRedirects:     playwright.Int(0),
+				Timeout:          timeoutMS(ctx),
+			})
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return Resource{}, ctx.Err()
+			}
+			if denied := p.takeDenied(); denied != nil {
+				return Resource{}, denied
+			}
+			return Resource{}, fmt.Errorf("%w: %v", ErrEngine, err)
+		}
+		status := resp.Status()
+		if status >= 300 && status < 400 {
+			loc := header(resp, "location")
+			_ = resp.Dispose()
+			if loc == "" {
+				return Resource{}, fmt.Errorf("%w: redirect missing location", ErrEngine)
+			}
+			next, err := current.Parse(loc)
+			if err != nil {
+				return Resource{}, fmt.Errorf("%w: scheme", ErrDenied)
+			}
+			current = *next
+			continue
+		}
+		body, err := resp.Body()
+		mime := header(resp, "content-type")
+		finalURL := resp.URL()
+		_ = resp.Dispose()
+		if err != nil {
+			return Resource{}, fmt.Errorf("%w: %v", ErrEngine, err)
+		}
+		if i := strings.IndexByte(mime, ';'); i >= 0 {
+			mime = strings.TrimSpace(mime[:i])
+		}
+		if finalURL == "" {
+			finalURL = current.String()
+		}
+		return Resource{URL: finalURL, MIME: mime, Body: body, Status: status}, nil
+	}
+	return Resource{}, fmt.Errorf("%w: too many redirects", ErrEngine)
+}
+
 func (p *pwPage) Content(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err

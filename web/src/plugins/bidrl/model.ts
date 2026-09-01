@@ -8,6 +8,7 @@ export type Auction = {
   lotCount: number;
   lastError: string;
   collectedAt: string;
+  endsAt: string;
 };
 
 export type Lot = {
@@ -16,7 +17,16 @@ export type Lot = {
   url: string;
   lotCode: string;
   title: string;
+  description: string;
   currentBidCents: number | null;
+  minBidCents: number | null;
+  bidIncrementCents: number | null;
+  bidCount: number;
+  highBidder: string;
+  endsAt: string;
+  biddingExtended: boolean;
+  reserveMet: boolean;
+  category: string;
   bucket: string;
   identification: string;
   basis: string;
@@ -28,6 +38,8 @@ export type Lot = {
   sourceUrl: string;
   citedText: string;
   sourceTitle: string;
+  sourceClass: string;
+  sourceLabel: string;
   retrievedAt: string;
   dealScore: number | null;
   thumbUrl: string;
@@ -35,11 +47,29 @@ export type Lot = {
   latestEventId?: number;
 };
 
+export type LotsPage = {
+  lots: Lot[];
+  latestEventId: number;
+};
+
 export type FeedPage = {
   filter: string;
   lots: Lot[];
   latestEventId: number;
 };
+
+export const LOT_CATEGORIES = [
+  "tools",
+  "furniture",
+  "electronics",
+  "appliances",
+  "outdoor",
+  "automotive",
+  "sporting",
+  "household",
+  "collectibles",
+  "other",
+] as const;
 
 export type AuctionPage = {
   auction: Auction;
@@ -120,7 +150,7 @@ export function cents(n: number | null | undefined): string {
 export function filterLabel(filter: string): string {
   switch (filter) {
     case "deals":
-      return "Priced lots with a gap between the current bid and the cited market price.";
+      return "Priced lots where the current bid is below a search listing that names the model and a price, preferring eBay sold comps.";
     case "mislabeled":
       return "Title and photographs disagree.";
     case "model":
@@ -129,5 +159,20 @@ export function filterLabel(filter: string): string {
       return "Visually interesting, deliberately unpriced.";
     default:
       return "Every scanned lot.";
+  }
+}
+
+export function comparableHint(lot: Pick<Lot, "priceKind" | "sourceLabel" | "sourceUrl">): string {
+  const kind = lot.priceKind === "sold" ? "sold" : lot.priceKind === "asking" ? "asking" : "";
+  const where = lot.sourceLabel || sourceHost(lot.sourceUrl);
+  if (kind && where) return `${kind} · ${where}`;
+  return where || kind;
+}
+
+export function sourceHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
   }
 }

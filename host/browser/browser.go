@@ -5,6 +5,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"net/url"
 	"time"
 )
 
@@ -32,6 +33,10 @@ type Page interface {
 	WaitFor(ctx context.Context, selector string, d time.Duration) error
 	Content(ctx context.Context) (string, error)
 	Get(ctx context.Context, url string) (Resource, error)
+	// Post sends application/x-www-form-urlencoded to an allowlisted URL. Same cookie
+	// jar, SSRF checks, and size bound as Get. Form is the only body; there is no JSON
+	// POST, so a plugin cannot smuggle an arbitrary payload through the session.
+	Post(ctx context.Context, url string, form url.Values) (Resource, error)
 	// Responses are JSON/CSV bodies this page fetched (XHR/fetch), already allowlisted.
 	// An Angular app that POSTs usage to its API shows up here; Get only does GET and
 	// does not send in-page Authorization headers.

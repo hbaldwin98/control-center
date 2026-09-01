@@ -140,5 +140,24 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			) STRICT;
 			CREATE INDEX bidrl_search_hits_search ON bidrl_search_hits(search_id);
 		`,
+	}, {
+		Version: 3,
+		Name:    "itemdata",
+		Up: `
+			ALTER TABLE bidrl_auctions ADD COLUMN ends_at TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_lots ADD COLUMN ends_at TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_lots ADD COLUMN bid_count INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE bidrl_lots ADD COLUMN high_bidder TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_lots ADD COLUMN min_bid_cents INTEGER;
+			ALTER TABLE bidrl_lots ADD COLUMN bid_increment_cents INTEGER;
+			ALTER TABLE bidrl_lots ADD COLUMN bidding_extended INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE bidrl_lots ADD COLUMN reserve_met INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE bidrl_lots ADD COLUMN category TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_lots ADD COLUMN description TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_lots ADD COLUMN itemdata_at TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_lots ADD COLUMN bids_refreshed_at TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_analyses ADD COLUMN category TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_analyses ADD COLUMN search_terms TEXT NOT NULL DEFAULT '[]';
+		`,
 	}})
 }

@@ -1,6 +1,7 @@
 package bidrl
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,19 +10,21 @@ import (
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
+	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 )
 
 var priceSchema = json.RawMessage(`{
 	"type":"object",
 	"additionalProperties":false,
-	"required":["price_cents","currency","condition","kind","model_or_code"],
+	"required":["price_cents","currency","condition","kind","model_or_code","source_url"],
 	"properties":{
 		"price_cents":{"type":"integer"},
 		"currency":{"type":"string"},
 		"condition":{"type":"string"},
 		"kind":{"type":"string","enum":["asking","sold"]},
-		"model_or_code":{"type":"string"}
+		"model_or_code":{"type":"string"},
+		"source_url":{"type":"string"}
 	}
 }`)
 
@@ -31,6 +34,7 @@ type priceResult struct {
 	Condition   string `json:"condition"`
 	Kind        string `json:"kind"`
 	ModelOrCode string `json:"model_or_code"`
+	SourceURL   string `json:"source_url"`
 }
 
 func (p *Plugin) priceEligible(jc hostjobs.Context, h host.Host, auctionID string) error {
@@ -84,27 +88,41 @@ func (p *Plugin) priceLot(jc hostjobs.Context, h host.Host, lot lotRow, basis, m
 		_ = jc.Logf("lot %s has basis %s but no model/sku; leaving unpriced", lot.ID, basis)
 		return nil
 	}
-	prompt := fmt.Sprintf(`Find a current market price for this exact item. Cite a source that names the model and a price.
+	hits, tier, err := lookupComparables(jc, h.Search().Query, model)
+	if err != nil {
+		return err
+	}
+	if len(hits) == 0 {
+		_ = jc.Logf("lot %s: no search hit named the model and a dollar amount; leaving unpriced", lot.ID)
+		return nil
+	}
+	_ = jc.Logf("lot %s: pricing from %s (%d hits)", lot.ID, tier.label, len(hits))
+	var listed strings.Builder
+	for i, hit := range hits {
+		fmt.Fprintf(&listed, "[%d] %s\nURL: %s\n%s\n\n", i+1, hit.Title, hit.URL, hit.Snippet)
+	}
+	prompt := fmt.Sprintf(`Pick a comparable price for this used auction lot from ONLY the %s results below.
+Prefer [1] if it names this model and a dollar amount; only move down the list if it does not.
+Set source_url to that result's URL exactly. Set price_cents to a dollar amount already written in that result's title or snippet. Do not invent, average, or convert retail MSRP into a street price.
 Identification: %s
 Model: %s
 Title: %s
-Condition hint: used auction lot`, ident, model, lot.Title)
+Condition hint: used auction lot
+Source class: %s
+
+Search results:
+%s`, tier.label, ident, model, lot.Title, tier.class, listed.String())
 	resp, err := h.AI().Chat(jc, hostai.ChatRequest{
 		Model:    "grounded-price",
 		Schema:   priceSchema,
 		Messages: []hostai.Message{{Role: hostai.RoleUser, Text: prompt}},
-		Grounding: &hostai.GroundingOptions{
-			MaxQueries:     4,
-			Freshness:      30 * 24 * time.Hour,
-			AllowedDomains: nil,
-		},
 	})
 	if err != nil {
 		return err
 	}
-	ev, ok := evidenceFrom(resp, model, h.Clock().Now().UTC())
+	ev, ok := evidenceFrom(resp, model, h.Clock().Now().UTC(), hits)
 	if !ok {
-		_ = jc.Logf("lot %s: grounded response lacked matching cited evidence; leaving unpriced", lot.ID)
+		_ = jc.Logf("lot %s: response did not cite a matching search hit; leaving unpriced", lot.ID)
 		return nil
 	}
 	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
@@ -122,7 +140,7 @@ Condition hint: used auction lot`, ident, model, lot.Title)
 		payload := map[string]any{
 			"lotId": lot.ID, "auctionId": lot.AuctionID, "title": lot.Title,
 			"priceCents": ev.PriceCents, "bidCents": lot.BidCents, "kind": ev.Kind,
-			"sourceUrl": ev.SourceURL,
+			"sourceUrl": ev.SourceURL, "sourceClass": classifySource(ev.SourceURL).Class,
 		}
 		if err := h.Events().PublishTx(jc, tx, "lot.priced", lot.ID, payload); err != nil {
 			return err
@@ -150,8 +168,8 @@ type evidence struct {
 	RetrievedAt string
 }
 
-func evidenceFrom(resp *hostai.ChatResponse, model string, now time.Time) (evidence, bool) {
-	if resp == nil || len(resp.Sources) == 0 || len(resp.Citations) == 0 {
+func evidenceFrom(resp *hostai.ChatResponse, model string, now time.Time, hits []hostsearch.Hit) (evidence, bool) {
+	if resp == nil {
 		return evidence{}, false
 	}
 	var parsed priceResult
@@ -174,31 +192,72 @@ func evidenceFrom(resp *hostai.ChatResponse, model string, now time.Time) (evide
 	if !modelMatch(code, model) && !modelMatch(resp.Text, model) {
 		return evidence{}, false
 	}
-	cite := resp.Citations[0]
-	if cite.Source < 0 || cite.Source >= len(resp.Sources) {
+	hit, ok := matchHit(parsed.SourceURL, hits)
+	if !ok {
+		hit, ok = matchHitFromCitations(resp, hits)
+	}
+	if !ok {
 		return evidence{}, false
 	}
-	src := resp.Sources[cite.Source]
-	if src.URL == "" {
+	if !hitStatesCents(hit, parsed.PriceCents) {
 		return evidence{}, false
 	}
-	quoted := resp.Text
-	if cite.Start >= 0 && cite.End <= len(resp.Text) && cite.End > cite.Start {
-		quoted = resp.Text[cite.Start:cite.End]
-	}
-	if !containsPrice(quoted) && !containsPrice(resp.Text) {
+	if !modelMatch(hit.Title, model) && !modelMatch(hit.Snippet, model) {
 		return evidence{}, false
-	}
-	pub := ""
-	if src.PublishedAt != nil {
-		pub = src.PublishedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return evidence{
 		PriceCents: parsed.PriceCents, Currency: "USD", Condition: parsed.Condition,
-		Kind: parsed.Kind, ModelOrCode: code, CitedText: quoted,
-		SourceURL: src.URL, SourceTitle: src.Title, PublishedAt: pub,
-		RetrievedAt: now.Format(time.RFC3339Nano),
+		Kind: parsed.Kind, ModelOrCode: code, CitedText: quoteHit(hit, parsed.PriceCents),
+		SourceURL: hit.URL, SourceTitle: hit.Title, RetrievedAt: now.Format(time.RFC3339Nano),
 	}, true
+}
+
+type searchQuery func(ctx context.Context, req hostsearch.Request) ([]hostsearch.Hit, error)
+
+func lookupComparables(ctx context.Context, query searchQuery, model string) ([]hostsearch.Hit, priceTier, error) {
+	model = strings.TrimSpace(model)
+	if model == "" || query == nil {
+		return nil, priceTier{}, nil
+	}
+	for _, t := range priceTiers {
+		hits, err := query(ctx, hostsearch.Request{
+			Query:          strings.TrimSpace(model + " " + t.query),
+			MaxResults:     4,
+			AllowedDomains: t.domains,
+		})
+		if err != nil {
+			return nil, priceTier{}, err
+		}
+		if usable := usableHits(hits, model); len(usable) > 0 {
+			return usable, t, nil
+		}
+	}
+	return nil, priceTier{}, nil
+}
+
+func matchHit(sourceURL string, hits []hostsearch.Hit) (hostsearch.Hit, bool) {
+	want := strings.TrimRight(strings.TrimSpace(sourceURL), "/")
+	if want == "" {
+		return hostsearch.Hit{}, false
+	}
+	for _, h := range hits {
+		if strings.EqualFold(strings.TrimRight(h.URL, "/"), want) {
+			return h, true
+		}
+	}
+	return hostsearch.Hit{}, false
+}
+
+func matchHitFromCitations(resp *hostai.ChatResponse, hits []hostsearch.Hit) (hostsearch.Hit, bool) {
+	if resp == nil {
+		return hostsearch.Hit{}, false
+	}
+	for _, src := range resp.Sources {
+		if hit, ok := matchHit(src.URL, hits); ok {
+			return hit, true
+		}
+	}
+	return hostsearch.Hit{}, false
 }
 
 func modelMatch(hay, model string) bool {
@@ -208,10 +267,6 @@ func modelMatch(hay, model string) bool {
 		return false
 	}
 	return strings.Contains(h, m)
-}
-
-func containsPrice(s string) bool {
-	return dollar.FindString(s) != "" || strings.Contains(s, "price_cents")
 }
 
 func max(a, b int) int {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRelative, formatUSD } from "./format";
+import { formatRemaining, formatRelative, formatUSD } from "./format";
 
 const NOW = 1_700_000_000_000;
 
@@ -30,5 +30,15 @@ describe("formatRelative", () => {
 
   it("does not run backwards on a clock that is slightly ahead", () => {
     expect(formatRelative(NOW + 5_000, NOW)).toBe("just now");
+  });
+});
+
+describe("formatRemaining", () => {
+  it("counts down, then says ended", () => {
+    expect(formatRemaining(NOW + 12_000, NOW)).toBe("12s");
+    expect(formatRemaining(NOW + 5 * 60_000, NOW)).toBe("5m");
+    expect(formatRemaining(NOW + 4 * 3_600_000 + 12 * 60_000, NOW)).toBe("4h 12m");
+    expect(formatRemaining(NOW + 2 * 86_400_000, NOW)).toBe("2d");
+    expect(formatRemaining(NOW - 1_000, NOW)).toBe("ended");
   });
 });

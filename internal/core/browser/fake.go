@@ -93,6 +93,13 @@ func (p *fakePage) Get(ctx context.Context, u *url.URL, check func(*url.URL) err
 	return p.fetch(ctx, u, http.MethodGet, "", nil, false, check)
 }
 
+func (p *fakePage) Post(ctx context.Context, u *url.URL, form url.Values, check func(*url.URL) error) (Resource, error) {
+	if form == nil {
+		form = url.Values{}
+	}
+	return p.fetch(ctx, u, http.MethodPost, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), false, check)
+}
+
 func (p *fakePage) Resources() []Resource {
 	p.mu.Lock()
 	defer p.mu.Unlock()

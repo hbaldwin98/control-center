@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/plugins/bidrl"
 )
@@ -83,7 +85,7 @@ routes:
         inputMicroUSDPerMillion: 1000000
         outputMicroUSDPerMillion: 2000000
   grounded-price:
-    capabilities: [chat, grounding]
+    capabilities: [chat]
     maxInputTokens: 512
     maxOutputTokens: 256
     attempts:
@@ -115,9 +117,11 @@ routes:
 	}
 	t.Cleanup(br.Close)
 
+	searchsvc := search.New(pol, search.Options{Engine: search.Fake{}})
+
 	reg, err := New(ctx, store, Options{
 		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: q, AI: aisvc, Browser: br,
-		Creds: creds, Refs: creds, ShutdownTimeout: time.Second,
+		Search: searchsvc, Creds: creds, Refs: creds, ShutdownTimeout: time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +240,7 @@ routes:
 	if len(feed.Lots) != 1 || feed.Lots[0].ID != "1001" || feed.Lots[0].Bucket != "priced" {
 		t.Fatalf("deals %+v", feed.Lots)
 	}
-	if feed.Lots[0].PriceCents == nil || *feed.Lots[0].PriceCents != 12900 || feed.Lots[0].SourceURL == "" {
+	if feed.Lots[0].PriceCents == nil || *feed.Lots[0].PriceCents != 12900 || !strings.Contains(feed.Lots[0].SourceURL, "ebay.com") {
 		t.Fatalf("priced lot %+v", feed.Lots[0])
 	}
 

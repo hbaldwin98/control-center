@@ -1,12 +1,15 @@
 package bidrl
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
+	hostsearch "github.com/hbaldwin98/control-center/host/search"
 )
 
 func TestParseAuctionURL(t *testing.T) {
@@ -143,7 +146,7 @@ func TestPluginContract(t *testing.T) {
 		t.Fatalf("manifest = %#v, want non-automated %q", m, pluginID)
 	}
 	jobs := p.Jobs()
-	if len(jobs) != 6 {
+	if len(jobs) != 7 {
 		t.Fatalf("jobs = %d", len(jobs))
 	}
 	for _, j := range jobs {
@@ -151,7 +154,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 13 {
+	if len(p.Routes()) != 15 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -161,7 +164,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 2 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
+	if len(mig.migrations) != 3 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -313,15 +316,15 @@ func TestExpandQuery(t *testing.T) {
 
 func TestMatchScorePrefersIdentification(t *testing.T) {
 	t.Parallel()
-	titleOnly, _ := matchScore("herman miller aeron", "Office mesh task chair", "", "")
-	photos, reason := matchScore("herman miller aeron", "Office mesh task chair", "Herman Miller Aeron", "")
+	titleOnly, _ := matchScore("herman miller aeron", "Office mesh task chair", "", "", "", "")
+	photos, reason := matchScore("herman miller aeron", "Office mesh task chair", "Herman Miller Aeron", "", "", "")
 	if photos <= titleOnly {
 		t.Fatalf("identification should outrank a mismatched title: title=%v photos=%v %s", titleOnly, photos, reason)
 	}
 	if !strings.Contains(reason, "photos") {
 		t.Fatalf("reason = %q", reason)
 	}
-	model, mReason := matchScore("K-Supreme", "Keurig K-Supreme Plus Coffee Maker", "", "K-Supreme Plus")
+	model, mReason := matchScore("K-Supreme", "Keurig K-Supreme Plus Coffee Maker", "", "K-Supreme Plus", "", "")
 	if model < 3 {
 		t.Fatalf("model score = %v (%s)", model, mReason)
 	}
@@ -404,5 +407,190 @@ func TestMergeHitsRanksSITESFirst(t *testing.T) {
 	only := mergeHits("keurig", pluginConfig{SearchScope: scopeOnly}, nil, live, preferred)
 	if len(only) != 1 || only[0].AuctionID != "42" {
 		t.Fatalf("only scope = %#v", only)
+	}
+}
+
+func TestParseItemData(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+		"item":{
+			"id":"25808125","auction_id":"191465","title":"DeWalt 20V Drill",
+			"lot_number":"TKD1","description":"<p>A drill</p>","current_bid":"12.50",
+			"minimum_bid":"13.00","highbidder_username":"goldwing44","bid_count":"9",
+			"end_time":"1788396360","current_increment":"0.25","reserve_met":false,
+			"item_url":"https://www.bidrl.com/auction/191465/item/dewalt-25808125/",
+			"images":[{"image_url":"https://d3ugkdpeq35ojy.cloudfront.net/photos/a.jpg"}]
+		},
+		"auction":{"id":"191465","title":"Turlock Warehouse"}
+	}`)
+	got, ok := parseItemData("191465", "25808125", raw)
+	if !ok {
+		t.Fatal("parseItemData rejected a fat payload")
+	}
+	if got.Title != "DeWalt 20V Drill" || got.AuctionTitle != "Turlock Warehouse" {
+		t.Fatalf("titles %+v", got)
+	}
+	if got.BidCents == nil || *got.BidCents != 1250 {
+		t.Fatalf("bid %v", got.BidCents)
+	}
+	if got.HighBidder != "goldwing44" || got.BidCount != 9 {
+		t.Fatalf("bidder %+v", got)
+	}
+	if got.EndsAt == "" || !strings.HasPrefix(got.EndsAt, "2026-") {
+		t.Fatalf("endsAt %q", got.EndsAt)
+	}
+	if len(got.Images) != 1 || !strings.Contains(got.Images[0], "cloudfront") {
+		t.Fatalf("images %v", got.Images)
+	}
+	if got.Description != "A drill" {
+		t.Fatalf("description %q", got.Description)
+	}
+}
+
+func TestParsePusher(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"item":{"bid_count":139,"current_bid":80.93,"minimum_bid":81.18,"high_bidder":"11320","highbidder_username":"goldwing44","bidding_extended":false,"end_time":"1788396360","current_increment":0.25,"reserve_met":false}}`)
+	got, ok := parsePusher(raw)
+	if !ok {
+		t.Fatal("parsePusher rejected live snapshot")
+	}
+	if got.BidCents == nil || *got.BidCents != 8093 {
+		t.Fatalf("bid %v", got.BidCents)
+	}
+	if got.HighBidder != "goldwing44" || got.BidCount != 139 {
+		t.Fatalf("%+v", got)
+	}
+	if got.EndsAt == "" {
+		t.Fatal("missing end time")
+	}
+}
+
+func TestMatchScoreUsesCategoryAndAliases(t *testing.T) {
+	t.Parallel()
+	_, reason := matchScore("aeron", "Office mesh", "", "", "furniture", "herman miller aeron")
+	if !strings.Contains(reason, "alias") && !strings.Contains(reason, "model") {
+		t.Fatalf("reason = %q", reason)
+	}
+	score, catReason := matchScore("furniture", "Random lot", "", "", "furniture", "")
+	if score <= 0 || !strings.Contains(catReason, "category") {
+		t.Fatalf("category match %v %q", score, catReason)
+	}
+}
+
+func TestEvidenceFromRequiresASearchHit(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	hit := hostsearch.Hit{
+		URL: "https://example-market.test/k-supreme-plus", Title: "Keurig K-Supreme Plus",
+		Snippet: "Sold listing for K-Supreme Plus at $129 used.",
+	}
+	parsed, _ := json.Marshal(map[string]any{
+		"price_cents": 12900, "currency": "USD", "condition": "used", "kind": "sold",
+		"model_or_code": "K-Supreme Plus", "source_url": hit.URL,
+	})
+	resp := &hostai.ChatResponse{Text: hit.Snippet, Parsed: parsed}
+	ev, ok := evidenceFrom(resp, "K-Supreme Plus", now, []hostsearch.Hit{hit})
+	if !ok || ev.SourceURL != hit.URL || ev.PriceCents != 12900 {
+		t.Fatalf("evidence %+v ok=%v", ev, ok)
+	}
+	if ev.CitedText != hit.Snippet {
+		t.Fatalf("cited %q", ev.CitedText)
+	}
+	if _, ok := evidenceFrom(resp, "K-Supreme Plus", now, nil); ok {
+		t.Fatal("no hits must leave the lot unpriced")
+	}
+	invented, _ := json.Marshal(map[string]any{
+		"price_cents": 19900, "currency": "USD", "condition": "used", "kind": "sold",
+		"model_or_code": "K-Supreme Plus", "source_url": hit.URL,
+	})
+	if _, ok := evidenceFrom(&hostai.ChatResponse{Text: "Sold at $199", Parsed: invented}, "K-Supreme Plus", now, []hostsearch.Hit{hit}); ok {
+		t.Fatal("price_cents must appear in the search hit, not only in model prose")
+	}
+}
+
+func TestClassifySourcePrefersEbay(t *testing.T) {
+	t.Parallel()
+	if got := classifySource("https://www.ebay.com/itm/123"); got.Class != "ebay" || got.Label != "eBay" {
+		t.Fatalf("ebay %+v", got)
+	}
+	if got := classifySource("https://sfbay.craigslist.org/zip/d/drill"); got.Class != "marketplace" || got.Label != "Craigslist" {
+		t.Fatalf("craigslist %+v", got)
+	}
+	if got := classifySource("https://www.amazon.com/dp/B00"); got.Class != "retail" || got.Label != "Amazon" {
+		t.Fatalf("amazon %+v", got)
+	}
+}
+
+func TestLookupComparablesPrefersRetailOverMarketplace(t *testing.T) {
+	t.Parallel()
+	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
+		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "ebay.com" {
+			return []hostsearch.Hit{{
+				URL: "https://www.ebay.com/itm/x", Title: "K-Supreme Plus",
+				Snippet: "K-Supreme Plus listing with no dollar amount.",
+			}}, nil
+		}
+		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "amazon.com" {
+			return []hostsearch.Hit{{
+				URL: "https://www.amazon.com/dp/k-supreme-plus", Title: "Keurig K-Supreme Plus",
+				Snippet: "K-Supreme Plus for $89.",
+			}}, nil
+		}
+		t.Fatalf("should not search marketplaces when retail has a price: %+v", req)
+		return nil, nil
+	}
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	if err != nil || tier.class != "retail" || len(hits) != 1 {
+		t.Fatalf("tier=%s hits=%+v err=%v", tier.class, hits, err)
+	}
+}
+
+func TestLookupComparablesFallsThroughWhenEbayHasNoPrice(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
+		if len(req.AllowedDomains) > 0 {
+			seen = append(seen, req.AllowedDomains[0])
+		}
+		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "ebay.com" {
+			return []hostsearch.Hit{{
+				URL: "https://www.ebay.com/itm/x", Title: "K-Supreme Plus",
+				Snippet: "K-Supreme Plus listing with no dollar amount.",
+			}}, nil
+		}
+		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "mercari.com" {
+			return []hostsearch.Hit{{
+				URL: "https://www.mercari.com/k-supreme-plus", Title: "Keurig K-Supreme Plus",
+				Snippet: "K-Supreme Plus for $40 used.",
+			}}, nil
+		}
+		return nil, nil
+	}
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tier.class != "marketplace" || len(hits) != 1 || hits[0].URL != "https://www.mercari.com/k-supreme-plus" {
+		t.Fatalf("tier=%s hits=%+v seen=%v", tier.class, hits, seen)
+	}
+}
+
+func TestLookupComparablesStopsAtEbay(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
+		calls++
+		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "ebay.com" {
+			return []hostsearch.Hit{{
+				URL: "https://www.ebay.com/itm/k-supreme-plus", Title: "Keurig K-Supreme Plus",
+				Snippet: "Sold listing for K-Supreme Plus at $129 used.",
+			}}, nil
+		}
+		t.Fatalf("should not search past eBay: %+v", req)
+		return nil, nil
+	}
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	if err != nil || tier.class != "ebay" || len(hits) != 1 || calls != 1 {
+		t.Fatalf("tier=%s hits=%d calls=%d err=%v", tier.class, len(hits), calls, err)
 	}
 }

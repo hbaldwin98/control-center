@@ -167,3 +167,34 @@ func TestBrowserEnginePlaywrightAndUnknown(t *testing.T) {
 		t.Fatal("unknown engine must fail")
 	}
 }
+
+func TestSearchEngineSearxngRequiresURL(t *testing.T) {
+	cfg := Default()
+	if cfg.Search.Engine != "fake" {
+		t.Fatalf("default search engine = %q", cfg.Search.Engine)
+	}
+	cfg.Search.Engine = "searxng"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("searxng without url must fail")
+	}
+	cfg.Search.SearXNG.URL = "http://searxng:8080"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Search.SearXNG.URL = "file:///etc/passwd"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("file url must fail")
+	}
+}
+
+func TestSearchEnvOverrides(t *testing.T) {
+	t.Setenv("CC_SEARCH_ENGINE", "searxng")
+	t.Setenv("CC_SEARCH_SEARXNG_URL", "http://searxng:8080")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Search.Engine != "searxng" || cfg.Search.SearXNG.URL != "http://searxng:8080" {
+		t.Fatalf("search = %+v", cfg.Search)
+	}
+}

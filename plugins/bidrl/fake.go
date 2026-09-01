@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -44,6 +45,8 @@ func FakeSite() http.Handler {
 		}`)
 	})
 	mux.HandleFunc("/allitems/", fakeAllitems)
+	mux.HandleFunc("POST /api/ItemData", fakeItemData)
+	mux.HandleFunc("/aucbeat/pusher/", fakePusher)
 	return mux
 }
 
@@ -62,6 +65,76 @@ func lotPage(title, bid string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, `<html><h1>`+title+`</h1><p>Current bid `+bid+`</p><img src="https://www.bidrl.com/img/1.png"></html>`)
 	}
+}
+
+func fakeItemData(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "form", http.StatusBadRequest)
+		return
+	}
+	itemID := r.Form.Get("item_id")
+	auctionID := r.Form.Get("auction_id")
+	lot, ok := fakeLots[itemID]
+	if !ok {
+		http.Error(w, "missing", http.StatusNotFound)
+		return
+	}
+	if auctionID != "" && lot.auctionID != auctionID {
+		http.Error(w, "auction", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, lot.itemData)
+}
+
+func fakePusher(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/aucbeat/pusher/"), ".json")
+	parts := strings.Split(name, "-")
+	if len(parts) < 2 {
+		http.Error(w, "missing", http.StatusNotFound)
+		return
+	}
+	itemID := parts[len(parts)-1]
+	lot, ok := fakeLots[itemID]
+	if !ok {
+		http.Error(w, "missing", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, lot.pusher)
+}
+
+type fakeLot struct {
+	auctionID string
+	itemData  string
+	pusher    string
+}
+
+func fakeItemJSON(id, auctionID, title, lotCode, bid, min, endUnix string, bids int, bidder string) string {
+	return `{
+		"item":{
+			"id":"` + id + `","auction_id":"` + auctionID + `","title":"` + title + `","lot_number":"` + lotCode + `",
+			"description":"<p>` + title + `</p>","current_bid":"` + bid + `","minimum_bid":"` + min + `",
+			"highbidder_username":"` + bidder + `","bid_count":"` + strconv.Itoa(bids) + `","end_time":"` + endUnix + `",
+			"current_increment":"1.00","reserve_met":false,"bidding_extended":false,
+			"item_url":"https://www.bidrl.com/auction/` + auctionID + `/item/` + id + `/",
+			"images":[{"image_url":"https://www.bidrl.com/img/1.png","thumb_url":"https://www.bidrl.com/img/1.png"}]
+		},
+		"auction":{"id":"` + auctionID + `","title":"Test Warehouse Auction"}
+	}`
+}
+
+func fakePusherJSON(bid, min, endUnix string, bids int, bidder string) string {
+	return `{"item":{"bid_count":` + strconv.Itoa(bids) + `,"current_bid":` + bid + `,"minimum_bid":` + min + `,
+		"high_bidder":"1","highbidder_username":"` + bidder + `","bidding_extended":false,"end_time":"` + endUnix + `",
+		"current_increment":1,"reserve_met":false}}`
+}
+
+var fakeLots = map[string]fakeLot{
+	"1001": {auctionID: "42", itemData: fakeItemJSON("1001", "42", "Keurig K-Supreme Plus Coffee Maker", "K1001", "15.00", "16.00", "1788396360", 4, "goldwing44"), pusher: fakePusherJSON("15.00", "16.00", "1788396360", 4, "goldwing44")},
+	"1002": {auctionID: "42", itemData: fakeItemJSON("1002", "42", "Office mesh task chair", "C1002", "8.00", "9.00", "1788396360", 2, "bidder2"), pusher: fakePusherJSON("8.00", "9.00", "1788396360", 2, "bidder2")},
+	"1003": {auctionID: "42", itemData: fakeItemJSON("1003", "42", "Aeron-style mesh chair", "C1003", "40.00", "41.00", "1788396360", 6, "bidder3"), pusher: fakePusherJSON("40.00", "41.00", "1788396360", 6, "bidder3")},
+	"9001": {auctionID: "99", itemData: fakeItemJSON("9001", "99", "Keurig Mini", "K9001", "12.00", "13.00", "1788396360", 1, "bidder9"), pusher: fakePusherJSON("12.00", "13.00", "1788396360", 1, "bidder9")},
 }
 
 func fakeAllitems(w http.ResponseWriter, r *http.Request) {

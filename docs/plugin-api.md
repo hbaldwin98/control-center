@@ -29,7 +29,7 @@ out-of-process plugins as a compatible direction, but that move will require pro
 adapters, supervision, and capability proxies; it is not just a transport or build swap.
 
 The public module contains `host` plus `host/ai`, `host/browser`, `host/events`,
-`host/jobs`, `host/policy`, and `host/storage`. Those packages contain only the
+`host/jobs`, `host/policy`, `host/search`, and `host/storage`. Those packages contain only the
 interfaces, DTOs, options, and sentinel errors shown here; they do not import
 `internal/core`. Core modules adapt their internal implementations to these public
 contracts. Plugin code never imports an `internal/` package.
@@ -152,6 +152,7 @@ type Host interface {
 
     AI() ai.AI               // the only host-managed paid provider path
     Browser() browser.Browser // headless sessions; the host owns the engine
+    Search() search.Search    // web lookup; the host owns SearXNG / the fake engine
     Jobs() jobs.Jobs         // enqueue, cancel, inspect
     Events() Events          // publish; Source is forced to your plugin ID
     Store() storage.DB       // SQL, restricted to your table prefix
@@ -190,7 +191,8 @@ but invoke no plugin code.
 | Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`, and declare that name on `Manifest.Models`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
-| Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). For a login form, `Fill` / `Click` / `FillCredential` — the host types the password; you never see it. For an SPA that POSTs JSON after login, parse `Responses`. |
+| Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). For a login form, `Fill` / `Click` / `FillCredential` — the host types the password; you never see it. For an SPA that POSTs usage to its API with a bearer token in localStorage, parse `Responses`. For an allowlisted form POST that must share the session cookie jar, `Post`. |
+| A search-engine client or Google scrape | The kill switch cannot stop a plugin-owned crawler, and result URLs need the same public-HTTPS filter as the browser. | `h.Search().Query`. See [`search.md`](modules/search.md). The host talks to a private SearXNG sidecar (or the fake engine). |
 | Anything belonging to another plugin | Plugins compose through events, not imports. | Subscribe to their events. |
 
 Ordinary `net/http` for APIs is still the plugin's own. The host-managed browser is the
@@ -198,7 +200,7 @@ path for JavaScript-rendered pages and for fetches that must share a cookie jar 
 HTTPS host allowlist.
 
 The plugin switch is a **host-capability kill switch**. Once disabled, the host rejects
-new managed jobs, AI dispatches, browser sessions, event-handler invocations, and requests
+new managed jobs, AI dispatches, browser sessions, search queries, event-handler invocations, and requests
 to the plugin's HTTP routes, plus new event publications and storage/blob mutations
 through the facade. Admitted browser sessions are closed, not asked to finish. Reads and
 diagnostic logging remain available. The host cancels contexts it already admitted, but
@@ -295,6 +297,17 @@ Points that matter in practice:
   it. A paid call admitted before disable may finish and is still recorded and settled.
 - **Two errors you must handle:** `policy.ErrPluginDisabled` and `policy.ErrBudgetExceeded`.
   Both mean stop cleanly, not retry.
+
+Web lookup that must not depend on the model's own search tool goes through the host:
+
+```go
+hits, err := h.Search().Query(ctx, search.Request{Query: model + " used price", MaxResults: 4})
+```
+
+The host queries a private SearXNG sidecar (or the fake engine). Hits are public HTTPS
+only. `AllowedDomains` keeps a host and its subdomains. Pass them into a later `Chat`
+with no `Grounding`, and keep a price only if the model cites one of those URLs **and**
+the dollar amount appears in that hit. See [`search.md`](modules/search.md).
 
 ---
 

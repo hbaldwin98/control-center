@@ -2,13 +2,46 @@
 # Open https://localhost:8443 (self-signed cert). First-run password is
 # in the volume at /data/admin.password:
 #   docker compose exec control-center cat /data/admin.password
+#
+# SearXNG is a private sidecar. It is not published on the host. Control Center
+# queries its JSON API; plugins never see the URL.
 services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./deploy/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_SECRET: control-center-searxng
+      SEARXNG_LIMITER: "false"
+      SEARXNG_PUBLIC_INSTANCE: "false"
+      SEARXNG_METHOD: GET
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
   control-center:
     build: .
     ports:
       - "8443:8443"
     volumes:
       - cc-data:/data
+    environment:
+      CC_SEARCH_ENGINE: searxng
+      CC_SEARCH_SEARXNG_URL: http://searxng:8080
+    depends_on:
+      - searxng
 
 volumes:
   cc-data:

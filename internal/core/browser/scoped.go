@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"net/url"
 	"time"
 )
 
@@ -85,6 +86,10 @@ func (p *scopedPage) Content(ctx context.Context) (string, error) {
 
 func (p *scopedPage) Get(ctx context.Context, url string) (Resource, error) {
 	return p.inner.Get(WithPlugin(ctx, p.pluginID), url)
+}
+
+func (p *scopedPage) Post(ctx context.Context, raw string, form url.Values) (Resource, error) {
+	return p.inner.Post(WithPlugin(ctx, p.pluginID), raw, form)
 }
 
 func (p *scopedPage) Responses(ctx context.Context) ([]Resource, error) {

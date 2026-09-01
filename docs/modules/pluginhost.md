@@ -193,6 +193,7 @@ reconciliation derives work from persisted policy state and current runtime stat
 | New `AI().Chat`, `ChatStream`, `Embed` | Rejected before reservation or provider dispatch. | `ai` |
 | Admitted AI calls | Context cancelled; paid provider work may finish and is accounted. | `ai` |
 | New `Browser().Open` / page I/O | Rejected before any engine call. | `browser` |
+| New `Search().Query` | Rejected before any engine call. | `search` |
 | Admitted browser sessions | Context cancelled; pages and the browser context are closed. | `browser` |
 | New subscription deliveries | Handler not invoked; durable cursor advances in discard/ack mode. | `pluginhost` |
 | Admitted subscription handlers | Context cancelled; handler may continue cooperatively. | `pluginhost` |

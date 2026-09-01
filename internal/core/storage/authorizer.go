@@ -127,6 +127,10 @@ func authorize(prefix string, action int32, arg1, arg2, arg3, arg4 string) int32
 		sqlite3.SQLITE_DROP_TEMP_TRIGGER, sqlite3.SQLITE_DROP_TEMP_VIEW:
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_PRAGMA:
+		// ALTER TABLE ADD COLUMN on STRICT tables issues PRAGMA quick_check(table).
+		if strings.EqualFold(arg1, "quick_check") && tableAllowed(prefix, arg2) {
+			return sqlite3.SQLITE_OK
+		}
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_FUNCTION:
 		if strings.EqualFold(arg2, "load_extension") {
@@ -136,9 +140,15 @@ func authorize(prefix string, action int32, arg1, arg2, arg3, arg4 string) int32
 	case sqlite3.SQLITE_CREATE_VTABLE, sqlite3.SQLITE_DROP_VTABLE:
 		return sqlite3.SQLITE_DENY
 	case sqlite3.SQLITE_READ, sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
-		sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_ALTER_TABLE,
+		sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE,
 		sqlite3.SQLITE_ANALYZE:
 		if tableAllowed(prefix, arg1) {
+			return sqlite3.SQLITE_OK
+		}
+		return sqlite3.SQLITE_DENY
+	case sqlite3.SQLITE_ALTER_TABLE:
+		// arg1 is the database name, arg2 is the table.
+		if tableAllowed(prefix, arg2) {
 			return sqlite3.SQLITE_OK
 		}
 		return sqlite3.SQLITE_DENY
@@ -177,6 +187,11 @@ func tableAllowed(prefix, name string) bool {
 		// SQLite implements DDL by writing sqlite_master / sqlite_schema. Denying
 		// that would make CREATE TABLE impossible; other sqlite_* objects stay closed.
 		return lower == "sqlite_master" || lower == "sqlite_schema"
+	}
+	// ALTER TABLE ADD COLUMN on STRICT tables runs PRAGMA quick_check, which reads
+	// the eponymous virtual table.
+	if strings.EqualFold(name, "pragma_quick_check") {
+		return true
 	}
 	return strings.HasPrefix(name, prefix)
 }

@@ -7,7 +7,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
-import { formatDateTime, formatRelative, formatTime, formatUSD } from "./format";
+import { formatDateTime, formatRelative, formatRemaining, formatTime, formatUSD } from "./format";
 import { useNow } from "./hooks";
 
 function cx(...parts: (string | false | null | undefined)[]): string {
@@ -147,6 +147,22 @@ export function RelativeTime({
     <time dateTime={iso} title={formatDateTime(iso)}>
       {prefix ? `${prefix} ` : ""}
       {formatRelative(ms, now)}
+    </time>
+  );
+}
+
+/** Time remaining until an instant. Ticks with `useNow`. */
+export function Countdown({ iso }: { iso: string }) {
+  const now = useNow();
+  if (!iso) return <Dash />;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return <>{iso}</>;
+  const remaining = ms - now;
+  const cls =
+    remaining <= 0 ? "cc-countdown cc-countdown--ended" : remaining < 60 * 60_000 ? "cc-countdown cc-countdown--soon" : "cc-countdown";
+  return (
+    <time className={cls} dateTime={iso} title={formatDateTime(iso)}>
+      {formatRemaining(ms, now)}
     </time>
   );
 }
