@@ -438,6 +438,57 @@ func TestCodexRefusesWithoutAnAccountID(t *testing.T) {
 	}
 }
 
+func TestCodexChatHonorsSchema(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["basis"],"properties":{"basis":{"type":"string"}}}`)
+	payload := `{"basis":"exact_text"}`
+	delta, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		var body struct {
+			Text struct {
+				Format struct {
+					Type   string          `json:"type"`
+					Name   string          `json:"name"`
+					Schema json.RawMessage `json:"schema"`
+				} `json:"format"`
+			} `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		if body.Text.Format.Type != "json_schema" {
+			t.Errorf("text.format.type = %q, want json_schema", body.Text.Format.Type)
+		}
+		if string(body.Text.Format.Schema) != string(schema) {
+			t.Errorf("schema = %s", body.Text.Format.Schema)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":%s}\n\n", delta)
+		fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}}\n\n")
+	}))
+	defer srv.Close()
+
+	got, err := Codex{Client: srv.Client()}.Chat(context.Background(), Dispatch{
+		ProviderID: "codex", BaseURL: srv.URL, Token: "t", AccountID: "acct", Model: "m",
+		Billing: BillingSubscription, attempt: attempt{billing: BillingSubscription},
+	}, ChatRequest{
+		Schema:   schema,
+		Messages: []Message{{Role: "user", Text: "identify"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.parsed) != payload {
+		t.Fatalf("parsed = %s, want %s", got.parsed, payload)
+	}
+}
+
 // idTokenWithAccount builds an unsigned JWT carrying the namespaced ChatGPT claims.
 // Nothing verifies the signature — the account id is routing metadata, and the provider
 // is the one that decides whether the bearer token is real.
