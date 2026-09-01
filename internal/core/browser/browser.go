@@ -6,11 +6,13 @@
 package browser
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -42,6 +44,7 @@ const (
 type Options struct {
 	Engine Engine
 	Log    *slog.Logger
+	Client *http.Client
 
 	MaxSessionsPerPlugin int
 	MaxPagesPerSession   int
@@ -55,6 +58,9 @@ type Options struct {
 func (o *Options) applyDefaults() {
 	if o.Log == nil {
 		o.Log = slog.Default()
+	}
+	if o.Client == nil {
+		o.Client = &http.Client{Timeout: defaultNavTimeout}
 	}
 	if o.MaxSessionsPerPlugin <= 0 {
 		o.MaxSessionsPerPlugin = defaultSessionsPerPlugin
@@ -77,6 +83,67 @@ func (o *Options) applyDefaults() {
 	if o.WaitForCap <= 0 {
 		o.WaitForCap = defaultWaitCap
 	}
+}
+
+// Do performs an allowlisted HTTP request without launching a browser engine.
+func (s *Service) Do(ctx context.Context, opts OpenOptions, request Request) (Resource, error) {
+	pluginID, err := pluginID(ctx)
+	if err != nil {
+		return Resource{}, err
+	}
+	if err := s.gate.CheckWork(ctx, pluginID); err != nil {
+		return Resource{}, err
+	}
+	allowed, err := parseAllowlist(opts.AllowedHosts)
+	if err != nil {
+		return Resource{}, err
+	}
+	u, err := parsePageURL(request.URL)
+	if err != nil {
+		return Resource{}, err
+	}
+	if err := checkURL(u, allowed); err != nil {
+		s.deny(ctx, pluginID, jobID(ctx), deniedHost(u), deniedReason(err))
+		return Resource{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, request.Method, u.String(), bytes.NewReader(request.Body))
+	if err != nil {
+		return Resource{}, fmt.Errorf("%w: %v", ErrEngine, err)
+	}
+	for name, value := range request.Headers {
+		req.Header.Set(name, value)
+	}
+	client := *s.opts.Client
+	priorRedirect := client.CheckRedirect
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if err := checkURL(next.URL, allowed); err != nil {
+			s.deny(ctx, pluginID, jobID(ctx), deniedHost(next.URL), deniedReason(err))
+			return err
+		}
+		if priorRedirect != nil {
+			return priorRedirect(next, via)
+		}
+		return nil
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return Resource{}, ctx.Err()
+		}
+		if errors.Is(err, ErrDenied) {
+			return Resource{}, err
+		}
+		return Resource{}, fmt.Errorf("%w: %v", ErrEngine, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(s.opts.MaxResourceBytes)+1))
+	if err != nil {
+		return Resource{}, fmt.Errorf("%w: %v", ErrEngine, err)
+	}
+	if len(body) > s.opts.MaxResourceBytes {
+		return Resource{}, ErrLimit
+	}
+	return Resource{URL: resp.Request.URL.String(), MIME: resp.Header.Get("Content-Type"), Body: body, Status: resp.StatusCode}, nil
 }
 
 // Service is the concrete unscoped browser capability.

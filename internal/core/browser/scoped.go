@@ -49,6 +49,10 @@ func (a *scoped) Open(ctx context.Context, opts OpenOptions) (Session, error) {
 	return &scopedSession{inner: sess, pluginID: a.pluginID}, nil
 }
 
+func (a *scoped) Do(ctx context.Context, opts OpenOptions, req Request) (Resource, error) {
+	return a.s.Do(WithPlugin(ctx, a.pluginID), opts, req)
+}
+
 type scopedSession struct {
 	inner    Session
 	pluginID string

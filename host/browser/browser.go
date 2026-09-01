@@ -4,6 +4,7 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -11,6 +12,22 @@ import (
 // Browser opens allowlisted sessions. The host owns the engine and teardown.
 type Browser interface {
 	Open(ctx context.Context, opts OpenOptions) (Session, error)
+	Do(ctx context.Context, opts OpenOptions, req Request) (Resource, error)
+}
+
+// Request is one direct allowlisted HTTP request. Credential, when set, is
+// injected into the top-level JSON object by the host and never exposed to the plugin.
+type Request struct {
+	Method     string
+	URL        string
+	Headers    map[string]string
+	Body       json.RawMessage
+	Credential *JSONCredential
+}
+
+type JSONCredential struct {
+	ID    string
+	Field string
 }
 
 // OpenOptions names the hosts this session may touch. The list is required.

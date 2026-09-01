@@ -42,6 +42,12 @@ func (p *Plugin) Manifest() host.Manifest {
 				"type":"object",
 				"additionalProperties":false,
 				"properties":{
+					"tenant_id":{
+						"type":"string",
+						"title":"OCX tenant ID",
+						"description":"Tenant ID sent with every TID API request.",
+						"maxLength":200
+					},
 					"username":{
 						"type":"string",
 						"title":"My TID username",
@@ -61,16 +67,10 @@ func (p *Plugin) Manifest() host.Manifest {
 						"description":"Optional. Used to estimate cost when the portal does not include dollars.",
 						"minimum":0,
 						"maximum":200
-					},
-					"usage_url":{
-						"type":"string",
-						"title":"Usage URL override",
-						"description":"Optional HTTPS URL on my.tid.org to fetch after login. Leave blank to open Origin CX Usage Graphs and parse the SPA's usage JSON.",
-						"maxLength":300
 					}
 				}
 			}`),
-			Defaults: json.RawMessage(`{"username":"","credential_id":"","cents_per_kwh":0,"usage_url":""}`),
+			Defaults: json.RawMessage(`{"tenant_id":"","username":"","credential_id":"","cents_per_kwh":0}`),
 		},
 	}
 }
@@ -124,10 +124,10 @@ func (p *Plugin) host() (host.Host, bool) {
 }
 
 type settings struct {
+	TenantID     string  `json:"tenant_id"`
 	Username     string  `json:"username"`
 	CredentialID string  `json:"credential_id"`
 	CentsPerKWh  float64 `json:"cents_per_kwh"`
-	UsageURL     string  `json:"usage_url"`
 }
 
 func (p *Plugin) settings() settings {

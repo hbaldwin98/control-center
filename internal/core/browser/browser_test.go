@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +65,71 @@ func newHarnessWithEngine(t *testing.T, eng Engine) *harness {
 
 func (h *harness) ctxHello() context.Context {
 	return WithPlugin(h.ctx, "hello")
+}
+
+func (h *harness) useHTTPServer(server *httptest.Server) {
+	h.t.Helper()
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	base := server.Client()
+	transport := base.Transport
+	base.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = serverURL.Scheme
+		clone.URL.Host = serverURL.Host
+		return transport.RoundTrip(clone)
+	})
+	h.svc.opts.Client = base
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestDoSendsRequestAndEnforcesAllowlist(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("X-Test") != "present" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	h := newHarness(t, map[string]http.Handler{"unused.test": http.NotFoundHandler()})
+	h.useHTTPServer(server)
+	ctx := h.ctxHello()
+	res, err := h.svc.Do(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}}, Request{
+		Method: http.MethodPost, URL: "https://hello.test/data", Headers: map[string]string{"X-Test": "present"}, Body: []byte(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != http.StatusCreated || res.MIME != "application/json" || string(res.Body) != `{"ok":true}` {
+		t.Fatalf("unexpected response: %+v", res)
+	}
+	if _, err := h.svc.Do(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}}, Request{Method: http.MethodGet, URL: "https://evil.test/"}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("off-allowlist request: %v", err)
+	}
+}
+
+func TestDoRejectsOffAllowlistRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.test/secret", http.StatusFound)
+	}))
+	defer server.Close()
+
+	h := newHarness(t, map[string]http.Handler{"unused.test": http.NotFoundHandler()})
+	h.useHTTPServer(server)
+	_, err := h.svc.Do(h.ctxHello(), OpenOptions{AllowedHosts: []string{"hello.test"}}, Request{Method: http.MethodGet, URL: "https://hello.test/"})
+	if !errors.Is(err, ErrDenied) {
+		t.Fatalf("redirect: %v", err)
+	}
 }
 
 func TestOpenRequiresAllowlistAndPlugin(t *testing.T) {

@@ -9,6 +9,14 @@ import (
 // Browser opens allowlisted sessions. The scoped wrapper stamps plugin identity.
 type Browser interface {
 	Open(ctx context.Context, opts OpenOptions) (Session, error)
+	Do(ctx context.Context, opts OpenOptions, req Request) (Resource, error)
+}
+
+type Request struct {
+	Method  string
+	URL     string
+	Headers map[string]string
+	Body    []byte
 }
 
 // OpenOptions names the hosts this session may touch. The list is required.
