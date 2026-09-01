@@ -163,7 +163,7 @@ function Usage() {
         {error ? <Callout tone="danger">{error}</Callout> : null}
         {disabled ? (
           <Callout>
-            TID is disabled. Enable it on the <a href="/plugins">Plugins</a> screen, set a daily
+            TID is disabled. Enable it on the <a href="/plugins/tid/settings">plugin screen</a>, set a daily
             budget, then add your My TID username and password credential under its config.
           </Callout>
         ) : (
@@ -223,7 +223,8 @@ function Usage() {
                 </Stack>
               </Card>
             ) : null}
-            <Card title="Daily readings">
+            <details className="cc-card">
+              <summary>Daily readings</summary>
               <Table
                 head={
                   <>
@@ -241,11 +242,12 @@ function Usage() {
                   </tr>
                 ))}
               </Table>
-            </Card>
+            </details>
           </>
         )}
 
-        <Card title="Upload CSV">
+        <details className="cc-card">
+          <summary>Upload CSV</summary>
           <Stack>
             <Hint>
               If automatic sync misses a day, open Usage Graphs on My TID, export CSV, and paste it here.
@@ -267,7 +269,7 @@ function Usage() {
               {busy === "upload" ? "Uploading…" : "Import readings"}
             </Button>
           </Stack>
-        </Card>
+        </details>
       </Stack>
     </Page>
   );

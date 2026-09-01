@@ -108,7 +108,7 @@ function HistoryMessages({ message, error, disabled }: {
       {error ? <Callout tone="danger">{error}</Callout> : null}
       {disabled ? (
         <Callout>
-          Page Watch is disabled. Set a daily budget and enable it on the <a href="/plugins/pagewatch">plugin screen</a>.
+          Page Watch is disabled. Set a daily budget and enable it on the <a href="/plugins/pagewatch/settings">plugin screen</a>.
         </Callout>
       ) : null}
       <PluginAIHint pluginId="pagewatch" />

@@ -95,13 +95,60 @@ export function isFailure(state: JobState): boolean {
   return state === "failed" || state === "dead";
 }
 
-/** The one-word health verdict a tile shows, worst first. */
-export type Verdict = "accounting" | "disabled" | "degraded" | "failing" | "ok";
+/**
+ * Open and current-failure counts for one plugin's jobs.
+ *
+ * `jobs` must be newest first, which is the order `/api/jobs` returns. Historical
+ * failures do not count: a plugin that failed last week and is running now is running.
+ */
+export type JobPulse = {
+  running: number;
+  waiting: number;
+  failing: boolean;
+};
 
-export function verdictOf(state: PluginState, failures: number): Verdict {
+export const idlePulse: JobPulse = { running: 0, waiting: 0, failing: false };
+
+/** Group a newest-first job list, preserving that order inside each plugin. */
+export function jobsByPlugin(jobs: Job[]): Map<string, Job[]> {
+  const byPlugin = new Map<string, Job[]>();
+  for (const job of jobs) {
+    const list = byPlugin.get(job.pluginId);
+    if (list) list.push(job);
+    else byPlugin.set(job.pluginId, [job]);
+  }
+  return byPlugin;
+}
+
+export function pulseOf(jobs: Job[]): JobPulse {
+  let running = 0;
+  let waiting = 0;
+  for (const job of jobs) {
+    if (job.state === "running") running += 1;
+    else if (job.state === "pending" || job.state === "retry_wait" || job.state === "cancel_requested") {
+      waiting += 1;
+    }
+  }
+  const latest = jobs[0];
+  const failing =
+    latest !== undefined &&
+    (latest.state === "failed" || latest.state === "dead" || latest.state === "retry_wait");
+  return { running, waiting, failing };
+}
+
+/** The one-word health verdict a tile shows, worst first. */
+export type Verdict = "accounting" | "disabled" | "degraded" | "failing" | "running" | "ok";
+
+export function verdictOf(state: PluginState, pulse: JobPulse = idlePulse): Verdict {
   if (state.accountingFailed) return "accounting";
   if (!state.enabled) return "disabled";
   if (state.health?.runtime === "degraded") return "degraded";
-  if (failures > 0) return "failing";
+  if (pulse.running > 0) return "running";
+  if (pulse.failing) return "failing";
   return "ok";
+}
+
+/** Verdicts an operator should look at, as opposed to healthy or currently running. */
+export function needsAttention(verdict: Verdict): boolean {
+  return verdict !== "ok" && verdict !== "running";
 }

@@ -72,6 +72,7 @@ export {
   Sparkline,
   Stack,
   Table,
+  Tabs,
   Textarea,
   Time,
   Toolbar,

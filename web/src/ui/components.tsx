@@ -44,16 +44,18 @@ export function Card({
   title,
   actions,
   muted,
+  className,
   children,
 }: {
   /** A node rather than a string, so a card can make its own title a link. */
   title?: ReactNode | undefined;
   actions?: ReactNode | undefined;
   muted?: boolean | undefined;
+  className?: string | undefined;
   children: ReactNode;
 }) {
   return (
-    <section className={cx("cc-card", muted && "cc-card--muted")}>
+    <section className={cx("cc-card", muted && "cc-card--muted", className)}>
       {title || actions ? (
         <div className="cc-card__head">
           {title ? <h2 className="cc-card__title">{title}</h2> : <span />}
@@ -90,6 +92,15 @@ export function Row({ children }: { children: ReactNode }) {
 /** A filter bar above a listing. Its controls wrap instead of overflowing. */
 export function Toolbar({ children }: { children: ReactNode }) {
   return <div className="cc-toolbar">{children}</div>;
+}
+
+/** In-page section links. Children are `Link` or `a` elements; the current one sets `aria-current="page"`. */
+export function Tabs({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <nav className="cc-tabs" aria-label={label}>
+      {children}
+    </nav>
+  );
 }
 
 /* ---- typography ---- */

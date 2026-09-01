@@ -23,7 +23,7 @@ export function PluginAIHint({ pluginId }: { pluginId: string }) {
   return (
     <Callout tone="warn">
       AI is not set up yet: {names}. Pick a model on the{" "}
-      <a href={`/plugins/${encodeURIComponent(pluginId)}#ai`}>plugin screen</a>.
+      <a href={`/plugins/${encodeURIComponent(pluginId)}/settings#ai`}>plugin screen</a>.
     </Callout>
   );
 }

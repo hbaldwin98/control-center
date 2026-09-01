@@ -2,10 +2,9 @@
  * The administrative controls for one plugin: state badges, problems, spend, budgets, and
  * the kill switch.
  *
- * They live here rather than inside one screen because the Plugins list and a single
- * plugin's detail screen must offer exactly the same controls — an operator who drilled
- * into a plugin should not have to navigate back to turn it off. Each piece takes
- * `heading`, so a screen that has already titled a card does not print the label twice.
+ * They live here rather than inside one screen because a plugin's settings tab and any
+ * other host surface that needs the kill switch must offer the same controls. Each piece
+ * takes `heading`, so a screen that has already titled a card does not print the label twice.
  */
 import { useState } from "react";
 import {

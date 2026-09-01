@@ -200,8 +200,8 @@ affected resource rather than reconstructing it from partial event payloads.
 | Screen | Shows |
 |---|---|
 | Dashboard | one live tile per plugin in a grid, plus totals, running jobs, and recent alerts |
-| Plugin detail | one plugin in full: AI setup, live activity, its own surface, jobs, spend, and every control |
-| Plugins | enable/disable, AI model assignment, budgets, health, schema-backed config |
+| Plugin detail | one plugin: overview (status, its surface, jobs) and a settings tab for AI, budget, config, kill switch |
+| Plugins | a card per plugin; click through to that plugin's overview |
 | Jobs | queue, history, per-job progress and logs, cancel; filterable by plugin from the URL |
 | Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
@@ -209,26 +209,29 @@ affected resource rather than reconstructing it from partial event payloads.
 | Inbox | rule-matched notifications, mark-read, links into the rest of the shell |
 | Settings | credentials (with re-auth), API keys, OAuth logins, notification rules and channels. Keys are not enough: connect them as a provider under Models. |
 
-The dashboard is a grid of plugin tiles. Each tile carries the plugin's state, what it has
-spent today against its daily budget, its open and failed work, its live indicator and
-activity history, and whatever surface the plugin contributed. Clicking one opens
-`/plugins/<id>`: the same live view at full size, that plugin's AI needs, jobs and event feed, its
-spend in every budget window, and the same controls the Plugins screen offers — kill
-switch, budgets, and config — because an operator who has drilled into a plugin should not
-have to navigate back to turn it off.
+The dashboard is a grid of plugin tiles. Each tile carries the plugin's current state
+(running beats leftover failed jobs), what it has spent today against its daily budget,
+open work, its live indicator and activity history, and whatever surface the plugin
+contributed. Tiles are clipped to the grid so long plugin output cannot shove the page
+sideways. Clicking one opens `/plugins/<id>`.
 
-The Plugins screen is where the host-capability kill switch lives. Disabled plugins are
+`/plugins/<id>` is the overview: status, the plugin's own surface, recent jobs. Administration
+— AI setup, spend, budgets, schema-backed config, and the kill switch — lives on
+`/plugins/<id>/settings`, so an operator who drilled in from a tile sees the plugin first
+and can still turn it off without navigating back to a list.
+
+The Plugins screen is a catalog of those cards, one click each. Disabled plugins are
 greyed with the reason and timestamp, never hidden. A plugin that declared `Manifest.Models`
-shows those needs on the same screen: connect a provider if none exist, then pick a model
-for each name. That assignment creates the logical route with the capabilities the plugin
+shows a "needs AI setup" badge until those routes exist; the assignment itself is on the
+plugin's settings tab and creates the logical route with the capabilities the plugin
 declared, so an operator never has to invent `cheap-vision`.
 
 Disable rejects new host-managed jobs, AI dispatches, event handlers, plugin HTTP requests,
 event publications, and storage/blob mutations, closes that plugin's browser sessions, and
 cancels admitted contexts. Reads and logs remain available. It does not claim to terminate
 trusted in-process code that ignores cancellation or uses direct networking. An already-admitted
-paid call may finish and remains accounted. Schema-backed plugin config is edited on the same
-screen.
+paid call may finish and remains accounted. Schema-backed plugin config is edited on that
+plugin's settings tab.
 
 The Models screen is administration, not secrets: it edits providers and routes with a
 session and CSRF, and shows credential ids without ever showing credential material. The
@@ -250,8 +253,9 @@ reason shown inline — the UI half of the guardrail enforced in
 inline styles, hand-roll a `<table>`, or borrow a class from another component. The core
 screens and the `hello` plugin are the worked examples.
 
-**Layout** — `Page`, `PageHeader`, `Card`, `Stack`, `Grid`, `Row`, `Toolbar`.
+**Layout** — `Page`, `PageHeader`, `Card`, `Stack`, `Grid`, `Row`, `Toolbar`, `Tabs`.
 `Toolbar` is the filter bar above a listing; its controls wrap rather than overflow.
+`Tabs` is the in-page section row; the current item sets `aria-current="page"`.
 
 **Data** — `Table` renders the header row and its own horizontal scroll container, so a
 wide table scrolls inside its card and the page never scrolls sideways. `ActionsHeader`

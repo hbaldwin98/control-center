@@ -30,6 +30,7 @@ import {
   Select,
   Stack,
   Table,
+  Tabs,
   Toolbar,
   pluginApi,
   useSnapshot,
@@ -143,7 +144,7 @@ function BidrlTabs() {
     { href: "/bidrl/lots", label: "Lots" },
   ];
   return (
-    <nav className="cc-tabs" aria-label="BIDRL sections">
+    <Tabs label="BIDRL sections">
       {items.map((item) => {
         const current =
           item.href === "/bidrl"
@@ -157,7 +158,7 @@ function BidrlTabs() {
           </a>
         );
       })}
-    </nav>
+    </Tabs>
   );
 }
 
@@ -245,7 +246,7 @@ function Notices({
       {error ? <Callout tone="danger">{error}</Callout> : null}
       {disabled ? (
         <Callout>
-          BIDRL is disabled. Enable it on the <a href="/plugins/bidrl">plugin screen</a>.
+          BIDRL is disabled. Enable it on the <a href="/plugins/bidrl/settings">plugin screen</a>.
         </Callout>
       ) : null}
       <PluginAIHint pluginId="bidrl" />
@@ -301,7 +302,8 @@ function Feed() {
       <Stack>
         <BidrlTabs />
         <Notices message={message} error={error} disabled={disabled} />
-        <Card title="Search">
+        <details className="cc-card">
+          <summary>Search open auctions</summary>
           <Stack>
             <Hint>
               Matches BidRL titles and any lots you have already scanned — so a chair titled
@@ -387,7 +389,7 @@ function Feed() {
               </>
             ) : null}
           </Stack>
-        </Card>
+        </details>
         <Card
           title="Feed"
           actions={

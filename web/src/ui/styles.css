@@ -340,6 +340,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-4);
+  min-width: 0;
 }
 
 .cc-card--muted {
@@ -352,6 +353,8 @@ kbd {
   justify-content: space-between;
   gap: var(--space-3);
   margin-bottom: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .cc-card__title {
@@ -365,6 +368,12 @@ kbd {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
+/* Grid items default to min-width: auto, which lets long titles and plugin surfaces
+   blow the track out and overflow the page. */
+.cc-grid > * {
+  min-width: 0;
+}
+
 .cc-stack {
   display: flex;
   flex-direction: column;
@@ -376,6 +385,7 @@ kbd {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 /* Filter bars align their controls on the baseline of the control, not the label. */
@@ -439,6 +449,7 @@ kbd {
   margin: 0;
   color: var(--text-muted);
   font-size: 12.5px;
+  overflow-wrap: anywhere;
 }
 
 .cc-dash {
@@ -650,6 +661,9 @@ kbd {
   font-size: 12px;
   font-weight: 550;
   line-height: 18px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-muted);
 }
@@ -868,6 +882,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
+  min-width: 0;
 }
 
 .cc-metric__label {
@@ -884,6 +899,7 @@ kbd {
   font-weight: 600;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .cc-metric__hint {
@@ -960,6 +976,8 @@ kbd {
 .cc-tile {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* The title is a link, but it is still the card's heading: it takes colour on hover only. */
@@ -973,7 +991,7 @@ kbd {
 
 .cc-tile__stats {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
 }
 
@@ -989,11 +1007,13 @@ kbd {
   font-size: 17px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .cc-tile__activity {
   padding-top: var(--space-1);
   border-top: 1px solid var(--border);
+  min-width: 0;
 }
 
 .cc-tile__foot {
@@ -1003,10 +1023,50 @@ kbd {
   padding-top: var(--space-1);
 }
 
+/* A whole-card link for the plugin catalog: one click opens the plugin. */
+a.cc-catalog {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.cc-main a.cc-catalog {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cc-main a.cc-catalog:hover {
+  text-decoration: none;
+}
+
+.cc-main a.cc-catalog:hover .cc-card {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.cc-catalog .cc-card {
+  height: 100%;
+}
+
+.cc-catalog__lede {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
 /* A plugin-supplied surface, fenced off so it reads as the plugin's own area. */
 .cc-surface {
   padding-top: var(--space-3);
   border-top: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cc-tile .cc-surface {
+  max-height: 7.5rem;
 }
 
 .cc-surface--failed {
@@ -1039,6 +1099,20 @@ kbd {
 
 .cc-windows__value {
   font-variant-numeric: tabular-nums;
+}
+
+.cc-card > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.cc-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cc-card[open] > summary {
+  margin-bottom: 10px;
 }
 
 .cc-tabs {

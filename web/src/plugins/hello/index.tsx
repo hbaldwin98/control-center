@@ -147,7 +147,7 @@ function History() {
         {error ? <Callout tone="danger">{error}</Callout> : null}
         {disabled ? (
           <Callout>
-            Hello is disabled. Enable it on the <a href="/plugins">Plugins</a> screen to run ticks.
+            Hello is disabled. Enable it on the <a href="/plugins/hello/settings">plugin screen</a> to run ticks.
           </Callout>
         ) : null}
         <PluginAIHint pluginId="hello" />

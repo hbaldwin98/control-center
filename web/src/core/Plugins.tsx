@@ -1,34 +1,29 @@
 /**
- * Plugin administration: the kill switch, budgets, health, and schema-backed config.
+ * Plugin administration: a catalog of cards, one per plugin.
  *
- * This is the flat list — every plugin, every control, on one page. A single plugin's
- * detail screen at `/plugins/<id>` offers the same controls beside its live view, from the
- * same components.
+ * Clicking a card opens that plugin. Enable, budget, AI, and config live on the
+ * plugin's own settings tab — stacking every control here made the page unusable.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   Async,
-  Callout,
+  Badge,
   Card,
+  Grid,
   Hint,
+  Meter,
+  Money,
   Page,
   PageHeader,
   Stack,
   api,
   useSnapshot,
 } from "@cc/ui";
-import { ConfigForm } from "./ConfigForm";
-import { PluginAI } from "./PluginAI";
-import {
-  BudgetForm,
-  KillSwitch,
-  PluginBadges,
-  PluginProblems,
-  SpendWindows,
-  budgetKey,
-} from "./PluginControls";
-import type { PluginState } from "./types";
+import { modelsReady } from "./aiSetup";
+import { VERDICTS } from "./status";
+import { idlePulse, jobsByPlugin, pulseOf, verdictOf } from "./types";
+import type { Job, JobPulse, PluginState } from "./types";
 
 export function Plugins() {
   const load = useCallback(
@@ -36,71 +31,91 @@ export function Plugins() {
     [],
   );
   const plugins = useSnapshot<PluginState[]>(load, { events: ["core.plugin.**", "core.ai.usage"] });
+  const jobs = useSnapshot<Job[]>(
+    useCallback((signal) => api.snapshot<Job[]>("/api/jobs?limit=200", { signal }), []),
+    { events: "core.job.**" },
+  );
+
+  const pulses = useMemo(() => {
+    const grouped = jobs.status === "ready" ? jobsByPlugin(jobs.data) : new Map<string, Job[]>();
+    const out = new Map<string, JobPulse>();
+    for (const [id, list] of grouped) out.set(id, pulseOf(list));
+    return out;
+  }, [jobs]);
 
   return (
     <Page>
       <PageHeader
         title="Plugins"
-        lede="Enable a plugin, give it a budget if it runs on its own, and point its AI names at a model. Disabled plugins stay listed with the reason."
+        lede="Every registered plugin. Open one to see what it is doing, or to change its budget, models, and kill switch."
       />
       <Async state={plugins} loading="Loading plugins…" empty="No plugins are registered yet.">
         {(list) => (
-          <Stack>
+          <Grid density="tile">
             {list.map((st) => (
-              <PluginCard key={st.pluginId} state={st} onChanged={plugins.reload} />
+              <CatalogCard key={st.pluginId} state={st} pulse={pulses.get(st.pluginId) ?? idlePulse} />
             ))}
-          </Stack>
+          </Grid>
         )}
       </Async>
     </Page>
   );
 }
 
-function PluginCard({ state, onChanged }: { state: PluginState; onChanged: () => void }) {
-  const [error, setError] = useState<string | null>(null);
+function CatalogCard({ state, pulse }: { state: PluginState; pulse: JobPulse }) {
+  const href = `/plugins/${encodeURIComponent(state.pluginId)}`;
+  const badge = VERDICTS[verdictOf(state, pulse)];
+  const aiReady = modelsReady(state.models);
+  const lede = state.description || state.pluginId;
 
   return (
-    <Card
-      title={
-        <Link className="cc-tile__link" to={`/plugins/${encodeURIComponent(state.pluginId)}`}>
-          {state.name || state.pluginId}
-        </Link>
-      }
-      muted={!state.enabled}
-      actions={<PluginBadges state={state} />}
-    >
-      <Stack>
-        <Hint>
-          <code>{state.pluginId}</code>
-          {state.description ? ` — ${state.description}` : ""}
-        </Hint>
-
-        <PluginProblems state={state} />
-        {error ? <Callout tone="danger">{error}</Callout> : null}
-
-        <PluginAI state={state} onChanged={onChanged} />
-
-        <SpendWindows state={state} />
-
-        <BudgetForm
-          key={budgetKey(state)}
-          pluginId={state.pluginId}
-          budget={state.budget}
-          onSaved={onChanged}
-          onError={setError}
-        />
-
-        <ConfigForm
-          key={`${state.pluginId}:${JSON.stringify(state.config ?? null)}`}
-          pluginId={state.pluginId}
-          schema={state.configSchema}
-          value={state.config}
-          onSaved={onChanged}
-          onError={setError}
-        />
-
-        <KillSwitch state={state} onChanged={onChanged} onError={setError} />
-      </Stack>
-    </Card>
+    <Link className="cc-catalog" to={href}>
+      <Card
+        muted={!state.enabled}
+        className="cc-tile"
+        title={state.name || state.pluginId}
+        actions={<Badge tone={badge.tone}>{badge.label}</Badge>}
+      >
+        <Stack>
+          <Hint>
+            <code>{state.pluginId}</code>
+          </Hint>
+          <p className="cc-hint cc-catalog__lede">{lede}</p>
+          {!aiReady ? <Badge tone="warn">needs AI setup</Badge> : null}
+          <div className="cc-tile__stats">
+            <div>
+              <div className="cc-tile__stat-label">Today</div>
+              <div className="cc-tile__stat-value">
+                <Money microUsd={state.committedDay} compact />
+                {state.budget.daily > 0 ? (
+                  <span className="cc-hint">
+                    {" / "}
+                    <Money microUsd={state.budget.daily} compact />
+                  </span>
+                ) : null}
+              </div>
+              {state.budget.daily > 0 ? (
+                <Meter
+                  value={state.committedDay}
+                  soft={state.reservedDay}
+                  max={state.budget.daily}
+                  label={`${state.pluginId} daily budget`}
+                />
+              ) : (
+                <Hint>no daily budget</Hint>
+              )}
+            </div>
+            <div>
+              <div className="cc-tile__stat-label">Work</div>
+              <div className="cc-tile__stat-value">{pulse.running}</div>
+              <Hint>
+                {pulse.waiting > 0 ? `${pulse.waiting} waiting` : "nothing waiting"}
+                {pulse.failing && pulse.running === 0 ? " · last job failed" : ""}
+              </Hint>
+            </div>
+          </div>
+        </Stack>
+      </Card>
+    </Link>
   );
 }

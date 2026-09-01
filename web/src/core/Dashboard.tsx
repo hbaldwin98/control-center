@@ -2,8 +2,7 @@
  * The control centre's front page.
  *
  * One tile per registered plugin, in a grid, each a live summary of what the host knows —
- * state, spend against budget, open work, recent failures — plus whatever the plugin
- * itself chooses to show. A plugin that declares live patterns gets a live indicator and
+ * state, spend against budget, open work — plus whatever the plugin itself chooses to show. A plugin that declares live patterns gets a live indicator and
  * an activity history driven by the one shared stream; one that declares nothing still
  * gets a tile, just a static one. Clicking a tile opens that plugin.
  */
@@ -36,8 +35,9 @@ import {
 import type { PluginModule, StreamStatus } from "@cc/ui";
 import { PluginSurface } from "./PluginSurface";
 import { liveLabel, liveState } from "./live";
-import { isFailure, isOpen, verdictOf } from "./types";
-import type { Job, PluginState, Verdict } from "./types";
+import { VERDICTS } from "./status";
+import { idlePulse, jobsByPlugin, needsAttention, pulseOf, verdictOf } from "./types";
+import type { Job, JobPulse, PluginState } from "./types";
 
 type InboxPage = {
   notifications: {
@@ -50,14 +50,6 @@ type InboxPage = {
     url: string;
   }[];
   nextAfter: string;
-};
-
-const VERDICTS: Record<Verdict, { tone: "ok" | "warn" | "danger"; label: string }> = {
-  accounting: { tone: "danger", label: "accounting failed" },
-  disabled: { tone: "danger", label: "disabled" },
-  degraded: { tone: "warn", label: "degraded" },
-  failing: { tone: "warn", label: "failing jobs" },
-  ok: { tone: "ok", label: "healthy" },
 };
 
 export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
@@ -80,14 +72,11 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   const rows = states.status === "ready" ? states.data : [];
   const jobRows = jobs.status === "ready" ? jobs.data : [];
 
-  const byPlugin = useMemo(() => {
-    const open = new Map<string, Job[]>();
-    const failed = new Map<string, number>();
-    for (const j of jobRows) {
-      if (isOpen(j.state)) open.set(j.pluginId, [...(open.get(j.pluginId) ?? []), j]);
-      if (isFailure(j.state)) failed.set(j.pluginId, (failed.get(j.pluginId) ?? 0) + 1);
-    }
-    return { open, failed };
+  const pulses = useMemo(() => {
+    const grouped = jobsByPlugin(jobRows);
+    const out = new Map<string, JobPulse>();
+    for (const [id, list] of grouped) out.set(id, pulseOf(list));
+    return out;
   }, [jobRows]);
 
   const running = jobRows.filter((j) => j.state === "running");
@@ -97,8 +86,8 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   const enabledCount = rows.filter((p) => p.enabled).length;
   const alerts = inbox.status === "ready" ? inbox.data.notifications : [];
   const lastAlert = alerts[0];
-  const attention = rows.filter(
-    (p) => verdictOf(p, byPlugin.failed.get(p.pluginId) ?? 0) !== "ok",
+  const attention = rows.filter((p) =>
+    needsAttention(verdictOf(p, pulses.get(p.pluginId) ?? idlePulse)),
   ).length;
 
   return (
@@ -156,8 +145,7 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
                   key={state.pluginId}
                   state={state}
                   module={modules.get(state.pluginId)}
-                  open={byPlugin.open.get(state.pluginId) ?? []}
-                  failures={byPlugin.failed.get(state.pluginId) ?? 0}
+                  pulse={pulses.get(state.pluginId) ?? idlePulse}
                 />
               ))}
             </Grid>
@@ -244,28 +232,25 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
 function PluginTile({
   state,
   module,
-  open,
-  failures,
+  pulse,
 }: {
   state: PluginState;
   module: PluginModule | undefined;
-  open: Job[];
-  failures: number;
+  pulse: JobPulse;
 }) {
   const dashboard = module?.dashboard;
   const live = dashboard?.live ?? [];
   const activity = useActivity(live);
   const connected = useStreamStatus() === "live";
 
-  const badge = VERDICTS[verdictOf(state, failures)];
-  const running = open.filter((j) => j.state === "running");
-  const waiting = open.length - running.length;
+  const badge = VERDICTS[verdictOf(state, pulse)];
   const detail = `/plugins/${encodeURIComponent(state.pluginId)}`;
   const own = module?.nav[0];
 
   return (
     <Card
       muted={!state.enabled}
+      className="cc-tile"
       title={
         <Link className="cc-tile__link" to={detail}>
           {state.name || state.pluginId}
@@ -316,10 +301,10 @@ function PluginTile({
           </div>
           <div>
             <div className="cc-tile__stat-label">Work</div>
-            <div className="cc-tile__stat-value">{running.length}</div>
+            <div className="cc-tile__stat-value">{pulse.running}</div>
             <Hint>
-              {waiting > 0 ? `${waiting} waiting` : "nothing waiting"}
-              {failures > 0 ? ` · ${failures} failed` : ""}
+              {pulse.waiting > 0 ? `${pulse.waiting} waiting` : "nothing waiting"}
+              {pulse.failing && pulse.running === 0 ? " · last job failed" : ""}
             </Hint>
           </div>
         </div>

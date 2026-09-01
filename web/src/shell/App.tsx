@@ -75,6 +75,7 @@ function Shell({
           <Route index element={<Dashboard plugins={plugins} />} />
           <Route path="/plugins" element={<Plugins />} />
           <Route path="/plugins/:id" element={<PluginDetail plugins={plugins} />} />
+          <Route path="/plugins/:id/settings" element={<PluginDetail plugins={plugins} />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/events" element={<Events />} />
           <Route path="/costs" element={<Costs />} />

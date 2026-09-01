@@ -1,8 +1,8 @@
 /**
  * The operator-facing AI setup for one plugin: what it will ask for, whether those
- * routes exist, and a picker that creates them. Lives on the plugin list and detail
- * screens so enabling BIDRL (or anything else) does not require a trip through Models
- * just to learn the names.
+ * routes exist, and a picker that creates them. Lives on the plugin settings tab so
+ * enabling BIDRL (or anything else) does not require a trip through Models just to
+ * learn the names.
  */
 import { useCallback } from "react";
 import { Badge, Card, Hint, Stack, api, useSnapshot } from "@cc/ui";
