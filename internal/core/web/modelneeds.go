@@ -15,6 +15,8 @@ const (
 	defaultChatMaxInput    = 4000
 	defaultChatMaxOutput   = 1024
 	defaultVisionMaxInput  = 16000
+	defaultEmbedMaxInput   = 8192
+	defaultEmbedMaxOutput  = 1
 	defaultMaxInput        = 8000
 	defaultMaxOutput       = 2000
 )
@@ -117,6 +119,7 @@ func unionNeed(name string, declared []host.Manifest) (host.ModelNeed, bool) {
 func defaultRouteLimits(caps []string) (in, out int) {
 	in, out = defaultMaxInput, defaultMaxOutput
 	onlyChat := true
+	onlyEmbed := true
 	hasVision := false
 	for _, c := range caps {
 		if c == "vision" {
@@ -125,6 +128,9 @@ func defaultRouteLimits(caps []string) (in, out int) {
 		if c != "chat" {
 			onlyChat = false
 		}
+		if c != "embed" {
+			onlyEmbed = false
+		}
 	}
 	if hasVision {
 		return defaultVisionMaxInput, defaultMaxOutput
@@ -132,12 +138,49 @@ func defaultRouteLimits(caps []string) (in, out int) {
 	if onlyChat {
 		return defaultChatMaxInput, defaultChatMaxOutput
 	}
+	if onlyEmbed {
+		return defaultEmbedMaxInput, defaultEmbedMaxOutput
+	}
 	return in, out
 }
 
+func embedOnly(caps []string) bool {
+	if len(caps) == 0 {
+		return false
+	}
+	for _, c := range caps {
+		if c != "embed" {
+			return false
+		}
+	}
+	return true
+}
+
 func pricesForAttempt(p ai.ProviderConfig, catalog []ai.Model, model string, inOverride, outOverride int64) (in, out int64, errMsg string) {
+	return pricesForAttemptCaps(p, catalog, model, inOverride, outOverride, false)
+}
+
+func pricesForAttemptCaps(p ai.ProviderConfig, catalog []ai.Model, model string, inOverride, outOverride int64, embedOnlyRoute bool) (in, out int64, errMsg string) {
 	if p.Billing == ai.BillingSubscription {
 		return 0, 0, ""
+	}
+	if embedOnlyRoute {
+		if inOverride > 0 {
+			if outOverride < 0 {
+				outOverride = 0
+			}
+			return inOverride, outOverride, ""
+		}
+		for _, m := range catalog {
+			if m.ID != model {
+				continue
+			}
+			if m.Priced && m.InputMicroUSDPerMillion > 0 {
+				return int64(m.InputMicroUSDPerMillion), int64(m.OutputMicroUSDPerMillion), ""
+			}
+			return 0, 0, "that model has no published input price; enter dollars per million tokens"
+		}
+		return 0, 0, "unknown model; enter input dollars per million tokens, or load the catalog first"
 	}
 	if inOverride > 0 && outOverride > 0 {
 		return inOverride, outOverride, ""

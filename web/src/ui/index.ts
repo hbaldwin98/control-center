@@ -71,6 +71,7 @@ export {
   Select,
   Sparkline,
   Stack,
+  SortHeader,
   Table,
   Tabs,
   Textarea,

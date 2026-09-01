@@ -257,3 +257,74 @@ func TestChatAdmittedBeforeDisableStillSettles(t *testing.T) {
 		t.Fatalf("%+v %v", page, err)
 	}
 }
+
+func TestEmbedReservesAndSettles(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if err := h.ai.PutRoute(ctx, RouteInput{
+		Name: "lot-embed", Capabilities: []string{"embed"},
+		MaxInputTokens: 512, MaxOutputTokens: 1,
+		Attempts: []RouteAttemptInput{{
+			Provider: "fake", Model: "echo",
+			InputMicroUSDPerMillion: 1_000_000, OutputMicroUSDPerMillion: 0,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := h.ai.Embed(WithPlugin(ctx, "hello"), EmbedRequest{
+		Model: "lot-embed", Inputs: []string{"camping tent", "coffee maker"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Vectors) != 2 || len(resp.Vectors[0]) == 0 {
+		t.Fatalf("%+v", resp)
+	}
+	if resp.Usage.CostMicroUSD <= 0 || resp.Usage.OutputTokens != 0 || resp.Usage.Attempts != 1 {
+		t.Fatalf("usage %+v", resp.Usage)
+	}
+	page, err := h.ai.Calls(ctx, CallQuery{PluginID: "hello", LogicalModel: "lot-embed"})
+	if err != nil || len(page.Calls) != 1 || page.Calls[0].Status != "succeeded" || page.Calls[0].Operation != "embed" {
+		t.Fatalf("%+v %v", page, err)
+	}
+}
+
+func TestEmbedRequiresCapabilityAndBoundedInput(t *testing.T) {
+	h := newHarness(t)
+	ctx := WithPlugin(context.Background(), "hello")
+	if _, err := h.ai.Embed(ctx, EmbedRequest{Model: "cheap-chat", Inputs: []string{"hi"}}); !errors.Is(err, ErrCapability) {
+		t.Fatalf("chat route: %v", err)
+	}
+	if _, err := h.ai.Embed(ctx, EmbedRequest{Model: "cheap-chat", Inputs: nil}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty: %v", err)
+	}
+}
+
+func TestFakeEmbedIsSemanticEnoughForIntent(t *testing.T) {
+	campQ := fakeEmbed("things that would help me camp\ntent headlamp lantern canopy cooler stove")
+	tent := fakeEmbed("4-person camping tent")
+	lamp := fakeEmbed("Black Diamond LED headlamp")
+	coffee := fakeEmbed("Keurig K-Supreme Plus")
+	chair := fakeEmbed("Herman Miller Aeron office chair")
+	if cosine(campQ, tent) <= cosine(campQ, coffee) || cosine(campQ, tent) <= cosine(campQ, chair) {
+		t.Fatalf("camp→tent=%v camp→coffee=%v camp→chair=%v", cosine(campQ, tent), cosine(campQ, coffee), cosine(campQ, chair))
+	}
+	if cosine(campQ, lamp) <= cosine(campQ, coffee) {
+		t.Fatalf("expanded camping should retrieve a headlamp: camp→lamp=%v camp→coffee=%v", cosine(campQ, lamp), cosine(campQ, coffee))
+	}
+	coffeeQ := fakeEmbed("coffee")
+	if cosine(coffeeQ, coffee) <= cosine(coffeeQ, tent) {
+		t.Fatalf("coffee→keurig=%v coffee→tent=%v", cosine(coffeeQ, coffee), cosine(coffeeQ, tent))
+	}
+}
+
+func cosine(a, b []float64) float64 {
+	if len(a) != len(b) {
+		return 0
+	}
+	var sum float64
+	for i := range a {
+		sum += a[i] * b[i]
+	}
+	return sum
+}

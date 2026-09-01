@@ -20,7 +20,8 @@ plugins/bidrl/
   analyze.go       one vision call per lot, category + search_terms
   price.go         grounded pricing with stored citations
   jobs.go          collect, scan, reprice, refresh, enrich, search, intent, discover
-  intent.go        user-triggered intent match over collected titles
+  intent.go        user-triggered intent match over collected lots
+  embeddings.go    SQLite-stored lot vectors; cosine rank at Ask time
 
 web/src/plugins/bidrl/
   index.tsx        one nav item; Feed / Auctions / Lots tabs; auction and lot views
@@ -159,7 +160,8 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 | `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` chat with a cited-price schema | pick a `$` amount already written in those hits |
-| `AI()` chat to expand an intent into item words | match collected titles (and identifications, if already scanned) |
+| `AI()` chat to expand an intent into related gear words | one `intent-expand` call; tent/headlamp/lantern, not only "camping" |
+| `AI()` Embed over titles (and identifications, if already scanned) | embed the expanded query plus cached lot vectors; cosine rank locally |
 | `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, enrich, search, intent, and SITES discovery |
 | `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.lot.enriched` |
 | `Store()` / `Blobs()` | lots, analyses, cached photos |
@@ -187,9 +189,11 @@ Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`
 browser serves a canned three-lot warehouse auction at
 `https://www.bidrl.com/auction/42/bidgallery`, plus `POST /api/ItemData` and
 `GET /aucbeat/pusher/` fixtures. Before scanning, connect a provider and
-assign models to the plugin's three declared routes, `cheap-vision` (chat+vision),
-`grounded-price` (chat), and `intent-match` (chat). The plugin screen lists each by
-purpose; Models will too. Do not invent other names — the plugin asks for these three.
+assign models to the plugin's four declared routes, `cheap-vision` (chat+vision),
+`grounded-price` (chat), `intent-expand` (chat), and `intent-match` (embed). The plugin
+screen lists each by purpose; Models will too. Do not invent other names — the plugin
+asks for these four. Assign `intent-expand` to a cheap chat model and `intent-match` to
+an embedding model (for example `text-embedding-3-small`).
 
 ---
 
@@ -223,15 +227,27 @@ can be collected from the list instead of a pasted URL.
 ## Intent
 
 Intent matching is user-triggered (`POST/GET /intent`) from the lots catalog. It does not
-hit BidRL and does not look at photographs. One cheap chat call expands the intent into
-item words ("things that would help me camp" → tent, stove, cooler). Those words are then
-matched locally against each collected lot's title and description. A scan is not
-required: a title that says "camping tent" is enough. Stored photograph identifications
-and search terms count too when they already exist, but they do not win over a useful
-title.
+hit BidRL and does not look at photographs.
 
-It does not need to be perfect. Generic skipped commodities still count. Each hit stores a
-score and a short reason. The catalog's Find box stays a direct text filter.
+Ask starts with one cheap `intent-expand` chat call: "camping" becomes related auction-title
+words (tent, headlamp, lantern, canopy, cooler). It then embeds that expanded query once
+and ranks collected lots by cosine similarity against vectors stored in SQLite
+(`bidrl_lot_embeddings`). Each lot is embedded from its title and description, plus
+identification, model, category, and search terms when a scan already exists. The vector
+is reused until that text changes. Photographs are never sent.
+
+A scan is not required. A title that says "camping tent" matches, and so does a headlamp
+that never uses the word camp, because expansion named it before embedding. Stored
+photograph identifications count when they already exist, but they do not win over a
+useful title.
+
+The host does not load a SQLite vector extension (virtual tables are denied). Vectors are
+BLOBs; ranking is a local dot product over normalized float32 rows. Ended lots are skipped
+at Ask and their stored vectors are deleted then; "Remove ended" also deletes the lot row
+and its vector together. Lots with no end time are left alone.
+
+If expansion fails, Ask embeds the typed words. If embedding fails, it matches the expanded
+words against titles. The catalog's Find box stays a direct text filter.
 
 ---
 
@@ -252,7 +268,8 @@ Find in feed filters the visible lots by title, identification, model, and categ
 without starting a BidRL search.
 
 Lots on the feed, catalog, and auction page switch between a card grid and a table. The
-choice is remembered. Duplicate or near-duplicate listings — same model, identification,
+choice is remembered. Table columns sort on click: lot code, name, bid, expiration, price,
+and the rest. Duplicate or near-duplicate listings — same model, identification,
 or long identical title — collapse to one representative with the extras behind "N similar".
 
 Every card or row shows a thumb, the BidRL title beside what the photos suggest, the
@@ -261,7 +278,7 @@ current bid, a local countdown from stored `ends_at`, category, and a link back 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
 paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"
 deletes closed auctions, leftover closed lots, and stale SITES rows. `/bidrl/lots` is the
-catalog: intent matching over titles (and identifications when already scanned), then
+catalog: intent matching over embedded titles (and identifications when already scanned), then
 local text, bucket, category, and ending-soon (open lots ending within 24 hours).
 Auction and lot views add a bidder card (high bidder, bid count, min bid, reserve,
 extended) and Open on BidRL. The lot page shows photos in a large stage with a thumbnail
@@ -294,9 +311,11 @@ full-window view.
 - Scan, reprice, bid-refresh, enrich, search, intent, and SITES-discover job definitions are enqueue-only, have concurrency `1`
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
-  fails. Intent matching makes one `intent-match` chat call to expand the query into
-  item words, then scores collected titles (and stored identifications, when present)
-  locally. It does not re-read photographs.
+  fails. Intent matching makes one `intent-expand` chat call to name related gear, embeds
+  that expanded query once, and embeds each collected lot whose title (or stored
+  identification) has changed, then cosine-ranks locally. It does not re-read
+  photographs. Vectors live in `bidrl_lot_embeddings`, are skipped and dropped when a lot
+  has ended, and are deleted with the lot on "Remove ended".
 - ItemData and pusher traffic to BidRL is paced at 400ms with one request in flight. Three
   consecutive HTTP 429 or 403 responses stop the job.
 - Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs, AI

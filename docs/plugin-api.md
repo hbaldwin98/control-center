@@ -298,6 +298,19 @@ Points that matter in practice:
 - **Two errors you must handle:** `policy.ErrPluginDisabled` and `policy.ErrBudgetExceeded`.
   Both mean stop cleanly, not retry.
 
+Embeddings use the same admission and accounting path. Declare `embed` on the logical
+route, then call `AI().Embed` with a short list of texts — never photographs:
+
+```go
+resp, err := h.AI().Embed(ctx, ai.EmbedRequest{
+    Model:  "intent-match",
+    Inputs: []string{lotTitle, lotTitle + "\n" + identification},
+})
+```
+
+Store the returned vectors yourself. The host does not ship a vector index; SQLite
+virtual tables are denied, so a plugin keeps float32 BLOBs and ranks with a local cosine.
+
 Web lookup that must not depend on the model's own search tool goes through the host:
 
 ```go

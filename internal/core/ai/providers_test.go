@@ -328,6 +328,64 @@ func TestOpenAICompatibleChatChargesReportedTokens(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleEmbedChargesReportedTokens(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	actx := credentials.WithActor(ctx, "admin")
+	if _, err := h.creds.CreateAPIKey(actx, credentials.APIKeyInput{
+		ID: "router-key", Provider: "openrouter", Secret: credentials.SecretInput{Value: "sk-test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/embeddings" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		var body embeddingsRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		if body.Model != "text-embedding-3-small" || len(body.Input) != 2 {
+			t.Errorf("body = %+v", body)
+		}
+		_, _ = w.Write([]byte(`{"data":[
+			{"embedding":[0.1,0.2],"index":1},
+			{"embedding":[0.3,0.4],"index":0}
+		],"usage":{"prompt_tokens":1000}}`))
+	}))
+	defer srv.Close()
+
+	if err := h.ai.PutProvider(ctx, ProviderConfig{
+		ID: "openrouter", Kind: KindOpenAICompatible, BaseURL: srv.URL,
+		CredentialID: "router-key", Billing: BillingMetered,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ai.PutRoute(ctx, RouteInput{
+		Name: "lot-embed", Capabilities: []string{"embed"},
+		MaxInputTokens: 4000, MaxOutputTokens: 1,
+		Attempts: []RouteAttemptInput{{
+			Provider: "openrouter", Model: "text-embedding-3-small",
+			InputMicroUSDPerMillion: 3_000_000, OutputMicroUSDPerMillion: 0,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := h.ai.Embed(WithPlugin(ctx, "hello"), EmbedRequest{
+		Model: "lot-embed", Inputs: []string{"tent", "stove"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.CostMicroUSD != 3_000 {
+		t.Fatalf("cost = %d micro-USD, want 3000", resp.Usage.CostMicroUSD)
+	}
+	if len(resp.Vectors) != 2 || resp.Vectors[0][0] != 0.3 || resp.Vectors[1][0] != 0.1 {
+		t.Fatalf("vectors = %+v, want index order", resp.Vectors)
+	}
+}
+
 func TestRouteBecomesUnusableRatherThanUnknown(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

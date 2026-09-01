@@ -278,6 +278,10 @@ func readResponsesStream(body io.Reader) (string, responsesUsage, error) {
 	return text.String(), usage, nil
 }
 
+func (Codex) Embed(_ context.Context, d Dispatch, _ EmbedRequest) (providerResult, error) {
+	return providerResult{errClass: "unsupported"}, fmt.Errorf("ai: provider %s does not support embeddings", d.ProviderID)
+}
+
 type codexModelsResponse struct {
 	Models []struct {
 		Slug           string `json:"slug"`

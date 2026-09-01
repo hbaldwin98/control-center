@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -13,8 +14,9 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
 
-// OpenAICompatible speaks the /v1 chat-completions and /v1 models contract that OpenAI,
-// OpenRouter, and most self-hosted servers implement, authorized by a bearer API key.
+// OpenAICompatible speaks the /v1 chat-completions, /v1 embeddings, and /v1 models
+// contract that OpenAI, OpenRouter, and most self-hosted servers implement, authorized
+// by a bearer API key.
 //
 // One adapter serves every such provider. What differs between them is the base URL and
 // the credential, which are per-provider configuration, not per-vendor code.
@@ -119,6 +121,72 @@ func (p OpenAICompatible) Chat(ctx context.Context, d Dispatch, req ChatRequest)
 		inputTokens: in, outputTokens: out, cost: cost, billed: true,
 		providerStatus: strconv.Itoa(status),
 	}, nil
+}
+
+func (p OpenAICompatible) Embed(ctx context.Context, d Dispatch, req EmbedRequest) (providerResult, error) {
+	if d.Token == "" {
+		return providerResult{errClass: "credential"}, ErrMissingCredential
+	}
+	status, raw, err := httpDo(ctx, p.client(), http.MethodPost, d.BaseURL+"/embeddings",
+		map[string]string{"Authorization": "Bearer " + d.Token},
+		embeddingsRequest{Model: d.Model, Input: req.Inputs})
+	if err != nil {
+		return providerResult{errClass: "transport", billed: false}, err
+	}
+	if status < 200 || status >= 300 {
+		class := errorClass(status)
+		return providerResult{
+			errClass:       class,
+			providerStatus: strconv.Itoa(status),
+			billed:         class == "provider_5xx",
+		}, providerError(d.ProviderID, status, raw)
+	}
+	var parsed embeddingsResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return providerResult{errClass: "provider", billed: true}, err
+	}
+	if len(parsed.Data) != len(req.Inputs) {
+		return providerResult{errClass: "provider", billed: true},
+			fmt.Errorf("ai: provider %s returned %d embeddings for %d inputs", d.ProviderID, len(parsed.Data), len(req.Inputs))
+	}
+	sort.Slice(parsed.Data, func(i, j int) bool { return parsed.Data[i].Index < parsed.Data[j].Index })
+	vecs := make([][]float64, len(parsed.Data))
+	for i, row := range parsed.Data {
+		if len(row.Embedding) == 0 {
+			return providerResult{errClass: "provider", billed: true},
+				fmt.Errorf("ai: provider %s returned an empty embedding", d.ProviderID)
+		}
+		vecs[i] = row.Embedding
+	}
+	in := parsed.Usage.PromptTokens
+	if in == 0 {
+		for _, s := range req.Inputs {
+			in += approxTokens(s)
+		}
+	}
+	cost, err := d.charge(in, 0)
+	if err != nil {
+		return providerResult{errClass: "accounting_invariant", billed: true}, err
+	}
+	return providerResult{
+		vectors: vecs, inputTokens: in, billed: true, cost: cost,
+		providerStatus: strconv.Itoa(status),
+	}, nil
+}
+
+type embeddingsRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+type embeddingsResponse struct {
+	Data []struct {
+		Embedding []float64 `json:"embedding"`
+		Index     int       `json:"index"`
+	} `json:"data"`
+	Usage struct {
+		PromptTokens int64 `json:"prompt_tokens"`
+	} `json:"usage"`
 }
 
 func wireContent(m Message) json.RawMessage {

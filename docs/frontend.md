@@ -261,7 +261,8 @@ screens and the `hello` plugin are the worked examples.
 
 **Data** — `Table` renders the header row and its own horizontal scroll container, so a
 wide table scrolls inside its card and the page never scrolls sideways. `ActionsHeader`
-is the header cell for a column of buttons. `Time`, `Money`, and `Dash` render the three
+is the header cell for a column of buttons. `SortHeader` is a clickable column head that
+sets `aria-sort` on the cell. `Time`, `Money`, and `Dash` render the three
 values that appear on every screen; `Time` shows local time and puts the exact instant in
 the tooltip.
 

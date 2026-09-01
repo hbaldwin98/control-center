@@ -164,14 +164,14 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 5 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") {
+	if len(mig.migrations) != 6 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
 	if err := json.Unmarshal(m.Config.Defaults, &defaults); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Models) != 3 || m.Models[2].Name != "intent-match" {
+	if len(m.Models) != 4 || m.Models[2].Name != "intent-expand" || m.Models[2].Capabilities[0] != "chat" || m.Models[3].Name != "intent-match" || m.Models[3].Capabilities[0] != "embed" {
 		t.Fatalf("models = %#v", m.Models)
 	}
 }
@@ -671,10 +671,18 @@ func TestLookupComparablesRetriesAfterEngineError(t *testing.T) {
 
 func TestDecodeIntentWordsUsesStructuredJSON(t *testing.T) {
 	t.Parallel()
-	raw := json.RawMessage(`{"item_words":["tent","stove","cooler"]}`)
+	raw := json.RawMessage(`{"item_words":["tent","headlamp","lantern","canopy"]}`)
 	got := decodeIntentWords(&hostai.ChatResponse{Parsed: raw})
-	if len(got) != 3 || got[0] != "tent" {
+	if len(got) != 4 || got[1] != "headlamp" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestIntentQueryDocumentAddsRelatedGear(t *testing.T) {
+	t.Parallel()
+	doc := intentQueryDocument("camping", []string{"tent", "headlamp", "lantern", "canopy"})
+	if !strings.Contains(doc, "camping") || !strings.Contains(doc, "headlamp") || !strings.Contains(doc, "canopy") {
+		t.Fatalf("%q", doc)
 	}
 }
 
@@ -715,5 +723,49 @@ func TestScoreIntentCardTitleIsEnough(t *testing.T) {
 	})
 	if score <= 0 {
 		t.Fatalf("a camping title is enough even when photos say otherwise: %v", score)
+	}
+}
+
+func TestLotDocumentHashChangesWhenIdentificationArrives(t *testing.T) {
+	t.Parallel()
+	title := intentCard{ID: "1", Title: "office mesh"}
+	scanned := intentCard{ID: "1", Title: "office mesh", Identification: "Herman Miller Aeron"}
+	if lotDocument(title) == lotDocument(scanned) {
+		t.Fatal("scan should change the embedded document")
+	}
+	if textHash(lotDocument(title)) == textHash(lotDocument(scanned)) {
+		t.Fatal("hash should change after a scan")
+	}
+}
+
+func TestEncodeVectorRoundTrip(t *testing.T) {
+	t.Parallel()
+	in := normalizeVector([]float64{3, 4, 0})
+	got := decodeVector(encodeVector(in))
+	if len(got) != 3 {
+		t.Fatalf("%v", got)
+	}
+	if cosine(in, got) < 0.999 {
+		t.Fatalf("round trip %v vs %v", in, got)
+	}
+	if cosine(in, normalizeVector([]float64{0, 1, 0})) > 0.9 {
+		t.Fatal("orthogonal-ish vectors should not look identical")
+	}
+}
+
+func TestKeepLotEmbeddingDropsEndedAndOrphans(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	if keepLotEmbedding(false, now.Add(time.Hour).Format(time.RFC3339Nano), now) {
+		t.Fatal("deleted lots must not keep a vector")
+	}
+	if keepLotEmbedding(true, now.Add(-time.Minute).Format(time.RFC3339Nano), now) {
+		t.Fatal("ended lots must not keep a vector")
+	}
+	if !keepLotEmbedding(true, "", now) {
+		t.Fatal("lots with no end time stay searchable")
+	}
+	if !keepLotEmbedding(true, now.Add(time.Hour).Format(time.RFC3339Nano), now) {
+		t.Fatal("open lots keep a vector")
 	}
 }

@@ -14,10 +14,10 @@ const (
 
 // pacer spaces BidRL origin requests so a collect cannot stampede /api/ItemData.
 type pacer struct {
-	min          time.Duration
-	mu           sync.Mutex
-	last         time.Time
-	consecutive  int
+	min         time.Duration
+	mu          sync.Mutex
+	last        time.Time
+	consecutive int
 }
 
 func newPacer(min time.Duration) *pacer {

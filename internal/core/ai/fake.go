@@ -3,6 +3,8 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"hash/fnv"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +39,103 @@ func (Fake) Chat(_ context.Context, d Dispatch, req ChatRequest) (providerResult
 		text: reply, parsed: parsed, citations: citations, sources: sources,
 		inputTokens: inTok, outputTokens: outTok, cost: cost, billed: true,
 	}, nil
+}
+
+func (Fake) Embed(_ context.Context, d Dispatch, req EmbedRequest) (providerResult, error) {
+	if d.Token == "" {
+		return providerResult{errClass: "credential"}, ErrMissingCredential
+	}
+	vecs := make([][]float64, len(req.Inputs))
+	var inTok int64
+	for i, in := range req.Inputs {
+		vecs[i] = fakeEmbed(in)
+		inTok += approxTokens(in)
+	}
+	cost, err := d.charge(inTok, 0)
+	if err != nil {
+		return providerResult{}, err
+	}
+	return providerResult{
+		vectors: vecs, inputTokens: inTok, cost: cost, billed: true,
+	}, nil
+}
+
+const (
+	fakeEmbedDims    = 48
+	fakeConceptCount = 8
+)
+
+// fakeConcepts map tokens onto a few shared axes so tests can ask for "coffee" and
+// still retrieve a Keurig, the way a real embedding model would.
+var fakeConcepts = map[string]int{
+	"coffee": 0, "keurig": 0, "espresso": 0, "brew": 0, "kcup": 0, "k-cup": 0,
+	"k-supreme": 0, "ksupreme": 0,
+	"camp": 1, "camping": 1, "tent": 1, "stove": 1, "cooler": 1, "lantern": 1,
+	"sleeping": 1, "backpack": 1, "hike": 1, "hiking": 1, "outdoor": 1,
+	"headlamp": 1, "flashlight": 1, "canopy": 1, "popup": 1, "shelter": 1,
+	"chair": 2, "chairs": 2, "seating": 2, "seat": 2, "sit": 2, "desk": 2, "office": 2,
+	"mesh": 2, "herman": 2, "miller": 2, "aeron": 2, "stool": 2,
+}
+
+func fakeEmbed(text string) []float64 {
+	v := make([]float64, fakeEmbedDims)
+	for _, tok := range fakeEmbedTokens(text) {
+		if dim, ok := fakeConcepts[tok]; ok {
+			v[dim] += 4
+		}
+		h := fakeTokenHash(tok) % uint32(fakeEmbedDims-fakeConceptCount)
+		v[fakeConceptCount+int(h)] += 1
+	}
+	var sum float64
+	for _, x := range v {
+		sum += x * x
+	}
+	if sum == 0 {
+		v[0] = 1
+		return v
+	}
+	inv := 1 / math.Sqrt(sum)
+	for i := range v {
+		v[i] *= inv
+	}
+	return v
+}
+
+func fakeEmbedTokens(s string) []string {
+	s = strings.ToLower(s)
+	var out []string
+	var b strings.Builder
+	flush := func() {
+		t := b.String()
+		b.Reset()
+		if t == "" {
+			return
+		}
+		out = append(out, t)
+		if strings.Contains(t, "-") {
+			for _, p := range strings.Split(t, "-") {
+				if p != "" {
+					out = append(out, p)
+				}
+			}
+		}
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+func fakeTokenHash(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
 }
 
 // fakeReply produces structured output when the caller asked for a schema, and
@@ -153,7 +252,8 @@ func fakeIntentExpand(prompt string) (string, json.RawMessage, []Citation, []Sou
 	groups := [][]string{
 		{"coffee", "brew", "keurig", "espresso", "cafe"},
 		{"sit", "seat", "seating", "chair", "desk", "office", "aeron"},
-		{"camp", "camping", "tent", "stove", "lantern", "cooler", "backpack", "shelter"},
+		{"camp", "camping", "tent", "stove", "lantern", "cooler", "backpack", "shelter",
+			"headlamp", "flashlight", "canopy", "sleeping"},
 	}
 	var words []string
 	for _, g := range groups {
@@ -174,7 +274,8 @@ func fakeIntentMatches(prompt string) (string, json.RawMessage, []Citation, []So
 	groups := [][]string{
 		{"coffee", "brew", "keurig", "espresso", "cafe"},
 		{"sit", "seat", "seating", "chair", "desk", "office", "aeron"},
-		{"camp", "camping", "tent", "stove", "lantern", "cooler", "backpack", "shelter"},
+		{"camp", "camping", "tent", "stove", "lantern", "cooler", "backpack", "shelter",
+			"headlamp", "flashlight", "canopy", "sleeping"},
 	}
 	var active [][]string
 	for _, g := range groups {
@@ -287,6 +388,10 @@ func (h *HoldFake) Chat(ctx context.Context, d Dispatch, req ChatRequest) (provi
 	h.once.Do(func() { close(h.started) })
 	<-h.release
 	return Fake{}.Chat(ctx, d, req)
+}
+
+func (h *HoldFake) Embed(ctx context.Context, d Dispatch, req EmbedRequest) (providerResult, error) {
+	return Fake{}.Embed(ctx, d, req)
 }
 
 func (h *HoldFake) Models(ctx context.Context, d Dispatch) ([]Model, error) {

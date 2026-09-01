@@ -5,8 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -25,6 +23,7 @@ type providerResult struct {
 	parsed                    json.RawMessage
 	citations                 []Citation
 	sources                   []Source
+	vectors                   [][]float64
 	inputTokens, outputTokens int64
 	cost                      policy.MicroUSD
 	billed                    bool
@@ -162,258 +161,6 @@ func (s *Service) dispatchFor(ctx context.Context, a attempt) (Dispatch, error) 
 	return d, nil
 }
 
-func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-	plugin, err := pluginID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rt, err := s.route(req.Model)
-	if err != nil {
-		return nil, err
-	}
-	if !rt.usable() {
-		return nil, fmt.Errorf("%w: %s: %s", ErrRouteUncompiled, rt.name, rt.lastError)
-	}
-	if !rt.has("chat") {
-		return nil, ErrCapability
-	}
-	if imageCount(req) > 0 && !rt.has("vision") {
-		return nil, fmt.Errorf("%w: route %q has no vision capability", ErrCapability, rt.name)
-	}
-	if req.Grounding != nil {
-		if !rt.has("grounding") {
-			return nil, fmt.Errorf("%w: route %q has no grounding capability", ErrCapability, rt.name)
-		}
-		if req.Grounding.MaxQueries <= 0 {
-			return nil, fmt.Errorf("%w: grounding maxQueries must be positive", ErrCapability)
-		}
-	}
-	max, err := rt.estimateChat(req.MaxTokens)
-	if err != nil {
-		return nil, err
-	}
-
-	callID := newID()
-	started := s.now().UTC()
-	var reservation policy.Reservation
-	var rejected error
-	err = s.db.Tx(ctx, func(tx storage.Tx) error {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO core_ai_calls(id, reservation_id, plugin_id, job_id, operation, logical_model, status, reserved_micro_usd, started_at)
-			 VALUES (?, '', ?, ?, 'chat', ?, 'pending', ?, ?)`,
-			callID, plugin, jobID(ctx), req.Model, int64(max), rfc(started)); err != nil {
-			return err
-		}
-		res, rerr := s.gate.ReserveSpendTx(ctx, tx, plugin, max)
-		if policy.IsDomainRejection(rerr) {
-			_, _ = tx.Exec(ctx, `DELETE FROM core_ai_calls WHERE id = ?`, callID)
-			rejected = rerr
-			return nil
-		}
-		if rerr != nil {
-			return rerr
-		}
-		reservation = res
-		_, err := tx.Exec(ctx, `UPDATE core_ai_calls SET reservation_id = ? WHERE id = ?`, res.ID, callID)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if rejected != nil {
-		return nil, rejected
-	}
-
-	var (
-		text        string
-		parsed      json.RawMessage
-		citations   []Citation
-		sources     []Source
-		inTok       int64
-		outTok      int64
-		cost        policy.MicroUSD
-		finish      = "stop"
-		errClass    string
-		errDetail   string
-		attempts    []attemptOutcome
-		billedAny   bool
-		unknownBill bool
-	)
-	for i, a := range rt.attempts {
-		if ctx.Err() != nil {
-			unknownBill = billedAny
-			errClass = "cancelled"
-			break
-		}
-		if err := s.markDispatching(ctx, callID, i+1, a); err != nil {
-			return nil, err
-		}
-		d, err := s.dispatchFor(ctx, a)
-		if err != nil {
-			attempts = append(attempts, attemptOutcome{a: a, ordinal: i + 1, errClass: "credential", billed: false})
-			errClass = "credential"
-			continue
-		}
-		prov, ok := s.adapters[a.kind]
-		if !ok {
-			attempts = append(attempts, attemptOutcome{a: a, ordinal: i + 1, errClass: "provider", billed: false})
-			errClass = "provider"
-			continue
-		}
-		start := s.now()
-		out, perr := prov.Chat(ctx, d, req)
-		lat := s.now().Sub(start)
-		oc := attemptOutcome{
-			a: a, ordinal: i + 1, result: out, latency: lat,
-			errClass: out.errClass, billed: out.billed,
-		}
-		if perr != nil {
-			oc.detail = truncateDetail(perr.Error())
-			if oc.errClass == "" {
-				oc.errClass = "provider"
-			}
-		}
-		if oc.errClass != "" {
-			// One line per failed attempt, at the moment it fails. The call-level
-			// error names only the class; a provider that refuses a parameter or a
-			// model id can only say so here.
-			s.log.Warn("ai: attempt failed",
-				"call", callID, "plugin", plugin, "job", jobID(ctx),
-				"model", req.Model, "attempt", i+1,
-				"provider", a.providerID, "providerModel", a.model,
-				"status", out.providerStatus, "class", oc.errClass,
-				"latencyMs", lat.Milliseconds(), "detail", oc.detail)
-		}
-		if out.cost > max {
-			oc.errClass = "accounting_invariant"
-		}
-		attempts = append(attempts, oc)
-		inTok += out.inputTokens
-		outTok += out.outputTokens
-		next := cost + out.cost
-		if next < cost {
-			return nil, ErrUnbounded
-		}
-		cost = next
-		if out.billed {
-			billedAny = true
-		}
-		if perr == nil && oc.errClass == "" {
-			text = out.text
-			parsed = out.parsed
-			citations = out.citations
-			sources = out.sources
-			errClass = ""
-			errDetail = ""
-			break
-		}
-		errClass = oc.errClass
-		errDetail = oc.detail
-		if !spillover(oc.errClass) {
-			break
-		}
-	}
-
-	status := "succeeded"
-	if errClass != "" {
-		status = "failed"
-		finish = "error"
-	}
-	settled := cost
-	release := !billedAny && !unknownBill
-	if unknownBill {
-		settled = max
-		status = "failed"
-		if errClass == "" {
-			errClass = "ambiguous"
-		}
-	}
-	if settled > max {
-		settled = cost // truthful charge; policy will disable
-	}
-
-	// Accounting must complete even if the caller was cancelled after admission.
-	// A paid provider call that already ran still has to settle its reservation.
-	settleCtx := context.WithoutCancel(ctx)
-	err = s.db.Tx(settleCtx, func(tx storage.Tx) error {
-		now := rfc(s.now())
-		if _, err := tx.Exec(settleCtx,
-			`UPDATE core_ai_calls SET status = ?, error_class = ?, settled_micro_usd = ?, finalized_at = ? WHERE id = ?`,
-			status, errClass, int64(settled), now, callID); err != nil {
-			return err
-		}
-		for _, oc := range attempts {
-			bill := "unbilled"
-			if oc.billed {
-				bill = "billed"
-			}
-			if !oc.a.metered() {
-				bill = "subscription"
-			}
-			if unknownBill && oc.errClass != "" {
-				bill = "ambiguous"
-			}
-			st := "succeeded"
-			if oc.errClass != "" {
-				st = "failed"
-			}
-			if _, err := tx.Exec(settleCtx,
-				`UPDATE core_ai_attempts SET status = ?, error_class = ?, billing_state = ?, provider_status = ?,
-				        input_tokens = ?, output_tokens = ?, cost_micro_usd = ?, latency_ms = ?,
-				        provider_error = ?
-				  WHERE call_id = ? AND ordinal = ?`,
-				st, oc.errClass, bill, oc.result.providerStatus, oc.result.inputTokens, oc.result.outputTokens,
-				int64(oc.result.cost), oc.latency.Milliseconds(), oc.detail, callID, oc.ordinal); err != nil {
-				return err
-			}
-		}
-		if release {
-			if err := s.gate.ReleaseSpendTx(settleCtx, tx, reservation.ID); err != nil {
-				return err
-			}
-			settled = 0
-			_, _ = tx.Exec(settleCtx, `UPDATE core_ai_calls SET settled_micro_usd = 0 WHERE id = ?`, callID)
-		} else {
-			if err := s.gate.SettleSpendTx(settleCtx, tx, reservation.ID, settled); err != nil {
-				return err
-			}
-		}
-		eid, err := s.bus.PublishTx(settleCtx, tx, events.Input{
-			Type:    events.TypeAIUsage,
-			Source:  events.SourceAI,
-			Subject: callID,
-			Payload: map[string]any{
-				"plugin": plugin, "job": jobID(ctx), "operation": "chat",
-				"logicalModel": req.Model, "status": status,
-				"inputTokens": inTok, "outputTokens": outTok,
-				"attempts": len(attempts), "costMicroUSD": int64(settled),
-			},
-		})
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(settleCtx, `UPDATE core_ai_calls SET usage_event_id = ? WHERE id = ?`, eid, callID)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if status != "succeeded" {
-		if errDetail != "" {
-			return nil, fmt.Errorf("ai: call %s %s: %s: %s", callID, status, errClass, errDetail)
-		}
-		return nil, fmt.Errorf("ai: call %s %s: %s", callID, status, errClass)
-	}
-	return &ChatResponse{
-		Text: text, Parsed: parsed, Citations: citations, Sources: sources,
-		Finish: finish,
-		Usage: Usage{
-			InputTokens: inTok, OutputTokens: outTok, CostMicroUSD: settled,
-			Attempts: len(attempts),
-		},
-	}, nil
-}
-
 func imageCount(req ChatRequest) int {
 	n := 0
 	for _, m := range req.Messages {
@@ -436,7 +183,7 @@ type attemptOutcome struct {
 
 func spillover(class string) bool {
 	switch class {
-	case "rate_limit", "quota", "provider_5xx":
+	case "rate_limit", "quota", "provider_5xx", "unsupported":
 		return true
 	}
 	return false
@@ -482,34 +229,6 @@ func (s *Service) route(name string) (route, error) {
 	}
 	return route{}, ErrUnknownRoute
 }
-
-func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (Stream, error) {
-	resp, err := s.Chat(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	return &oneShot{resp: resp}, nil
-}
-
-func (s *Service) Embed(ctx context.Context, req EmbedRequest) (*EmbedResponse, error) {
-	return nil, ErrCapability
-}
-
-type oneShot struct {
-	resp *ChatResponse
-	done bool
-}
-
-func (s *oneShot) Recv() (Chunk, error) {
-	if s.resp == nil {
-		return Chunk{}, io.EOF
-	}
-	c := Chunk{Text: s.resp.Text, Finish: s.resp.Finish, Usage: &s.resp.Usage}
-	s.resp = nil
-	return c, nil
-}
-
-func (s *oneShot) Close() error { s.done = true; return nil }
 
 func rfc(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 

@@ -169,8 +169,8 @@ func (s *Server) handleAIAssign(w http.ResponseWriter, r *http.Request) {
 		s.writeAIResult(w, "list ai models", err)
 		return
 	}
-	inPrice, outPrice, priceErr := pricesForAttempt(provider, catalog, body.Model,
-		body.InputMicroUSDPerMillion, body.OutputMicroUSDPerMillion)
+	inPrice, outPrice, priceErr := pricesForAttemptCaps(provider, catalog, body.Model,
+		body.InputMicroUSDPerMillion, body.OutputMicroUSDPerMillion, embedOnly(need.Capabilities))
 	if priceErr != "" {
 		writeError(w, http.StatusBadRequest, CodeBadRequest, priceErr)
 		return

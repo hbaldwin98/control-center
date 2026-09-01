@@ -57,9 +57,14 @@ func (p *Plugin) Manifest() host.Manifest {
 				Purpose:      "Pick a dollar amount already written on an eBay, retail, or marketplace search hit.",
 			},
 			{
-				Name:         "intent-match",
+				Name:         "intent-expand",
 				Capabilities: []string{"chat"},
-				Purpose:      "Expand a stated intent into item words for matching collected titles.",
+				Purpose:      "Turn a stated intent into related auction-title words (tent, headlamp, lantern — not only the word camping).",
+			},
+			{
+				Name:         "intent-match",
+				Capabilities: []string{"embed"},
+				Purpose:      "Embed collected lot titles so intent search can match by meaning.",
 			},
 		},
 		Config: host.ConfigSpec{

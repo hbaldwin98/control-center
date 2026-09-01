@@ -313,6 +313,9 @@ func (p *Plugin) deleteAuction(ctx context.Context, h host.Host, id string) erro
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_intent_hits WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lot_embeddings WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE auction_id = ?`, id); err != nil {
 			return err
 		}
@@ -350,6 +353,9 @@ func (p *Plugin) deleteLot(ctx context.Context, h host.Host, auctionID, lotID st
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_intent_hits WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lot_embeddings WHERE lot_id = ?`, lotID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE id = ?`, lotID); err != nil {

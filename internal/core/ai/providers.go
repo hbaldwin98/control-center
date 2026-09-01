@@ -17,9 +17,9 @@ import (
 type ProviderKind string
 
 const (
-	// KindOpenAICompatible is the /v1 chat-completions + /v1 models contract that
-	// OpenAI, OpenRouter, and most self-hosted servers implement, authorized by a
-	// bearer API key.
+	// KindOpenAICompatible is the /v1 chat-completions, /v1 embeddings, and /v1 models
+	// contract that OpenAI, OpenRouter, and most self-hosted servers implement,
+	// authorized by a bearer API key.
 	KindOpenAICompatible ProviderKind = "openai_compatible"
 	// KindCodex is the ChatGPT subscription backend the Codex CLI talks to. It is
 	// authorized by a subscription OAuth credential rather than an API key, and it

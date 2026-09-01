@@ -798,6 +798,51 @@ kbd {
   width: 1%;
 }
 
+.cc-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cc-table__sort:hover {
+  color: var(--text);
+}
+
+.cc-table th[aria-sort="ascending"] .cc-table__sort,
+.cc-table th[aria-sort="descending"] .cc-table__sort {
+  color: var(--text);
+}
+
+.cc-table th.cc-num .cc-table__sort {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.cc-table__sort-indicator {
+  display: inline-block;
+  width: 0.9em;
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0;
+}
+
+.cc-table th[aria-sort="ascending"] .cc-table__sort-indicator,
+.cc-table th[aria-sort="descending"] .cc-table__sort-indicator {
+  opacity: 1;
+}
+
 .cc-num {
   text-align: right;
   color: var(--text-muted);

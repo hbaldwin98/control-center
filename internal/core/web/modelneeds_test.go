@@ -82,4 +82,8 @@ func TestDefaultRouteLimits(t *testing.T) {
 	if in != defaultVisionMaxInput {
 		t.Fatalf("vision input %d", in)
 	}
+	in, out = defaultRouteLimits([]string{"embed"})
+	if in != defaultEmbedMaxInput || out != defaultEmbedMaxOutput {
+		t.Fatalf("embed limits %d/%d", in, out)
+	}
 }

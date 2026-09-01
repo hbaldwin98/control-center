@@ -72,14 +72,28 @@ func compileRoute(in RouteInput, providers map[string]ProviderConfig) (route, er
 			inPerM:  policy.MicroUSD(ain.InputMicroUSDPerMillion),
 			outPerM: policy.MicroUSD(ain.OutputMicroUSDPerMillion),
 		}
-		if a.metered() && (a.inPerM <= 0 || a.outPerM <= 0) {
-			return r, fmt.Errorf("%w: route %q attempt %s/%s", ErrMissingPrice, in.Name, p.ID, ain.Model)
+		if a.metered() {
+			if a.inPerM <= 0 {
+				return r, fmt.Errorf("%w: route %q attempt %s/%s", ErrMissingPrice, in.Name, p.ID, ain.Model)
+			}
+			// Embedding-only routes charge input tokens. Chat still needs an output price
+			// because a completion is what the reservation is bounding.
+			if r.has("chat") && a.outPerM <= 0 {
+				return r, fmt.Errorf("%w: route %q attempt %s/%s", ErrMissingPrice, in.Name, p.ID, ain.Model)
+			}
 		}
 		r.attempts = append(r.attempts, a)
 	}
+	if !r.has("chat") && !r.has("embed") {
+		return r, fmt.Errorf("%w: route %q: declare chat or embed", ErrInvalidRoute, in.Name)
+	}
 	// Reject at build time what would otherwise only be discovered on the first paid
 	// request: an attempt plan whose maximum cost overflows is not a bounded plan.
-	if _, err := r.estimateChat(0); err != nil {
+	if r.has("chat") {
+		if _, err := r.estimateChat(0); err != nil {
+			return r, fmt.Errorf("%w: route %q: %v", ErrUnbounded, in.Name, err)
+		}
+	} else if _, err := r.estimateEmbed(); err != nil {
 		return r, fmt.Errorf("%w: route %q: %v", ErrUnbounded, in.Name, err)
 	}
 	return r, nil
@@ -129,6 +143,28 @@ func (r route) estimateChat(maxTokens int) (policy.MicroUSD, error) {
 	return total, nil
 }
 
+// estimateEmbed is the conservative maximum of embedding the route's full input
+// window. Embedding providers do not emit completion tokens, so output price is
+// not part of the bound.
+func (r route) estimateEmbed() (policy.MicroUSD, error) {
+	var total policy.MicroUSD
+	for _, a := range r.attempts {
+		if !a.metered() {
+			continue
+		}
+		in, err := tokensCost(int64(r.maxInputTokens), a.inPerM)
+		if err != nil {
+			return 0, err
+		}
+		next := total + in
+		if next < total {
+			return 0, ErrUnbounded
+		}
+		total = next
+	}
+	return total, nil
+}
+
 func tokensCost(tokens int64, perMillion policy.MicroUSD) (policy.MicroUSD, error) {
 	if tokens < 0 || perMillion <= 0 {
 		return 0, ErrUnbounded
@@ -149,6 +185,9 @@ func (a attempt) charge(inTok, outTok int64) (policy.MicroUSD, error) {
 	in, err := tokensCost(inTok, a.inPerM)
 	if err != nil {
 		return 0, err
+	}
+	if outTok == 0 || a.outPerM == 0 {
+		return in, nil
 	}
 	out, err := tokensCost(outTok, a.outPerM)
 	if err != nil {

@@ -20,8 +20,9 @@ const (
 	maxIntentQuery     = 400
 	keepIntentSearches = 10
 	intentMaxTokens    = 256
-	maxIntentWords     = 24
-	intentModel        = "intent-match"
+	maxIntentWords     = 36
+	intentExpandModel  = "intent-expand"
+	intentEmbedModel   = "intent-match"
 )
 
 var intentExpandSchema = json.RawMessage(`{
@@ -32,7 +33,7 @@ var intentExpandSchema = json.RawMessage(`{
 		"item_words":{
 			"type":"array",
 			"items":{"type":"string"},
-			"description":"Short words and product types that would appear in an auction title for this intent"
+			"description":"Related product types that would appear in an auction title for this intent, not only synonyms of the typed words"
 		}
 	}
 }`)
@@ -185,6 +186,9 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 	fail := func(err error) error {
 		return p.failIntent(jc, h, args.SearchID, q, now, err)
 	}
+	if err := p.pruneLotEmbeddings(jc, h); err != nil {
+		return fail(err)
+	}
 
 	cards, listed, err := p.loadIntentCards(jc, h)
 	if err != nil {
@@ -209,24 +213,21 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 
 	words, err := p.expandIntent(jc, h, q)
 	if err != nil {
-		_ = jc.Logf("intent expand: %v; matching the typed words against titles", err)
+		_ = jc.Logf("intent expand: %v; using the typed words", err)
 		words = intentWords(q, nil)
 	}
 	_ = jc.Logf("intent %q → %s", q, strings.Join(words, ", "))
-	if err := jc.Progress(0.45, "matching titles"); err != nil {
+	if err := jc.Progress(0.35, "embedding lots"); err != nil {
 		return err
 	}
 
-	var matches []intentMatch
-	for _, c := range cards {
-		if err := jc.Err(); err != nil {
-			return fail(err)
-		}
-		score, reason := scoreIntentCard(words, c)
-		if score <= 0 {
-			continue
-		}
-		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: reason})
+	matches, err := p.matchIntentSemantic(jc, h, intentQueryDocument(q, words), words, cards)
+	if err != nil {
+		_ = jc.Logf("intent embed: %v; matching expanded words against titles", err)
+		matches = matchIntentLexical(words, cards)
+	}
+	if err := jc.Progress(0.8, "ranking"); err != nil {
+		return err
 	}
 
 	kept := keepIntentMatches(matches, cards)
@@ -242,8 +243,9 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 }
 
 func (p *Plugin) loadIntentCards(ctx context.Context, h host.Host) ([]intentCard, int, error) {
+	now := h.Clock().Now()
 	rows, err := h.Store().Query(ctx, `SELECT l.id, l.title, IFNULL(l.description,''), IFNULL(a.identification,''),
-		IFNULL(a.model_or_sku,''), IFNULL(a.category,''), IFNULL(a.search_terms,''), IFNULL(a.notes,'')
+		IFNULL(a.model_or_sku,''), IFNULL(a.category,''), IFNULL(a.search_terms,''), IFNULL(a.notes,''), IFNULL(l.ends_at,'')
 		FROM bidrl_lots l
 		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
 		WHERE l.bucket != 'rejected'
@@ -256,8 +258,8 @@ func (p *Plugin) loadIntentCards(ctx context.Context, h host.Host) ([]intentCard
 	listed := 0
 	for rows.Next() {
 		var c intentCard
-		var termsRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.Identification, &c.Model, &c.Category, &termsRaw, &c.Notes); err != nil {
+		var termsRaw, endsAt string
+		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.Identification, &c.Model, &c.Category, &termsRaw, &c.Notes, &endsAt); err != nil {
 			return nil, 0, err
 		}
 		c.Terms = joinSearchTerms(termsRaw)
@@ -266,6 +268,9 @@ func (p *Plugin) loadIntentCards(ctx context.Context, h host.Host) ([]intentCard
 		c.Description = strings.TrimSpace(c.Description)
 		c.Notes = strings.TrimSpace(c.Notes)
 		if c.Identification == "" && c.Title == "" && c.Description == "" {
+			continue
+		}
+		if hasEnded(endsAt, now) {
 			continue
 		}
 		if c.Identification == "" {
@@ -289,11 +294,11 @@ func joinSearchTerms(raw string) string {
 }
 
 func (p *Plugin) expandIntent(jc hostjobs.Context, h host.Host, query string) ([]string, error) {
-	prompt := `Turn this intent into short words that would appear in an auction title. Include typical related items. It does not need to be exhaustive or perfect.
+	prompt := `Turn this intent into short product types that would appear in an auction title. Include typical related gear, not only synonyms of the words the user typed. It does not need to be exhaustive or perfect.
 
 Intent: ` + query
 	resp, err := h.AI().Chat(jc, hostai.ChatRequest{
-		Model:     intentModel,
+		Model:     intentExpandModel,
 		Schema:    intentExpandSchema,
 		MaxTokens: intentMaxTokens,
 		Messages:  []hostai.Message{{Role: hostai.RoleUser, Text: prompt}},
@@ -322,6 +327,27 @@ func decodeIntentWords(resp *hostai.ChatResponse) []string {
 		return nil
 	}
 	return parsed.ItemWords
+}
+
+func intentQueryDocument(query string, words []string) string {
+	q := strings.TrimSpace(query)
+	extra := strings.Join(words, " ")
+	if extra == "" || strings.EqualFold(extra, q) {
+		return q
+	}
+	return q + "\n" + extra
+}
+
+func matchIntentLexical(words []string, cards []intentCard) []intentMatch {
+	var matches []intentMatch
+	for _, c := range cards {
+		score, reason := scoreIntentCard(words, c)
+		if score <= 0 {
+			continue
+		}
+		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: reason})
+	}
+	return matches
 }
 
 func intentWords(query string, extra []string) []string {

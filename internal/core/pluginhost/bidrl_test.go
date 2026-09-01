@@ -94,16 +94,26 @@ routes:
         credential: fake-key
         inputMicroUSDPerMillion: 1000000
         outputMicroUSDPerMillion: 2000000
-  intent-match:
+  intent-expand:
     capabilities: [chat]
-    maxInputTokens: 2048
-    maxOutputTokens: 1024
+    maxInputTokens: 512
+    maxOutputTokens: 256
     attempts:
       - provider: fake
         model: echo
         credential: fake-key
         inputMicroUSDPerMillion: 1000000
         outputMicroUSDPerMillion: 2000000
+  intent-match:
+    capabilities: [embed]
+    maxInputTokens: 8192
+    maxOutputTokens: 1
+    attempts:
+      - provider: fake
+        model: echo
+        credential: fake-key
+        inputMicroUSDPerMillion: 1000000
+        outputMicroUSDPerMillion: 0
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -465,6 +475,10 @@ routes:
 		VALUES ('1004', '42', 'https://www.bidrl.com/auction/42/item/tent-1004', 'T1004', '4-person camping tent', 'pending', ?, 'Rainfly, stakes, and a stuff sack')`, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.Exec(ctx, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, bucket, created_at, description)
+		VALUES ('1005', '42', 'https://www.bidrl.com/auction/42/item/headlamp-1005', 'T1005', 'Black Diamond LED headlamp', 'pending', ?, '210 lumens, elastic strap')`, now); err != nil {
+		t.Fatal(err)
+	}
 
 	campBody, _ := json.Marshal(map[string]string{"query": "things that would help me camp"})
 	rec = serve(http.MethodPost, "/api/plugins/bidrl/intent", campBody)
@@ -482,8 +496,23 @@ routes:
 	if err := json.Unmarshal(rec.Body.Bytes(), &intentPage); err != nil {
 		t.Fatal(err)
 	}
-	if intentPage.Search.Query != "things that would help me camp" || intentPage.Search.Status != "ready" || len(intentPage.Lots) != 1 || intentPage.Lots[0].ID != "1004" {
-		t.Fatalf("camping should match the unscanned tent, not coffee or chairs: %+v", intentPage)
+	if intentPage.Search.Query != "things that would help me camp" || intentPage.Search.Status != "ready" {
+		t.Fatalf("camping search %+v", intentPage)
+	}
+	sawTent, sawLamp := false, false
+	for _, lot := range intentPage.Lots {
+		if lot.ID == "1001" {
+			t.Fatalf("coffee maker should not match camping: %+v", intentPage.Lots)
+		}
+		if lot.ID == "1004" {
+			sawTent = true
+		}
+		if lot.ID == "1005" {
+			sawLamp = true
+		}
+	}
+	if !sawTent || !sawLamp {
+		t.Fatalf("camping should match the tent and a headlamp with no camp in the title: %+v", intentPage)
 	}
 
 	rec = serve(http.MethodGet, "/api/plugins/bidrl/sites/auctions", nil)
@@ -555,10 +584,11 @@ routes:
 	if err := json.Unmarshal(rec.Body.Bytes(), &remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining.Auction.LotCount != 3 || len(remaining.Lots) != 3 {
+	if remaining.Auction.LotCount != 4 || len(remaining.Lots) != 4 {
 		t.Fatalf("after lot cleanup %+v", remaining)
 	}
-	sawTent := false
+	sawTent = false
+	sawLamp = false
 	for _, lot := range remaining.Lots {
 		if lot.ID == "1002" {
 			t.Fatal("ended lot still present")
@@ -566,9 +596,12 @@ routes:
 		if lot.ID == "1004" {
 			sawTent = true
 		}
+		if lot.ID == "1005" {
+			sawLamp = true
+		}
 	}
-	if !sawTent {
-		t.Fatalf("unscanned tent missing after cleanup %+v", remaining)
+	if !sawTent || !sawLamp {
+		t.Fatalf("unscanned tent or headlamp missing after cleanup %+v", remaining)
 	}
 
 	if _, err := store.Exec(ctx, `UPDATE bidrl_affiliate_auctions SET ends_at = ? WHERE id = '42'`, past); err != nil {

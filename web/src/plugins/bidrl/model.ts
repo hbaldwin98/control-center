@@ -301,6 +301,187 @@ function compareSimilarLots(a: Lot, b: Lot): number {
   return (a.endsAt || "").localeCompare(b.endsAt || "");
 }
 
+export type SortDir = "asc" | "desc";
+
+export type SortState<C extends string> = {
+  column: C;
+  dir: SortDir;
+};
+
+export type LotSortColumn =
+  | "lot"
+  | "name"
+  | "bid"
+  | "ends"
+  | "category"
+  | "price"
+  | "gap"
+  | "bucket"
+  | "why";
+
+export type AuctionSortColumn = "title" | "status" | "lots" | "ends";
+
+export type SitesSortColumn = "title" | "lots" | "ends";
+
+export const LOT_SORT_DEFAULTS: Record<LotSortColumn, SortDir> = {
+  lot: "asc",
+  name: "asc",
+  bid: "asc",
+  ends: "asc",
+  category: "asc",
+  price: "desc",
+  gap: "desc",
+  bucket: "asc",
+  why: "asc",
+};
+
+export const AUCTION_SORT_DEFAULTS: Record<AuctionSortColumn, SortDir> = {
+  title: "asc",
+  status: "asc",
+  lots: "desc",
+  ends: "asc",
+};
+
+export const SITES_SORT_DEFAULTS: Record<SitesSortColumn, SortDir> = {
+  title: "asc",
+  lots: "desc",
+  ends: "asc",
+};
+
+/** First click uses the column default, second reverses, third clears. */
+export function cycleSort<C extends string>(
+  current: SortState<C> | null,
+  column: C,
+  defaultDir: SortDir,
+): SortState<C> | null {
+  if (current?.column !== column) {
+    return { column, dir: defaultDir };
+  }
+  if (current.dir === defaultDir) {
+    return { column, dir: defaultDir === "asc" ? "desc" : "asc" };
+  }
+  return null;
+}
+
+type SortValue = { empty: true } | { empty: false; text?: string; number?: number };
+
+function textValue(s: string | undefined): SortValue {
+  const value = (s ?? "").trim();
+  return value === "" ? { empty: true } : { empty: false, text: value };
+}
+
+function numberValue(n: number | null | undefined): SortValue {
+  return n == null || Number.isNaN(n) ? { empty: true } : { empty: false, number: n };
+}
+
+function compareSortValues(a: SortValue, b: SortValue, dir: SortDir): number {
+  if (a.empty || b.empty) {
+    if (a.empty && b.empty) return 0;
+    return a.empty ? 1 : -1;
+  }
+  const inner =
+    a.text != null && b.text != null
+      ? a.text.localeCompare(b.text, undefined, { numeric: true, sensitivity: "base" })
+      : a.number != null && b.number != null
+        ? a.number - b.number
+        : 0;
+  return dir === "asc" ? inner : -inner;
+}
+
+function lotSortValue(lot: Lot, column: LotSortColumn): SortValue {
+  switch (column) {
+    case "lot":
+      return textValue(lot.lotCode);
+    case "name":
+      return textValue(lot.title || lot.id);
+    case "bid":
+      return numberValue(lot.currentBidCents);
+    case "ends":
+      return textValue(lot.endsAt);
+    case "category":
+      return textValue(lot.category);
+    case "price":
+      return numberValue(lot.priceCents);
+    case "gap":
+      return numberValue(lot.dealScore);
+    case "bucket":
+      return textValue(lot.bucket);
+    case "why":
+      return textValue(lot.matchReason);
+  }
+}
+
+function compareLots(a: Lot, b: Lot, sort: SortState<LotSortColumn>): number {
+  const n = compareSortValues(lotSortValue(a, sort.column), lotSortValue(b, sort.column), sort.dir);
+  return n !== 0 ? n : a.id.localeCompare(b.id, undefined, { numeric: true });
+}
+
+export function sortLots(lots: Lot[], sort: SortState<LotSortColumn> | null): Lot[] {
+  if (!sort) return lots;
+  return [...lots].sort((a, b) => compareLots(a, b, sort));
+}
+
+export function sortLotGroups(groups: SimilarGroup[], sort: SortState<LotSortColumn> | null): SimilarGroup[] {
+  if (!sort) return groups;
+  return groups
+    .map((group) => ({ ...group, lots: sortLots(group.lots, sort) }))
+    .sort((a, b) => {
+      const left = a.lots[0];
+      const right = b.lots[0];
+      if (!left && !right) return 0;
+      if (!left) return 1;
+      if (!right) return -1;
+      return compareLots(left, right, sort);
+    });
+}
+
+function auctionSortValue(auction: Auction, column: AuctionSortColumn): SortValue {
+  switch (column) {
+    case "title":
+      return textValue(auction.title || auction.id);
+    case "status":
+      return textValue(auction.status);
+    case "lots":
+      return numberValue(auction.lotCount);
+    case "ends":
+      return textValue(auction.endsAt);
+  }
+}
+
+export function sortAuctions(auctions: Auction[], sort: SortState<AuctionSortColumn> | null): Auction[] {
+  if (!sort) return auctions;
+  return [...auctions].sort((a, b) => {
+    const n = compareSortValues(
+      auctionSortValue(a, sort.column),
+      auctionSortValue(b, sort.column),
+      sort.dir,
+    );
+    return n !== 0 ? n : a.id.localeCompare(b.id, undefined, { numeric: true });
+  });
+}
+
+function sitesSortValue(auction: SitesAuction, column: SitesSortColumn): SortValue {
+  switch (column) {
+    case "title":
+      return textValue(auction.title || auction.id);
+    case "lots":
+      return numberValue(auction.itemCount);
+    case "ends":
+      return textValue(auction.endsAt);
+  }
+}
+
+export function sortSitesAuctions(
+  auctions: SitesAuction[],
+  sort: SortState<SitesSortColumn> | null,
+): SitesAuction[] {
+  if (!sort) return auctions;
+  return [...auctions].sort((a, b) => {
+    const n = compareSortValues(sitesSortValue(a, sort.column), sitesSortValue(b, sort.column), sort.dir);
+    return n !== 0 ? n : a.id.localeCompare(b.id, undefined, { numeric: true });
+  });
+}
+
 export type CleanupResult = {
   auctions: number;
   lots: number;

@@ -382,6 +382,49 @@ export function ActionsHeader({ label = "Actions" }: { label?: string | undefine
   );
 }
 
+/**
+ * A clickable column header. The table's current sort is `aria-sort` on the cell;
+ * the control itself names the column and, when active, the direction.
+ */
+export function SortHeader({
+  children,
+  active,
+  direction,
+  onClick,
+  numeric,
+}: {
+  children: string;
+  active?: boolean | undefined;
+  direction?: "asc" | "desc" | undefined;
+  onClick: () => void;
+  numeric?: boolean | undefined;
+}) {
+  const sorted = Boolean(active);
+  const descending = direction === "desc";
+  return (
+    <th
+      className={cx(numeric && "cc-num")}
+      aria-sort={sorted ? (descending ? "descending" : "ascending") : "none"}
+    >
+      <button
+        type="button"
+        className="cc-table__sort"
+        onClick={onClick}
+        aria-label={
+          sorted
+            ? `Sort by ${children}, currently ${descending ? "descending" : "ascending"}`
+            : `Sort by ${children}`
+        }
+      >
+        {children}
+        <span className="cc-table__sort-indicator" aria-hidden="true">
+          {sorted && descending ? "▼" : "▲"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 /* ---- liveness ---- */
 
 /**

@@ -160,6 +160,7 @@ type Usage struct {
 var (
 	ErrUnknownRoute      = errors.New("ai: unknown logical model")
 	ErrCapability        = errors.New("ai: capability not enabled on this route")
+	ErrInvalidInput      = errors.New("ai: embedding input is empty or too large")
 	ErrNoPlugin          = errors.New("ai: plugin identity missing")
 	ErrUnbounded         = errors.New("ai: request cost cannot be bounded")
 	ErrMissingPrice      = errors.New("ai: attempt is missing pricing")

@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  ActionsHeader,
   Badge,
   Button,
   Callout,
@@ -28,6 +29,7 @@ import {
   RelativeTime,
   Row,
   Select,
+  SortHeader,
   Stack,
   Table,
   Tabs,
@@ -38,26 +40,38 @@ import {
 } from "@cc/ui";
 import type { PluginModule, PluginSurfaceProps, UseSnapshotResult } from "@cc/ui";
 import {
+  AUCTION_SORT_DEFAULTS,
   LOT_CATEGORIES,
+  LOT_SORT_DEFAULTS,
+  SITES_SORT_DEFAULTS,
   cents,
   cleanupMessage,
   comparableHint,
+  cycleSort,
   eventBoundary,
   filterLabel,
   groupByLocation,
   groupSimilarLots,
+  sortAuctions,
+  sortLotGroups,
+  sortSitesAuctions,
   type Auction,
   type AuctionPage,
+  type AuctionSortColumn,
   type AuctionsPage,
   type CleanupResult,
   type FeedPage,
   type IntentPage,
   type LocationGroup,
   type Lot,
+  type LotSortColumn,
   type LotsPage,
   type SimilarGroup,
   type SitesAuction,
   type SitesPage,
+  type SitesSortColumn,
+  type SortDir,
+  type SortState,
 } from "./model";
 import "./index.css";
 
@@ -172,6 +186,37 @@ function bucketTone(bucket: string): "neutral" | "ok" | "warn" | "danger" {
   return "neutral";
 }
 
+function useColumnSort<C extends string>(defaults: Record<C, SortDir>) {
+  const [sort, setSort] = useState<SortState<C> | null>(null);
+  const onSort = (column: C) => setSort((cur) => cycleSort(cur, column, defaults[column]));
+  return { sort, onSort };
+}
+
+function SortedHead<C extends string>({
+  column,
+  sort,
+  onSort,
+  numeric,
+  children,
+}: {
+  column: C;
+  sort: SortState<C> | null;
+  onSort: (column: C) => void;
+  numeric?: boolean;
+  children: string;
+}) {
+  return (
+    <SortHeader
+      active={sort?.column === column}
+      direction={sort?.dir ?? "asc"}
+      numeric={numeric}
+      onClick={() => onSort(column)}
+    >
+      {children}
+    </SortHeader>
+  );
+}
+
 function BidrlLink({ href, children }: { href: string; children?: string }) {
   if (!href) return null;
   return (
@@ -211,9 +256,20 @@ function LocationSections<T>({
 }
 
 function CollectedTable({ auctions }: { auctions: Auction[] }) {
+  const { sort, onSort } = useColumnSort<AuctionSortColumn>(AUCTION_SORT_DEFAULTS);
+  const rows = useMemo(() => sortAuctions(auctions, sort), [auctions, sort]);
   return (
-    <Table head={<><th>Auction</th><th>Status</th><th>Lots</th><th>Ends</th></>}>
-      {auctions.map((a) => (
+    <Table
+      head={
+        <>
+          <SortedHead column="title" sort={sort} onSort={onSort}>Auction</SortedHead>
+          <SortedHead column="status" sort={sort} onSort={onSort}>Status</SortedHead>
+          <SortedHead column="lots" sort={sort} onSort={onSort} numeric>Lots</SortedHead>
+          <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+        </>
+      }
+    >
+      {rows.map((a) => (
         <tr key={a.id}>
           <td>
             <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title || a.id}</a>
@@ -239,9 +295,20 @@ function SitesTable({
   busy: string | null;
   onCollect: (url: string) => void;
 }) {
+  const { sort, onSort } = useColumnSort<SitesSortColumn>(SITES_SORT_DEFAULTS);
+  const rows = useMemo(() => sortSitesAuctions(auctions, sort), [auctions, sort]);
   return (
-    <Table head={<><th>Auction</th><th>Lots</th><th>Ends</th><th></th></>}>
-      {auctions.map((a) => (
+    <Table
+      head={
+        <>
+          <SortedHead column="title" sort={sort} onSort={onSort}>Auction</SortedHead>
+          <SortedHead column="lots" sort={sort} onSort={onSort} numeric>Lots</SortedHead>
+          <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+          <ActionsHeader label="Collect" />
+        </>
+      }
+    >
+      {rows.map((a) => (
         <tr key={a.id}>
           <td>
             {a.collected ? <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title}</a> : a.title}
@@ -270,6 +337,7 @@ function BidrlTabs() {
     { href: "/bidrl", label: "Feed" },
     { href: "/bidrl/auctions", label: "Auctions" },
     { href: "/bidrl/lots", label: "Lots" },
+    { href: "/bidrl/intent", label: "Intent" },
   ];
   return (
     <Tabs label="BIDRL sections">
@@ -279,7 +347,9 @@ function BidrlTabs() {
             ? path === "/bidrl"
             : item.href === "/bidrl/auctions"
               ? path === "/bidrl/auctions" || path.startsWith("/bidrl/auction/")
-              : path === "/bidrl/lots" || path.startsWith("/bidrl/lot/");
+              : item.href === "/bidrl/intent"
+                ? path === "/bidrl/intent"
+                : path === "/bidrl/lots" || path.startsWith("/bidrl/lot/");
         return (
           <a key={item.href} href={item.href} aria-current={current ? "page" : undefined}>
             {item.label}
@@ -501,19 +571,23 @@ function LotMeta({ lot }: { lot: Lot }) {
   );
 }
 
-function LotTitle({ lot }: { lot: Lot }) {
+function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: boolean }) {
+  const ident = lot.identification && lot.identification !== lot.title ? lot.identification : "";
+  const hint = ident || (showLotCode ? lot.lotCode : "");
   return (
     <>
       <a href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</a>
-      <Hint>
-        {lot.identification && lot.identification !== lot.title ? lot.identification : lot.lotCode}
-        {lot.url ? (
-          <>
-            {" · "}
-            <BidrlLink href={lot.url} />
-          </>
-        ) : null}
-      </Hint>
+      {hint || lot.url ? (
+        <Hint>
+          {hint}
+          {lot.url ? (
+            <>
+              {hint ? " · " : ""}
+              <BidrlLink href={lot.url} />
+            </>
+          ) : null}
+        </Hint>
+      ) : null}
     </>
   );
 }
@@ -542,7 +616,8 @@ function LotTableRows({ lots, extraClass, showWhy = false }: { lots: Lot[]; extr
       {lots.map((lot) => (
         <tr key={lot.id} className={extraClass}>
           <td><LotThumbLink lot={lot} /></td>
-          <td><LotTitle lot={lot} /></td>
+          <td className="cc-nowrap">{lot.lotCode || <Dash />}</td>
+          <td><LotTitle lot={lot} showLotCode={false} /></td>
           <td>{cents(lot.currentBidCents)}</td>
           <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
           <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
@@ -608,10 +683,13 @@ function LotBrowser({
   view: "grid" | "table";
   groupSimilar?: boolean;
 }) {
-  const groups = useMemo(
-    () => (groupSimilar ? groupSimilarLots(lots) : lots.map((lot) => ({ key: `id:${lot.id}`, label: lot.title, lots: [lot] }))),
-    [lots, groupSimilar],
-  );
+  const { sort, onSort } = useColumnSort<LotSortColumn>(LOT_SORT_DEFAULTS);
+  const groups = useMemo(() => {
+    const grouped = groupSimilar
+      ? groupSimilarLots(lots)
+      : lots.map((lot) => ({ key: `id:${lot.id}`, label: lot.title, lots: [lot] }));
+    return sortLotGroups(grouped, sort);
+  }, [lots, groupSimilar, sort]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   const showWhy = lots.some((lot) => Boolean(lot.matchReason));
@@ -635,14 +713,15 @@ function LotBrowser({
       head={
         <>
           <th></th>
-          <th>Lot</th>
-          <th>Bid</th>
-          <th>Ends</th>
-          <th>Category</th>
-          <th>Comparable</th>
-          <th className="cc-num">Gap</th>
-          <th>Bucket</th>
-          {showWhy ? <th>Why</th> : null}
+          <SortedHead column="lot" sort={sort} onSort={onSort}>Lot</SortedHead>
+          <SortedHead column="name" sort={sort} onSort={onSort}>Name</SortedHead>
+          <SortedHead column="bid" sort={sort} onSort={onSort}>Bid</SortedHead>
+          <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+          <SortedHead column="category" sort={sort} onSort={onSort}>Category</SortedHead>
+          <SortedHead column="price" sort={sort} onSort={onSort}>Price</SortedHead>
+          <SortedHead column="gap" sort={sort} onSort={onSort} numeric>Gap</SortedHead>
+          <SortedHead column="bucket" sort={sort} onSort={onSort}>Bucket</SortedHead>
+          {showWhy ? <SortedHead column="why" sort={sort} onSort={onSort}>Why</SortedHead> : null}
         </>
       }
     >
@@ -704,8 +783,9 @@ function LotGroupRows({
     <>
       <tr>
         <td><LotThumbLink lot={head} /></td>
+        <td className="cc-nowrap">{head.lotCode || <Dash />}</td>
         <td>
-          <LotTitle lot={head} />
+          <LotTitle lot={head} showLotCode={false} />
           {rest.length > 0 ? (
             <div>
               <Button size="sm" pressed={open} onClick={onToggle}>
@@ -972,98 +1052,20 @@ function LotsCatalog() {
   const [bucket, setBucket] = useState("all");
   const [category, setCategory] = useState("all");
   const [endingSoon, setEndingSoon] = useState(false);
-  const [intentDraft, setIntentDraft] = useState("");
-  const [intentBusy, setIntentBusy] = useState(false);
-  const [intentError, setIntentError] = useState<string | null>(null);
   const [view, setView] = useLotView();
   const snap = useLots(q, bucket, category, endingSoon ? "soon" : "");
-  const intent = useIntent();
   const disabled = snap.error instanceof PluginDisabledError;
-  const search = intent.status === "ready" ? intent.data.search : null;
-  const intentLots = intent.status === "ready" ? intent.data.lots : [];
-  const intentRunning = search?.status === "queued" || search?.status === "running" || intentBusy;
-
-  const ask = async () => {
-    const query = intentDraft.trim();
-    if (!query || intentRunning) return;
-    setIntentBusy(true);
-    setIntentError(null);
-    try {
-      await api.post("/intent", { query });
-      intent.reload();
-    } catch (err) {
-      setIntentError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIntentBusy(false);
-    }
-  };
 
   return (
     <Page>
       <PageHeader
         title="Lots"
-        lede="Every collected lot. Filter by text, or ask what you actually want — camping gear, not the word camp."
+        lede="Every collected lot. Filter by text, bucket, or category. Looking for something by purpose? Try the Intent tab."
       />
       <Stack>
         <BidrlTabs />
-        <Notices message={null} error={intentError} disabled={disabled} />
+        <Notices message={null} error={null} disabled={disabled} />
         <PluginAIHint pluginId="bidrl" />
-        <Card title="Intent">
-          <Stack>
-            <Hint>
-              Matches collected titles and descriptions. Photo identifications count too
-              when a lot has already been scanned — you do not need to scan first. One
-              cheap expansion call, not a pass over every photograph.
-            </Hint>
-            <Field label="What are you looking to do?">
-              <Textarea
-                value={intentDraft}
-                onChange={(e) => setIntentDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void ask();
-                  }
-                }}
-                placeholder="Things that would help me camp"
-                disabled={disabled || intentRunning}
-                rows={2}
-                aria-label="Intent search"
-              />
-            </Field>
-            <div className="bidrl-actions">
-              <Button variant="primary" disabled={disabled || intentRunning || !intentDraft.trim()} onClick={() => void ask()}>
-                {intentRunning ? "Matching…" : "Ask"}
-              </Button>
-            </div>
-            {search?.status === "failed" && search.lastError ? (
-              <Callout tone="danger">{search.lastError}</Callout>
-            ) : null}
-            {search && search.status !== "failed" ? (
-              <Hint>
-                {search.status === "ready"
-                  ? `${search.hitCount} match${search.hitCount === 1 ? "" : "es"} of ${search.scanned} lots`
-                  : `Looking through ${search.scanned || "collected"} lots…`}
-                {search.skipped > 0 ? ` · ${search.skipped} from title or description` : ""}
-                {search.query ? ` · “${search.query}”` : ""}
-              </Hint>
-            ) : null}
-          </Stack>
-        </Card>
-        {search && (search.status === "ready" || intentRunning) ? (
-          <Card title="Matches" actions={<ViewToggle value={view} onChange={setView} />}>
-            {intent.status === "loading" || intentRunning ? <Loading label="Matching lots to your intent…" /> : null}
-            {intent.status === "error" && !disabled ? <Callout tone="danger">{intent.error.message}</Callout> : null}
-            {intent.status === "ready" && search.status === "ready" ? (
-              <LotBrowser
-                lots={intentLots}
-                empty="Nothing in the collected lots serves that intent."
-                view={view}
-                groupSimilar={false}
-              />
-            ) : null}
-          </Card>
-        ) : null}
         <Card title="Filter">
           <Toolbar>
             <Field label="Find">
@@ -1115,6 +1117,106 @@ function LotsCatalog() {
             <LotBrowser lots={snap.data.lots} empty="No lots match these filters." view={view} />
           ) : null}
         </Card>
+      </Stack>
+    </Page>
+  );
+}
+
+function IntentSearch() {
+  const [intentDraft, setIntentDraft] = useState("");
+  const [intentBusy, setIntentBusy] = useState(false);
+  const [intentError, setIntentError] = useState<string | null>(null);
+  const [view, setView] = useLotView();
+  const intent = useIntent();
+  const disabled = intent.error instanceof PluginDisabledError;
+  const search = intent.status === "ready" ? intent.data.search : null;
+  const intentLots = intent.status === "ready" ? intent.data.lots : [];
+  const intentRunning = search?.status === "queued" || search?.status === "running" || intentBusy;
+
+  const ask = async () => {
+    const query = intentDraft.trim();
+    if (!query || intentRunning) return;
+    setIntentBusy(true);
+    setIntentError(null);
+    try {
+      await api.post("/intent", { query });
+      intent.reload();
+    } catch (err) {
+      setIntentError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIntentBusy(false);
+    }
+  };
+
+  return (
+    <Page>
+      <PageHeader
+        title="Intent"
+        lede="Ask for what you actually want — camping gear, not the word camp."
+      />
+      <Stack>
+        <BidrlTabs />
+        <Notices message={null} error={intentError} disabled={disabled} />
+        <PluginAIHint pluginId="bidrl" />
+        <Card title="Intent">
+          <Stack>
+            <Hint>
+              One chat call turns your intent into related gear (headlamp, lantern, tent —
+              not only the word you typed). Those words are embedded and ranked against
+              collected titles and descriptions. Photo identifications count too when a
+              lot has already been scanned.
+            </Hint>
+            <Field label="What are you looking to do?">
+              <Textarea
+                value={intentDraft}
+                onChange={(e) => setIntentDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void ask();
+                  }
+                }}
+                placeholder="Things that would help me camp"
+                disabled={disabled || intentRunning}
+                rows={2}
+                aria-label="Intent search"
+              />
+            </Field>
+            <div className="bidrl-actions">
+              <Button variant="primary" disabled={disabled || intentRunning || !intentDraft.trim()} onClick={() => void ask()}>
+                {intentRunning ? "Matching…" : "Ask"}
+              </Button>
+            </div>
+            {search?.status === "failed" && search.lastError ? (
+              <Callout tone="danger">{search.lastError}</Callout>
+            ) : null}
+            {search && search.status !== "failed" ? (
+              <Hint>
+                {search.status === "ready"
+                  ? `${search.hitCount} match${search.hitCount === 1 ? "" : "es"} of ${search.scanned} lots`
+                  : `Looking through ${search.scanned || "collected"} lots…`}
+                {search.skipped > 0 ? ` · ${search.skipped} from title or description` : ""}
+                {search.query ? ` · “${search.query}”` : ""}
+              </Hint>
+            ) : null}
+          </Stack>
+        </Card>
+        {search && (search.status === "ready" || intentRunning) ? (
+          <Card title="Matches" actions={<ViewToggle value={view} onChange={setView} />}>
+            {intent.status === "loading" || intentRunning ? <Loading label="Matching lots to your intent…" /> : null}
+            {intent.status === "error" && !disabled ? <Callout tone="danger">{intent.error.message}</Callout> : null}
+            {intent.status === "ready" && search.status === "ready" ? (
+              <LotBrowser
+                lots={intentLots}
+                empty="Nothing in the collected lots serves that intent."
+                view={view}
+                groupSimilar={false}
+              />
+            ) : null}
+          </Card>
+        ) : (
+          <EmptyState>Describe what you want to do and BIDRL will rank collected lots against it.</EmptyState>
+        )}
       </Stack>
     </Page>
   );
@@ -1369,6 +1471,7 @@ const bidrl: PluginModule = {
     { path: "/bidrl", element: <Feed /> },
     { path: "/bidrl/auctions", element: <Auctions /> },
     { path: "/bidrl/lots", element: <LotsCatalog /> },
+    { path: "/bidrl/intent", element: <IntentSearch /> },
     { path: "/bidrl/auction/:id", element: <AuctionView /> },
     { path: "/bidrl/lot/:id", element: <LotView /> },
   ],

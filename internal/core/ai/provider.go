@@ -19,6 +19,8 @@ type Provider interface {
 	// Chat runs one attempt. Returning a result with billed set means the provider
 	// charged for it, whatever the outcome.
 	Chat(ctx context.Context, d Dispatch, req ChatRequest) (providerResult, error)
+	// Embed runs one embedding attempt. billed has the same meaning as Chat.
+	Embed(ctx context.Context, d Dispatch, req EmbedRequest) (providerResult, error)
 	// Models lists what this credential can reach. ErrNotDiscoverable is a valid
 	// answer for a provider with no catalog endpoint.
 	Models(ctx context.Context, d Dispatch) ([]Model, error)

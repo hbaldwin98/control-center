@@ -4,11 +4,15 @@ import {
   cents,
   cleanupMessage,
   comparableHint,
+  cycleSort,
   eventBoundary,
   filterLabel,
   groupByLocation,
   groupSimilarLots,
   locationLabel,
+  sortAuctions,
+  sortLotGroups,
+  sortLots,
   type Lot,
 } from "./model";
 
@@ -76,6 +80,136 @@ describe("groupSimilarLots", () => {
     expect(groups[1]?.lots).toHaveLength(2);
     expect(groups[2]?.key).toBe("id:5");
     expect(groups[3]?.key).toBe("id:6");
+  });
+});
+
+describe("cycleSort", () => {
+  it("sets the default, reverses, then clears", () => {
+    const first = cycleSort(null, "bid", "asc");
+    expect(first).toEqual({ column: "bid", dir: "asc" });
+    const second = cycleSort(first, "bid", "asc");
+    expect(second).toEqual({ column: "bid", dir: "desc" });
+    expect(cycleSort(second, "bid", "asc")).toBeNull();
+  });
+
+  it("starts a new column from that column's default", () => {
+    expect(cycleSort({ column: "bid", dir: "asc" }, "price", "desc")).toEqual({
+      column: "price",
+      dir: "desc",
+    });
+  });
+});
+
+describe("sortLots", () => {
+  it("orders lot codes numerically and keeps blanks last", () => {
+    const sorted = sortLots(
+      [
+        fakeLot({ id: "1", lotCode: "A10" }),
+        fakeLot({ id: "2", lotCode: "" }),
+        fakeLot({ id: "3", lotCode: "A2" }),
+      ],
+      { column: "lot", dir: "asc" },
+    );
+    expect(sorted.map((l) => l.id)).toEqual(["3", "1", "2"]);
+  });
+
+  it("sorts names, bids, prices, and expirations", () => {
+    const lots = [
+      fakeLot({
+        id: "cheap",
+        title: "Zebra",
+        currentBidCents: 100,
+        priceCents: 500,
+        endsAt: "2026-09-03T00:00:00Z",
+      }),
+      fakeLot({
+        id: "dear",
+        title: "Apple",
+        currentBidCents: 900,
+        priceCents: 4000,
+        endsAt: "2026-09-01T00:00:00Z",
+      }),
+      fakeLot({ id: "open", title: "Mango" }),
+    ];
+    expect(sortLots(lots, { column: "name", dir: "asc" }).map((l) => l.id)).toEqual([
+      "dear",
+      "open",
+      "cheap",
+    ]);
+    expect(sortLots(lots, { column: "bid", dir: "asc" }).map((l) => l.id)).toEqual([
+      "cheap",
+      "dear",
+      "open",
+    ]);
+    expect(sortLots(lots, { column: "price", dir: "desc" }).map((l) => l.id)).toEqual([
+      "dear",
+      "cheap",
+      "open",
+    ]);
+    expect(sortLots(lots, { column: "ends", dir: "asc" }).map((l) => l.id)).toEqual([
+      "dear",
+      "cheap",
+      "open",
+    ]);
+  });
+
+  it("leaves missing values last when the direction is reversed", () => {
+    const sorted = sortLots(
+      [
+        fakeLot({ id: "a", currentBidCents: 100 }),
+        fakeLot({ id: "b" }),
+        fakeLot({ id: "c", currentBidCents: 300 }),
+      ],
+      { column: "bid", dir: "desc" },
+    );
+    expect(sorted.map((l) => l.id)).toEqual(["c", "a", "b"]);
+  });
+});
+
+describe("sortLotGroups", () => {
+  it("reorders groups by the sorted representative", () => {
+    const groups = groupSimilarLots([
+      fakeLot({ id: "k1", title: "Keurig K-Supreme Plus", modelOrSku: "K-Supreme", currentBidCents: 2000 }),
+      fakeLot({ id: "k2", title: "Keurig", modelOrSku: "K-Supreme", currentBidCents: 800 }),
+      fakeLot({ id: "chair", title: "Office mesh chair", currentBidCents: 400 }),
+    ]);
+    const sorted = sortLotGroups(groups, { column: "bid", dir: "asc" });
+    expect(sorted.map((g) => g.lots[0]?.id)).toEqual(["chair", "k2"]);
+    expect(sorted[1]?.lots.map((l) => l.id)).toEqual(["k2", "k1"]);
+  });
+});
+
+describe("sortAuctions", () => {
+  it("orders collected auctions by lot count and close time", () => {
+    const auctions = [
+      {
+        id: "1",
+        url: "",
+        title: "B",
+        status: "open",
+        lotCount: 2,
+        lastError: "",
+        collectedAt: "",
+        endsAt: "2026-09-03T00:00:00Z",
+        affiliateName: "",
+        city: "",
+      },
+      {
+        id: "2",
+        url: "",
+        title: "A",
+        status: "closed",
+        lotCount: 9,
+        lastError: "",
+        collectedAt: "",
+        endsAt: "2026-09-01T00:00:00Z",
+        affiliateName: "",
+        city: "",
+      },
+    ];
+    expect(sortAuctions(auctions, { column: "title", dir: "asc" }).map((a) => a.id)).toEqual(["2", "1"]);
+    expect(sortAuctions(auctions, { column: "lots", dir: "desc" }).map((a) => a.id)).toEqual(["2", "1"]);
+    expect(sortAuctions(auctions, { column: "ends", dir: "asc" }).map((a) => a.id)).toEqual(["2", "1"]);
   });
 });
 

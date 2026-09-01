@@ -192,5 +192,17 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			CREATE INDEX bidrl_intent_hits_search ON bidrl_intent_hits(search_id);
 			CREATE INDEX bidrl_intent_hits_lot ON bidrl_intent_hits(lot_id);
 		`,
+	}, {
+		Version: 6,
+		Name:    "lot_embeddings",
+		Up: `
+			CREATE TABLE bidrl_lot_embeddings (
+				lot_id      TEXT PRIMARY KEY,
+				text_hash   TEXT NOT NULL,
+				dims        INTEGER NOT NULL,
+				vector      BLOB NOT NULL,
+				updated_at  TEXT NOT NULL
+			) STRICT;
+		`,
 	}})
 }

@@ -184,9 +184,19 @@ citations, sources, and aggregate usage.
 
 ### Embeddings
 
-`EmbedRequest` names a logical embedding route and contains a finite list of bounded
-inputs. `EmbedResponse` returns vectors plus aggregate `Usage`. Empty or oversized input,
-or a route without embedding capability, fails before reservation or dispatch.
+`EmbedRequest` names a logical embedding route and contains 1..64 inputs of at most 8192
+characters each. `EmbedResponse` returns one vector per input plus aggregate `Usage`.
+Empty or oversized input, or a route without embedding capability, fails before
+reservation or dispatch.
+
+`openai_compatible` providers call `POST {base}/embeddings`. Metered embedding routes
+reserve input tokens only; output price may be zero. The `codex` adapter does not embed
+and classifies the attempt as `unsupported` so a later attempt on the plan can spill over
+to a provider that does. `fake` returns deterministic vectors with a few shared concept
+axes so tests can ask for "coffee" and retrieve a Keurig.
+
+Embedding cost is accounted like chat: reserve, dispatch, settle, usage event. The
+operation recorded on the call is `embed`.
 
 ---
 
@@ -198,7 +208,7 @@ the UI; `config/models.yaml` is a seed applied only to an empty installation.
 
 | Kind | Transport | Authorized by |
 |---|---|---|
-| `openai_compatible` | `/chat/completions` and `/models` | an API-key credential |
+| `openai_compatible` | `/chat/completions`, `/embeddings`, and `/models` | an API-key credential |
 | `codex` | the ChatGPT backend the Codex CLI uses: `/responses` (SSE) and `/models` | a subscription OAuth credential |
 | `fake` | in process, no network | any credential |
 
