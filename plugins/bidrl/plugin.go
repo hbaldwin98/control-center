@@ -59,7 +59,7 @@ func (p *Plugin) Manifest() host.Manifest {
 			{
 				Name:         "intent-match",
 				Capabilities: []string{"chat"},
-				Purpose:      "Judge which collected lots would serve a person's intent, from photograph identifications.",
+				Purpose:      "Expand a stated intent into item words for matching collected titles.",
 			},
 		},
 		Config: host.ConfigSpec{

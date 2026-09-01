@@ -20,7 +20,7 @@ plugins/bidrl/
   analyze.go       one vision call per lot, category + search_terms
   price.go         grounded pricing with stored citations
   jobs.go          collect, scan, reprice, refresh, enrich, search, intent, discover
-  intent.go        user-triggered intent match over collected identifications
+  intent.go        user-triggered intent match over collected titles
 
 web/src/plugins/bidrl/
   index.tsx        one nav item; Feed / Auctions / Lots tabs; auction and lot views
@@ -159,7 +159,7 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 | `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` chat with a cited-price schema | pick a `$` amount already written in those hits |
-| `AI()` chat over stored identifications | match collected lots to a stated intent |
+| `AI()` chat to expand an intent into item words | match collected titles (and identifications, if already scanned) |
 | `Jobs()` enqueue-only, long-running with progress | user-triggered collection, scans, pricing, bid refreshes, enrich, search, intent, and SITES discovery |
 | `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.lot.enriched` |
 | `Store()` / `Blobs()` | lots, analyses, cached photos |
@@ -223,16 +223,15 @@ can be collected from the list instead of a pasted URL.
 ## Intent
 
 Intent matching is user-triggered (`POST/GET /intent`) from the lots catalog. It does not
-hit BidRL. It reads the stored photograph identifications of scanned lots, and the title
-and description of lots that have not been scanned yet, then asks a cheap chat model which
-of those lots would actually serve what the operator wants — camping gear from "things
-that would help me camp", not a keyword hit on the word camp.
+hit BidRL and does not look at photographs. One cheap chat call expands the intent into
+item words ("things that would help me camp" → tent, stove, cooler). Those words are then
+matched locally against each collected lot's title and description. A scan is not
+required: a title that says "camping tent" is enough. Stored photograph identifications
+and search terms count too when they already exist, but they do not win over a useful
+title.
 
-When photographs have been identified, those identifications win: BidRL titles still lie.
-When a lot is still pending a scan, the listing text is the evidence. Generic skipped
-commodities still count: a folding chair the deal pipeline discarded is still a camping
-chair. Each hit stores a score and a one-line reason from the model. The catalog's Find
-box stays lexical.
+It does not need to be perfect. Generic skipped commodities still count. Each hit stores a
+score and a short reason. The catalog's Find box stays a direct text filter.
 
 ---
 
@@ -262,9 +261,8 @@ current bid, a local countdown from stored `ends_at`, category, and a link back 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
 paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"
 deletes closed auctions, leftover closed lots, and stale SITES rows. `/bidrl/lots` is the
-catalog: intent matching over photograph identifications and, for unscanned lots, title
-and description; then local text, bucket, category, and ending-soon (open lots ending
-within 24 hours).
+catalog: intent matching over titles (and identifications when already scanned), then
+local text, bucket, category, and ending-soon (open lots ending within 24 hours).
 Auction and lot views add a bidder card (high bidder, bid count, min bid, reserve,
 extended) and Open on BidRL. The lot page shows photos in a large stage with a thumbnail
 strip; arrow keys and Prev/Next move between them, and clicking the photo opens a
@@ -296,9 +294,9 @@ full-window view.
 - Scan, reprice, bid-refresh, enrich, search, intent, and SITES-discover job definitions are enqueue-only, have concurrency `1`
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation
-  fails. Intent matching batches collected lots into chat calls on `intent-match`
-  and does not re-read photographs: scanned lots use stored identifications, unscanned
-  lots use title and description.
+  fails. Intent matching makes one `intent-match` chat call to expand the query into
+  item words, then scores collected titles (and stored identifications, when present)
+  locally. It does not re-read photographs.
 - ItemData and pusher traffic to BidRL is paced at 400ms with one request in flight. Three
   consecutive HTTP 429 or 403 responses stop the job.
 - Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs, AI

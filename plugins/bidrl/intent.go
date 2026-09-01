@@ -16,32 +16,23 @@ import (
 )
 
 const (
-	intentBatchSize    = 40
-	minIntentScore     = 0.6
 	maxIntentHits      = 80
 	maxIntentQuery     = 400
 	keepIntentSearches = 10
-	intentMaxTokens    = 1024
+	intentMaxTokens    = 256
+	maxIntentWords     = 24
 	intentModel        = "intent-match"
 )
 
-var intentSchema = json.RawMessage(`{
+var intentExpandSchema = json.RawMessage(`{
 	"type":"object",
 	"additionalProperties":false,
-	"required":["matches"],
+	"required":["item_words"],
 	"properties":{
-		"matches":{
+		"item_words":{
 			"type":"array",
-			"items":{
-				"type":"object",
-				"additionalProperties":false,
-				"required":["id","score","reason"],
-				"properties":{
-					"id":{"type":"string","description":"The lot id from the list"},
-					"score":{"type":"number","description":"0-1 how well this lot serves the intent"},
-					"reason":{"type":"string","description":"One short clause: why this lot helps"}
-				}
-			}
+			"items":{"type":"string"},
+			"description":"Short words and product types that would appear in an auction title for this intent"
 		}
 	}
 }`)
@@ -70,10 +61,6 @@ type intentMatch struct {
 	ID     string  `json:"id"`
 	Score  float64 `json:"score"`
 	Reason string  `json:"reason"`
-}
-
-type intentResult struct {
-	Matches []intentMatch `json:"matches"`
 }
 
 func (p *Plugin) handlePostIntent(w http.ResponseWriter, r *http.Request) {
@@ -203,12 +190,11 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 	if err != nil {
 		return fail(err)
 	}
-	_ = jc.Logf("intent %q: %d lots (%d from listing text)", q, len(cards), listed)
-	if err := jc.Progress(0.05, fmt.Sprintf("reading %d lots", len(cards))); err != nil {
+	_ = jc.Logf("intent %q: %d lots (%d title-only)", q, len(cards), listed)
+	if err := jc.Progress(0.1, "expanding intent"); err != nil {
 		return err
 	}
 
-	var matches []intentMatch
 	if len(cards) == 0 {
 		if err := p.storeIntentHits(jc, h, args.SearchID, q, 0, 0, nil); err != nil {
 			return fail(err)
@@ -221,23 +207,26 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 		return jc.Progress(1, "no lots")
 	}
 
-	batches := (len(cards) + intentBatchSize - 1) / intentBatchSize
-	for i := 0; i < len(cards); i += intentBatchSize {
+	words, err := p.expandIntent(jc, h, q)
+	if err != nil {
+		_ = jc.Logf("intent expand: %v; matching the typed words against titles", err)
+		words = intentWords(q, nil)
+	}
+	_ = jc.Logf("intent %q → %s", q, strings.Join(words, ", "))
+	if err := jc.Progress(0.45, "matching titles"); err != nil {
+		return err
+	}
+
+	var matches []intentMatch
+	for _, c := range cards {
 		if err := jc.Err(); err != nil {
 			return fail(err)
 		}
-		end := i + intentBatchSize
-		if end > len(cards) {
-			end = len(cards)
+		score, reason := scoreIntentCard(words, c)
+		if score <= 0 {
+			continue
 		}
-		batch := cards[i:end]
-		n := i/intentBatchSize + 1
-		_ = jc.Progress(0.05+0.85*float64(i)/float64(len(cards)), fmt.Sprintf("batch %d of %d", n, batches))
-		got, err := p.judgeIntentBatch(jc, h, q, batch)
-		if err != nil {
-			return fail(err)
-		}
-		matches = append(matches, got...)
+		matches = append(matches, intentMatch{ID: c.ID, Score: score, Reason: reason})
 	}
 
 	kept := keepIntentMatches(matches, cards)
@@ -299,55 +288,23 @@ func joinSearchTerms(raw string) string {
 	return strings.Join(strings.Fields(strings.Trim(raw, "[]\"")), " ")
 }
 
-func (p *Plugin) judgeIntentBatch(jc hostjobs.Context, h host.Host, query string, batch []intentCard) ([]intentMatch, error) {
-	var b strings.Builder
-	b.WriteString(`Match collected auction lots to the person's intent.
+func (p *Plugin) expandIntent(jc hostjobs.Context, h host.Host, query string) ([]string, error) {
+	prompt := `Turn this intent into short words that would appear in an auction title. Include typical related items. It does not need to be exhaustive or perfect.
 
-A lot marked photos was identified from photographs — judge from that identification. BidRL titles often lie; do not use the listing title against a photos row.
-A lot marked listing has not been scanned. Judge it from the title and description.
-Include a lot only if it would actually help with the intent. A propane stove helps camping; a television does not.
-Do not match on coincidental words. Empty matches is correct when nothing serves the intent.
-
-Intent: `)
-	b.WriteString(query)
-	b.WriteString("\n\nLots:\n")
-	for _, c := range batch {
-		b.WriteString(formatIntentCard(c))
-		b.WriteByte('\n')
-	}
-	b.WriteString("\nReply with JSON matches: id, score (0-1), reason (one short clause). Omit lots below 0.6.")
-
+Intent: ` + query
 	resp, err := h.AI().Chat(jc, hostai.ChatRequest{
 		Model:     intentModel,
-		Schema:    intentSchema,
+		Schema:    intentExpandSchema,
 		MaxTokens: intentMaxTokens,
-		Messages: []hostai.Message{{
-			Role: hostai.RoleUser,
-			Text: b.String(),
-		}},
+		Messages:  []hostai.Message{{Role: hostai.RoleUser, Text: prompt}},
 	})
 	if err != nil {
 		return nil, err
 	}
-	return decodeIntentMatches(resp), nil
+	return intentWords(query, decodeIntentWords(resp)), nil
 }
 
-func formatIntentCard(c intentCard) string {
-	clip := func(s string, n int) string {
-		s = strings.Join(strings.Fields(s), " ")
-		if len(s) <= n {
-			return s
-		}
-		return s[:n]
-	}
-	if c.Identification != "" {
-		return c.ID + " | photos | " + c.Category + " | " + clip(c.Identification, 200) + " | " +
-			clip(c.Model, 80) + " | " + clip(c.Terms, 160) + " | " + clip(c.Notes, 200)
-	}
-	return c.ID + " | listing | " + clip(c.Title, 200) + " | " + clip(c.Description, 280)
-}
-
-func decodeIntentMatches(resp *hostai.ChatResponse) []intentMatch {
+func decodeIntentWords(resp *hostai.ChatResponse) []string {
 	if resp == nil {
 		return nil
 	}
@@ -358,11 +315,61 @@ func decodeIntentMatches(resp *hostai.ChatResponse) []intentMatch {
 	if len(raw) == 0 {
 		return nil
 	}
-	var parsed intentResult
+	var parsed struct {
+		ItemWords []string `json:"item_words"`
+	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil
 	}
-	return parsed.Matches
+	return parsed.ItemWords
+}
+
+func intentWords(query string, extra []string) []string {
+	var in []string
+	in = append(in, extra...)
+	in = append(in, contentTokens(query)...)
+	var out []string
+	for _, w := range in {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		if _, stop := queryStop[strings.ToLower(w)]; stop {
+			continue
+		}
+		if _, stop := intentStop[strings.ToLower(w)]; stop {
+			continue
+		}
+		if len(w) < 3 {
+			continue
+		}
+		out = append(out, w)
+	}
+	return uniqueFold(out, maxIntentWords)
+}
+
+var intentStop = map[string]struct{}{
+	"help": {}, "helps": {}, "want": {}, "wants": {}, "thing": {}, "things": {},
+	"that": {}, "this": {}, "would": {}, "could": {}, "make": {}, "looking": {},
+	"look": {}, "something": {}, "stuff": {}, "need": {}, "needs": {}, "please": {},
+	"find": {}, "get": {}, "useful": {}, "use": {}, "using": {}, "really": {},
+	"just": {}, "like": {}, "also": {}, "some": {}, "any": {},
+}
+
+func scoreIntentCard(words []string, c intentCard) (float64, string) {
+	q := strings.Join(words, " ")
+	if strings.TrimSpace(q) == "" {
+		return 0, ""
+	}
+	extra := strings.TrimSpace(c.Description + " " + c.Terms + " " + c.Notes)
+	score, reason := matchScore(q, c.Title, c.Identification, c.Model, c.Category, extra)
+	if score <= 0 {
+		return 0, ""
+	}
+	if reason == "" {
+		reason = "title"
+	}
+	return score, reason
 }
 
 func keepIntentMatches(matches []intentMatch, cards []intentCard) []intentMatch {
@@ -383,10 +390,7 @@ func keepIntentMatches(matches []intentMatch, cards []intentCard) []intentMatch 
 		if score < 0 {
 			score = 0
 		}
-		if score > 1 {
-			score = 1
-		}
-		if score < minIntentScore {
+		if score <= 0 {
 			continue
 		}
 		reason := strings.Join(strings.Fields(m.Reason), " ")

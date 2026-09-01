@@ -669,53 +669,51 @@ func TestLookupComparablesRetriesAfterEngineError(t *testing.T) {
 	}
 }
 
-func TestDecodeIntentMatchesUsesStructuredJSON(t *testing.T) {
+func TestDecodeIntentWordsUsesStructuredJSON(t *testing.T) {
 	t.Parallel()
-	raw := json.RawMessage(`{"matches":[{"id":"1001","score":0.9,"reason":"propane stove for camp cooking"}]}`)
-	got := decodeIntentMatches(&hostai.ChatResponse{Parsed: raw})
-	if len(got) != 1 || got[0].ID != "1001" || got[0].Score != 0.9 {
+	raw := json.RawMessage(`{"item_words":["tent","stove","cooler"]}`)
+	got := decodeIntentWords(&hostai.ChatResponse{Parsed: raw})
+	if len(got) != 3 || got[0] != "tent" {
 		t.Fatalf("%+v", got)
 	}
 }
 
-func TestKeepIntentMatchesDropsUnknownAndWeak(t *testing.T) {
+func TestKeepIntentMatchesDropsUnknownAndEmpty(t *testing.T) {
 	t.Parallel()
 	cards := []intentCard{{ID: "1001"}, {ID: "1002"}}
 	got := keepIntentMatches([]intentMatch{
 		{ID: "1001", Score: 0.9, Reason: "camp cooking"},
 		{ID: "1001", Score: 0.7, Reason: "weaker duplicate"},
-		{ID: "1002", Score: 0.4, Reason: "too weak"},
+		{ID: "1002", Score: 0, Reason: "no match"},
 		{ID: "9999", Score: 0.99, Reason: "unknown lot"},
 		{ID: "1002", Score: 1.4, Reason: "  extra   spaces  "},
 	}, cards)
 	if len(got) != 2 {
 		t.Fatalf("%+v", got)
 	}
-	if got[0].ID != "1002" || got[0].Score != 1 || got[0].Reason != "extra spaces" {
-		t.Fatalf("clamped %+v", got[0])
+	if got[0].ID != "1002" || got[0].Score != 1.4 || got[0].Reason != "extra spaces" {
+		t.Fatalf("kept high score %+v", got[0])
 	}
 	if got[1].ID != "1001" || got[1].Reason != "camp cooking" {
 		t.Fatalf("kept %+v", got[1])
 	}
 }
 
-func TestFormatIntentCardIsOneLine(t *testing.T) {
+func TestScoreIntentCardTitleIsEnough(t *testing.T) {
 	t.Parallel()
-	got := formatIntentCard(intentCard{
-		ID: "1001", Category: "outdoor", Identification: "Coleman\n2-burner stove",
-		Model: "414", Terms: "coleman, stove", Notes: "tank attached",
-		Title: "misc outdoor", Description: "should not appear on a photos row",
-	})
-	if strings.Contains(got, "\n") || !strings.HasPrefix(got, "1001 | photos | outdoor | Coleman 2-burner stove") {
-		t.Fatalf("%q", got)
+	words := []string{"tent", "camping", "stove"}
+	score, reason := scoreIntentCard(words, intentCard{ID: "1004", Title: "4-person camping tent"})
+	if score <= 0 || reason == "" {
+		t.Fatalf("title should match: score=%v reason=%q", score, reason)
 	}
-	if strings.Contains(got, "misc outdoor") {
-		t.Fatalf("photos row leaked listing title: %q", got)
+	score, _ = scoreIntentCard(words, intentCard{ID: "1001", Title: "Keurig K-Supreme Plus", Identification: "Keurig K-Supreme Plus"})
+	if score != 0 {
+		t.Fatalf("coffee maker should not match camping words: %v", score)
 	}
-	listed := formatIntentCard(intentCard{
-		ID: "1004", Title: "4-person\ncamping tent", Description: "rainfly and stakes",
+	score, _ = scoreIntentCard([]string{"camping"}, intentCard{
+		ID: "9", Title: "camping gear lot", Identification: "LED television",
 	})
-	if listed != "1004 | listing | 4-person camping tent | rainfly and stakes" {
-		t.Fatalf("%q", listed)
+	if score <= 0 {
+		t.Fatalf("a camping title is enough even when photos say otherwise: %v", score)
 	}
 }

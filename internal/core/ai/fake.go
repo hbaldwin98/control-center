@@ -52,6 +52,9 @@ func fakeReply(req ChatRequest, prompt string) (string, json.RawMessage, []Citat
 	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), "basis") {
 		return fakeAnalysis(prompt)
 	}
+	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), "item_words") {
+		return fakeIntentExpand(prompt)
+	}
 	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), `"matches"`) {
 		return fakeIntentMatches(prompt)
 	}
@@ -143,6 +146,23 @@ func fakeGrounded(prompt string) (string, json.RawMessage, []Citation, []Source)
 		"model_or_code": model,
 	})
 	return text, parsed, []Citation{{Start: 0, End: len(text), Source: 0}}, []Source{src}
+}
+
+func fakeIntentExpand(prompt string) (string, json.RawMessage, []Citation, []Source) {
+	intent := strings.ToLower(fieldAfter(prompt, "Intent:"))
+	groups := [][]string{
+		{"coffee", "brew", "keurig", "espresso", "cafe"},
+		{"sit", "seat", "seating", "chair", "desk", "office", "aeron"},
+		{"camp", "camping", "tent", "stove", "lantern", "cooler", "backpack", "shelter"},
+	}
+	var words []string
+	for _, g := range groups {
+		if groupHits(intent, g) {
+			words = append(words, g...)
+		}
+	}
+	parsed, _ := json.Marshal(map[string]any{"item_words": words})
+	return string(parsed), parsed, nil, nil
 }
 
 func fakeIntentMatches(prompt string) (string, json.RawMessage, []Citation, []Source) {

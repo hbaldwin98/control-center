@@ -1011,8 +1011,9 @@ function LotsCatalog() {
         <Card title="Intent">
           <Stack>
             <Hint>
-              Reads photograph identifications when a lot has been scanned. Unscanned lots
-              still count if the title or description fits. Starts only when you ask.
+              Matches collected titles and descriptions. Photo identifications count too
+              when a lot has already been scanned — you do not need to scan first. One
+              cheap expansion call, not a pass over every photograph.
             </Hint>
             <Field label="What are you looking to do?">
               <Textarea
@@ -1032,7 +1033,7 @@ function LotsCatalog() {
             </Field>
             <div className="bidrl-actions">
               <Button variant="primary" disabled={disabled || intentRunning || !intentDraft.trim()} onClick={() => void ask()}>
-                {intentRunning ? "Reading lots…" : "Ask"}
+                {intentRunning ? "Matching…" : "Ask"}
               </Button>
             </div>
             {search?.status === "failed" && search.lastError ? (
