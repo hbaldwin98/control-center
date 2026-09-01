@@ -179,12 +179,13 @@ right.
 |---|---|
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
-| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings |
+| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
+| API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
 | API | `GET /locations` — the SITES locations you have lots at, with lot counts |
 | API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
 | Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
-| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
@@ -313,6 +314,21 @@ drive rather than the price is exactly what you do from a phone. The lot page sh
 link into the catalog filtered to that location. Distance is not modelled: the plugin does
 not know where you live and does not geocode to guess.
 
+**Saving a lot outlives its auction.** A star on every card, row, and lot page writes to
+`bidrl_favorites` directly rather than queueing a job — it is instant and local, and the
+rule that every button queues a job is there for work that takes time. `/bidrl/saved` is
+that list, newest save first, with the same location and category filters as the catalog
+and no similar-lot collapsing, because every row on it was chosen on purpose. A note per
+lot lives on the lot page; writing one saves the lot, since a note about something you did
+not keep is not a thing anyone means to write.
+
+**"Remove ended" never deletes a saved lot.** The point of saving something is to refer
+back to it later, and later is usually after it closed — a favourite that vanishes on the
+next tidy is worse than no favourite. An ended auction holding a saved lot is kept as its
+shell so the lot keeps its photos, comparable, and location; that auction's unsaved lots
+still go, and cleanup reports what it kept as well as what it removed. Deleting an auction
+outright still takes everything in it, saved lots included: that was asked for.
+
 Find filters the visible lots by title, identification, model, and category without
 starting a BidRL search. The catalog's whole state — preset, text, bucket, category,
 ending — lives in the query string, so a filtered list can be linked to and pasted, and
@@ -336,8 +352,8 @@ below that, because a thin gap does not survive a buyer's premium — and the bi
 large figure, with the comparable beside it as "vs $X sold · eBay". A lot whose `ends_at`
 has passed carries an "Ended" pill opposite the gap.
 
-Below 720px the lot table drops lot code, category, comparable, and bucket — but keeps
-location — rather than scrolling sideways past the bid — those live on the lot page — the card grid tightens to
+Below 720px the lot table drops lot code, category, comparable, and bucket — but keeps the
+star and location — rather than scrolling sideways past the bid — those live on the lot page — the card grid tightens to
 150px columns, and each filter takes its own row.
 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then

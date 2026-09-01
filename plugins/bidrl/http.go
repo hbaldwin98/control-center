@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hbaldwin98/control-center/host"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
@@ -69,6 +70,9 @@ type lotView struct {
 	MatchReason     string   `json:"matchReason,omitempty"`
 	ThumbURL        string   `json:"thumbUrl"`
 	PhotoURLs       []string `json:"photoUrls,omitempty"`
+	Favorite        bool     `json:"favorite"`
+	FavoriteNote    string   `json:"favoriteNote"`
+	SavedAt         string   `json:"savedAt"`
 }
 
 func (p *Plugin) handleAddAuction(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +211,7 @@ type cleanupResult struct {
 	Auctions int `json:"auctions"`
 	Lots     int `json:"lots"`
 	Sites    int `json:"sites"`
+	Kept     int `json:"kept"`
 }
 
 func (p *Plugin) handleCleanupExpired(w http.ResponseWriter, r *http.Request) {
@@ -238,22 +243,17 @@ func (p *Plugin) cleanupExpired(ctx context.Context, h host.Host) (cleanupResult
 		return result, err
 	}
 	for _, a := range auctions {
-		lotEnds := make([]string, 0, len(a.Lots))
-		for _, lot := range a.Lots {
-			lotEnds = append(lotEnds, lot.EndsAt)
-		}
-		if auctionEnded(a.EndsAt, lotEnds, now) {
+		plan := cleanupPlan(a, now)
+		result.Kept += plan.Kept
+		if plan.DropAuction {
 			if err := p.deleteAuction(ctx, h, a.ID); err != nil {
 				return result, err
 			}
 			result.Auctions++
 			continue
 		}
-		for _, lot := range a.Lots {
-			if !hasEnded(lot.EndsAt, now) {
-				continue
-			}
-			if err := p.deleteLot(ctx, h, a.ID, lot.ID); err != nil {
+		for _, lotID := range plan.DropLots {
+			if err := p.deleteLot(ctx, h, a.ID, lotID); err != nil {
 				return result, err
 			}
 			result.Lots++
@@ -288,6 +288,48 @@ func (p *Plugin) cleanupExpired(ctx context.Context, h host.Host) (cleanupResult
 	return result, nil
 }
 
+// auctionCleanup is what cleanup decided to do with one auction.
+type auctionCleanup struct {
+	DropAuction bool
+	DropLots    []string
+	Kept        int
+}
+
+// cleanupPlan decides what "Remove ended" removes from one auction.
+//
+// A saved lot is never removed. The point of saving something is to refer back to it
+// later, and later is usually after it has closed: a favourite that disappears on the
+// next tidy is worse than no favourite at all. So an ended auction holding a saved lot
+// is kept as its shell — the lot keeps its photos, comparable, and location — while its
+// unsaved ended lots still go. Explicitly deleting the auction still takes everything,
+// saved lots included; that was asked for.
+func cleanupPlan(a cleanupAuction, now time.Time) auctionCleanup {
+	var plan auctionCleanup
+	lotEnds := make([]string, 0, len(a.Lots))
+	saved := 0
+	for _, lot := range a.Lots {
+		lotEnds = append(lotEnds, lot.EndsAt)
+		if lot.Favorite {
+			saved++
+		}
+	}
+	if auctionEnded(a.EndsAt, lotEnds, now) && saved == 0 {
+		plan.DropAuction = true
+		return plan
+	}
+	for _, lot := range a.Lots {
+		if !hasEnded(lot.EndsAt, now) {
+			continue
+		}
+		if lot.Favorite {
+			plan.Kept++
+			continue
+		}
+		plan.DropLots = append(plan.DropLots, lot.ID)
+	}
+	return plan
+}
+
 type cleanupAuction struct {
 	ID, EndsAt string
 	Lots       []cleanupLot
@@ -295,6 +337,7 @@ type cleanupAuction struct {
 
 type cleanupLot struct {
 	ID, EndsAt string
+	Favorite   bool
 }
 
 func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanupAuction, error) {
@@ -316,16 +359,21 @@ func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanu
 		return nil, err
 	}
 	for i := range auctions {
-		lotRows, err := h.Store().Query(ctx, `SELECT id, ends_at FROM bidrl_lots WHERE auction_id = ?`, auctions[i].ID)
+		lotRows, err := h.Store().Query(ctx, `SELECT l.id, l.ends_at, f.lot_id IS NOT NULL
+			FROM bidrl_lots l
+			LEFT JOIN bidrl_favorites f ON f.lot_id = l.id
+			WHERE l.auction_id = ?`, auctions[i].ID)
 		if err != nil {
 			return nil, err
 		}
 		for lotRows.Next() {
 			var lot cleanupLot
-			if err := lotRows.Scan(&lot.ID, &lot.EndsAt); err != nil {
+			var fav int
+			if err := lotRows.Scan(&lot.ID, &lot.EndsAt, &fav); err != nil {
 				_ = lotRows.Close()
 				return nil, err
 			}
+			lot.Favorite = fav != 0
 			auctions[i].Lots = append(auctions[i].Lots, lot)
 		}
 		_ = lotRows.Close()
@@ -361,6 +409,9 @@ func (p *Plugin) deleteAuction(ctx context.Context, h host.Host, id string) erro
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lot_embeddings WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_favorites WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE auction_id = ?`, id); err != nil {
@@ -403,6 +454,9 @@ func (p *Plugin) deleteLot(ctx context.Context, h host.Host, auctionID, lotID st
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lot_embeddings WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_favorites WHERE lot_id = ?`, lotID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE id = ?`, lotID); err != nil {
@@ -476,6 +530,85 @@ func (p *Plugin) handleListLocations(w http.ResponseWriter, r *http.Request) {
 		out = append(out, loc)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"locations": out, "latestEventId": latestEventID(r.Context(), h)})
+}
+
+type favoriteBody struct {
+	Note string `json:"note"`
+}
+
+const maxFavoriteNote = 500
+
+// handleFavorite saves a lot, or updates the note on one already saved. A direct
+// write rather than a job: it is instant and local, and the rule that every button
+// queues a job exists for work that takes time.
+func (p *Plugin) handleFavorite(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	id := r.PathValue("id")
+	var body favoriteBody
+	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
+		return
+	}
+	note := truncateRunes(collapseText(body.Note), maxFavoriteNote)
+	var exists string
+	if err := h.Store().QueryRow(r.Context(), `SELECT id FROM bidrl_lots WHERE id = ?`, id).Scan(&exists); err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "lot not found")
+		return
+	}
+	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
+	if _, err := h.Store().Exec(r.Context(), `INSERT INTO bidrl_favorites(lot_id, note, created_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(lot_id) DO UPDATE SET note = excluded.note`, id, note, now); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lotId": id, "favorite": true, "note": note})
+}
+
+func (p *Plugin) handleUnfavorite(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	id := r.PathValue("id")
+	if _, err := h.Store().Exec(r.Context(), `DELETE FROM bidrl_favorites WHERE lot_id = ?`, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lotId": id, "favorite": false})
+}
+
+// handleListFavorites serves saved lots, newest save first. Location and category
+// narrow it server-side the way they do on the catalog; sorting and the rest of the
+// filtering is the catalog screen's own client-side machinery.
+func (p *Plugin) handleListFavorites(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	where := `f.lot_id IS NOT NULL`
+	var args []any
+	if category := r.URL.Query().Get("category"); category != "" && category != "all" {
+		where += ` AND IFNULL(NULLIF(l.category, ''), a.category) = ?`
+		args = append(args, category)
+	}
+	if clause, vals := affiliateClause(r.URL.Query()); clause != "" {
+		where += clause
+		args = append(args, vals...)
+	}
+	lots, err := p.queryLots(h, r, where, args...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	lots = filterLotsByQuery(lots, strings.TrimSpace(r.URL.Query().Get("q")))
+	sort.SliceStable(lots, func(i, j int) bool { return lots[i].SavedAt > lots[j].SavedAt })
+	writeJSON(w, http.StatusOK, map[string]any{"lots": lots, "latestEventId": latestEventID(r.Context(), h)})
 }
 
 func (p *Plugin) handleScan(w http.ResponseWriter, r *http.Request) {
@@ -801,9 +934,11 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 		IFNULL(a.identification,''), IFNULL(a.basis,''), IFNULL(a.model_or_sku,''), IFNULL(a.title_agreement, 0),
 		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''), IFNULL(v.reused_from_lot_id,''),
 		IFNULL(au.affiliate_id,''), IFNULL(au.affiliate_name,''), IFNULL(au.city,''),
+		IFNULL(f.note,''), IFNULL(f.created_at,''), f.lot_id IS NOT NULL,
 		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)
 		FROM bidrl_lots l
 		LEFT JOIN bidrl_auctions au ON au.id = l.auction_id
+		LEFT JOIN bidrl_favorites f ON f.lot_id = l.id
 		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
 		LEFT JOIN bidrl_valuations v ON v.id = (SELECT MAX(id) FROM bidrl_valuations WHERE lot_id = l.id)
 		WHERE ` + where + `
@@ -817,16 +952,18 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 	for rows.Next() {
 		var l lotView
 		var thumb *string
-		var ext, reserve int
+		var ext, reserve, fav int
 		if err := rows.Scan(&l.ID, &l.AuctionID, &l.URL, &l.LotCode, &l.Title, &l.Description, &l.CurrentBidCents, &l.MinBidCents, &l.IncrementCents,
 			&l.BidCount, &l.HighBidder, &l.EndsAt, &ext, &reserve, &l.Category, &l.Bucket,
 			&l.Identification, &l.Basis, &l.ModelOrSKU, &l.TitleAgreement,
 			&l.PriceCents, &l.PriceKind, &l.SourceURL, &l.CitedText, &l.SourceTitle, &l.RetrievedAt, &l.ReusedFromLotID,
-			&l.AffiliateID, &l.AffiliateName, &l.City, &thumb); err != nil {
+			&l.AffiliateID, &l.AffiliateName, &l.City,
+			&l.FavoriteNote, &l.SavedAt, &fav, &thumb); err != nil {
 			return nil, err
 		}
 		l.BiddingExtended = ext != 0
 		l.ReserveMet = reserve != 0
+		l.Favorite = fav != 0
 		l.MislabelScore = mislabelScore(l.TitleAgreement)
 		if l.PriceCents != nil {
 			if d, ok := dealScore(l.CurrentBidCents, *l.PriceCents); ok {

@@ -52,11 +52,19 @@ export type Lot = {
   matchScore?: number | null;
   matchReason?: string;
   thumbUrl: string;
+  favorite: boolean;
+  favoriteNote: string;
+  savedAt: string;
   photoUrls?: string[];
   latestEventId?: number;
 };
 
 export type LotsPage = {
+  lots: Lot[];
+  latestEventId: number;
+};
+
+export type FavoritesPage = {
   lots: Lot[];
   latestEventId: number;
 };
@@ -423,6 +431,7 @@ export type LotSortColumn =
   | "price"
   | "gap"
   | "bucket"
+  | "saved"
   | "why";
 
 export type AuctionSortColumn = "title" | "status" | "lots" | "ends";
@@ -437,6 +446,7 @@ export const LOT_SORT_DEFAULTS: Record<LotSortColumn, SortDir> = {
   category: "asc",
   location: "asc",
   price: "desc",
+  saved: "desc",
   gap: "desc",
   bucket: "asc",
   why: "asc",
@@ -515,6 +525,8 @@ function lotSortValue(lot: Lot, column: LotSortColumn): SortValue {
       return numberValue(lot.dealScore);
     case "bucket":
       return textValue(lot.bucket);
+    case "saved":
+      return textValue(lot.savedAt);
     case "why":
       return textValue(lot.matchReason);
   }
@@ -595,6 +607,7 @@ export type CleanupResult = {
   auctions: number;
   lots: number;
   sites: number;
+  kept: number;
 };
 
 export function cleanupMessage(result: CleanupResult): string {
@@ -608,10 +621,14 @@ export function cleanupMessage(result: CleanupResult): string {
   if (result.sites > 0) {
     parts.push(`${result.sites} ended SITES listing${result.sites === 1 ? "" : "s"}`);
   }
+  // Saying what was kept matters more than saying what went: a tidy that silently
+  // spared your saved lots looks identical to one that quietly deleted them.
+  const kept =
+    result.kept > 0 ? ` Kept ${result.kept} you saved.` : "";
   if (parts.length === 0) {
-    return "Nothing had ended.";
+    return kept ? `Nothing had ended that you had not saved.${kept}` : "Nothing had ended.";
   }
-  return `Removed ${parts.join(" and ")}.`;
+  return `Removed ${parts.join(" and ")}.${kept}`;
 }
 
 /**

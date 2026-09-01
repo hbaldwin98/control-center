@@ -222,5 +222,15 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 				affiliate_name = IFNULL((SELECT s.affiliate_name FROM bidrl_affiliate_auctions s WHERE s.id = bidrl_auctions.id), ''),
 				city           = IFNULL((SELECT s.city           FROM bidrl_affiliate_auctions s WHERE s.id = bidrl_auctions.id), '');
 		`,
+	}, {
+		Version: 8,
+		Name:    "favorites",
+		Up: `
+			CREATE TABLE bidrl_favorites (
+				lot_id      TEXT PRIMARY KEY,
+				note        TEXT NOT NULL DEFAULT '',
+				created_at  TEXT NOT NULL
+			) STRICT;
+		`,
 	}})
 }

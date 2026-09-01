@@ -20,6 +20,9 @@ function lot(over: Partial<Lot> = {}): Lot {
     auctionId: "42",
     url: "https://www.bidrl.com/auction/42/lot/1001",
     lotCode: "A1",
+    favorite: false,
+    favoriteNote: "",
+    savedAt: "",
     affiliateId: "19",
     affiliateName: "Turlock",
     city: "Turlock",
@@ -70,6 +73,11 @@ const routes = new Map<string, unknown>([
   ["/api/plugins/bidrl/lots/1001", { ...lot(), photoUrls: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/intent", { search: null, lots: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/sites/auctions", { auctions: [], latestEventId: 1 }],
+  ["/api/plugins/bidrl/lots/1001/favorite", { lotId: "1001", favorite: true, note: "" }],
+  ["/api/plugins/bidrl/favorites", {
+    lots: [lot({ id: "2002", title: "Coleman two-burner stove", favorite: true, savedAt: "2026-08-20T00:00:00Z", favoriteNote: "check the regulator" })],
+    latestEventId: 1,
+  }],
   ["/api/plugins/bidrl/locations", {
     locations: [
       { id: "19", affiliateName: "SITES Turlock", city: "Turlock", lotCount: 3 },
@@ -131,6 +139,7 @@ describe("bidrl screens", () => {
     ["/bidrl", "BIDRL"],
     ["/bidrl/auctions", "Auctions"],
     ["/bidrl/lots", "Lots"],
+    ["/bidrl/saved", "Saved"],
     ["/bidrl/intent", "Intent"],
     ["/bidrl/auction/42", "Test Warehouse"],
     ["/bidrl/lot/1001", "Keurig coffee maker"],
@@ -142,7 +151,7 @@ describe("bidrl screens", () => {
   it("shows every section tab on each screen, with the current one marked", async () => {
     await renderAt("/bidrl/lots");
     const tabs = [...container.querySelectorAll(".cc-tabs a")].map((a) => a.textContent);
-    expect(tabs).toEqual(["Overview", "Auctions", "Lots", "Intent"]);
+    expect(tabs).toEqual(["Overview", "Auctions", "Lots", "Saved", "Intent"]);
     expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
   });
 
@@ -180,6 +189,34 @@ describe("bidrl screens", () => {
       (b) => b.textContent,
     );
     expect(pressed).toHaveLength(2);
+  });
+
+  it("shows saved lots with the note you left on them", async () => {
+    await renderAt("/bidrl/saved");
+    expect(container.textContent).toContain("Coleman two-burner stove");
+    expect(container.textContent).toContain("check the regulator");
+  });
+
+  it("puts a star on every lot in the catalog, pressed only for the ones already saved", async () => {
+    await renderAt("/bidrl/lots");
+    const stars = [...container.querySelectorAll<HTMLButtonElement>(".bidrl-star")];
+    expect(stars.length).toBeGreaterThan(0);
+    expect(stars.every((b) => b.getAttribute("aria-pressed") === "false")).toBe(true);
+  });
+
+  it("saves a lot by POSTing rather than queueing a job, and reports it straight away", async () => {
+    await renderAt("/bidrl/lots");
+    const star = container.querySelector<HTMLButtonElement>(".bidrl-star");
+    await act(async () => {
+      star?.click();
+    });
+    const calls = fetchMock.mock.calls.map(
+      (c) => ({ url: String(c[0]), method: (c[1] as RequestInit | undefined)?.method }),
+    );
+    expect(
+      calls.some((c) => c.url.endsWith("/lots/1001/favorite") && c.method === "POST"),
+    ).toBe(true);
+    expect(container.querySelector(".bidrl-star")?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("offers the overview's counts as links into the catalog that proves them", async () => {

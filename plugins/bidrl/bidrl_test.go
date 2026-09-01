@@ -156,7 +156,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 21 {
+	if len(p.Routes()) != 24 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -166,7 +166,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 7 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") {
+	if len(mig.migrations) != 8 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -870,5 +870,40 @@ func TestAffiliateClauseAcceptsSeveralLocations(t *testing.T) {
 	}
 	if clause, _ := affiliateClause(url.Values{"affiliate": {"", ","}}); clause != "" {
 		t.Fatalf("junk = %q", clause)
+	}
+}
+
+func TestCleanupKeepsWhatYouSaved(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	past := "2026-08-30T00:00:00Z"
+	future := "2026-09-05T00:00:00Z"
+
+	// An ended auction with nothing saved goes whole.
+	plan := cleanupPlan(cleanupAuction{ID: "1", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past},
+		{ID: "b", EndsAt: past},
+	}}, now)
+	if !plan.DropAuction || plan.Kept != 0 {
+		t.Fatalf("ended auction = %#v", plan)
+	}
+
+	// One saved lot keeps the auction as a shell, so the lot keeps its photos and
+	// comparable, but the auction's other ended lots still go.
+	plan = cleanupPlan(cleanupAuction{ID: "2", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past, Favorite: true},
+		{ID: "b", EndsAt: past},
+	}}, now)
+	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+		t.Fatalf("saved auction = %#v", plan)
+	}
+
+	// A saved ended lot in a still-open auction is kept too.
+	plan = cleanupPlan(cleanupAuction{ID: "3", EndsAt: future, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past, Favorite: true},
+		{ID: "b", EndsAt: past},
+		{ID: "c", EndsAt: future},
+	}}, now)
+	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+		t.Fatalf("open auction = %#v", plan)
 	}
 }

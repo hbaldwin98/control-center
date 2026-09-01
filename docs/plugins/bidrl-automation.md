@@ -1,6 +1,6 @@
 # Plugin: `bidrl` — automation, findings, favorites, locations
 
-Status: step 1 (locations) implemented; steps 2–4 proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
+Status: steps 1–2 (locations, favorites) implemented; steps 3–4 proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
 
 Four changes to the BIDRL plugin, in dependency order:
 
@@ -210,7 +210,6 @@ CREATE INDEX bidrl_findings_state ON bidrl_findings(state, created_at);
 
 CREATE TABLE bidrl_favorites (
   lot_id      TEXT PRIMARY KEY,
-  lot_title   TEXT NOT NULL DEFAULT '',
   note        TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL
 ) STRICT;
@@ -223,10 +222,15 @@ costs an embed or a judge call.
 
 **Findings survive their lot.** A finding whose lot has ended stays in the queue marked
 `Ended` until you decide on it; that is the record of what the automation found while you
-were asleep. "Remove ended" deletes the lot row, so findings and favorites hold the lot id
-plus a denormalized title and thumb rather than depending on the join. Favorites are never
-deleted by cleanup — the point of favoriting is referring back later, including to something
-you missed.
+were asleep.
+
+Favorites solve this by **keeping the lot rather than snapshotting it** — the built
+behaviour, and better than the title-and-thumb snapshot this file first proposed. Cleanup
+skips a saved lot and keeps its auction as a shell, so the saved row keeps its photos,
+comparable, and location instead of degrading to a title and a dead thumbnail. Findings
+will do the same: a finding pins its lot against cleanup for as long as it is undecided.
+Deleting an auction outright still takes everything in it, saved lots included — that was
+asked for explicitly, unlike a tidy.
 
 ### API
 
@@ -272,7 +276,8 @@ Each step is independently useful and independently shippable.
 1. **Locations** (§1) — *done.* Migration 7, collect-time capture, `affiliate` filter, UI
    column and location chips. Fixes an existing bug and delivers the "rule it out without
    opening it" ask on its own.
-2. **Favorites** (§4, partial) — table, star, Saved tab. No AI, no cron.
+2. **Favorites** (§4, partial) — *done.* Table, star, Saved tab, per-lot note. No AI, no
+   cron. Cleanup keeps saved lots instead of snapshotting them (see §4).
 3. **Watchlists + manual run** (§2) — the funnel, `watch-judge` route, findings table,
    Findings tab, `POST /watchlists/{id}/run`. Everything works, still user-triggered.
 4. **Cron** (§3) — `sweep` and `match` schedules, `Automated: true`, budget, throttle latch,

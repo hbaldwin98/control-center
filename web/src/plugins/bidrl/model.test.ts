@@ -67,9 +67,18 @@ describe("LOT_CATEGORIES", () => {
 
 describe("cleanupMessage", () => {
   it("names what was removed", () => {
-    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0 })).toBe("Nothing had ended.");
-    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0 })).toBe(
+    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, kept: 0 })).toBe("Nothing had ended.");
+    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, kept: 0 })).toBe(
       "Removed 1 ended auction and 4 ended lots.",
+    );
+  });
+
+  it("says what it kept, because a tidy that spared your saved lots looks the same as one that deleted them", () => {
+    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, kept: 2 })).toBe(
+      "Removed 1 ended auction and 4 ended lots. Kept 2 you saved.",
+    );
+    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, kept: 3 })).toBe(
+      "Nothing had ended that you had not saved. Kept 3 you saved.",
     );
   });
 });
@@ -229,6 +238,9 @@ function fakeLot(over: Partial<Lot> & Pick<Lot, "id">): Lot {
     auctionId: "42",
     url: "",
     lotCode: "",
+    favorite: false,
+    favoriteNote: "",
+    savedAt: "",
     affiliateId: "",
     affiliateName: "",
     city: "",
