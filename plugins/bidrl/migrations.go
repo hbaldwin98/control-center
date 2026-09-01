@@ -272,6 +272,20 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 		Version: 10,
 		Name:    "correct_ends_at",
 		Up:      rewriteStoredEndsAtSQL,
+	}, {
+		Version: 11,
+		Name:    "automation",
+		Up: `
+			CREATE TABLE bidrl_automation (
+				id               INTEGER PRIMARY KEY CHECK (id = 1),
+				last_sweep_at    TEXT NOT NULL DEFAULT '',
+				last_sweep_note  TEXT NOT NULL DEFAULT '',
+				last_match_at    TEXT NOT NULL DEFAULT '',
+				last_match_note  TEXT NOT NULL DEFAULT '',
+				throttled_until  TEXT NOT NULL DEFAULT ''
+			) STRICT;
+			INSERT INTO bidrl_automation(id) VALUES (1);
+		`,
 	}})
 }
 

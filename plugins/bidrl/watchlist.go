@@ -90,12 +90,19 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 	if err != nil {
 		return hostjobs.Permanent(err)
 	}
+	_, err = p.runWatchlist(jc, h, w)
+	return err
+}
+
+// runWatchlist is one watchlist's funnel, and returns how many findings it created.
+// The watch job runs one on demand; the match tick runs every enabled one.
+func (p *Plugin) runWatchlist(jc hostjobs.Context, h host.Host, w watchlist) (int, error) {
 	if err := p.markWatchlist(jc, h, w.ID, "running", ""); err != nil {
-		return err
+		return 0, err
 	}
-	fail := func(err error) error {
+	fail := func(err error) (int, error) {
 		_ = p.markWatchlist(jc, h, w.ID, "failed", err.Error())
-		return err
+		return 0, err
 	}
 
 	if err := p.pruneLotEmbeddings(jc, h); err != nil {
@@ -111,7 +118,7 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 		return p.finishWatch(jc, h, w, 0)
 	}
 	if err := jc.Progress(0.15, "ranking against the catalog"); err != nil {
-		return err
+		return 0, err
 	}
 
 	words, err := p.watchWords(jc, h, w)
@@ -130,7 +137,7 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 		return p.finishWatch(jc, h, w, 0)
 	}
 	if err := jc.Progress(0.45, "judging candidates"); err != nil {
-		return err
+		return 0, err
 	}
 
 	byID := make(map[string]intentCard, len(cards))
@@ -140,7 +147,7 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 	kept := make([]intentMatch, 0, len(ranked))
 	for _, m := range ranked {
 		if err := jc.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		card, ok := byID[m.ID]
 		if !ok {
@@ -164,7 +171,7 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 		return p.finishWatch(jc, h, w, 0)
 	}
 	if err := jc.Progress(0.65, "reading the photographs"); err != nil {
-		return err
+		return 0, err
 	}
 
 	ids := make([]string, 0, len(kept))
@@ -179,7 +186,7 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 		return fail(err)
 	}
 	if err := jc.Progress(0.85, "pricing what named a model"); err != nil {
-		return err
+		return 0, err
 	}
 	if err := p.priceEligibleWhere(jc, h, inClause("l.id", len(ids)), anyStrings(ids)...); err != nil {
 		return fail(err)
@@ -192,16 +199,16 @@ func (p *Plugin) watchJob(jc hostjobs.Context) error {
 	return p.finishWatch(jc, h, w, created)
 }
 
-func (p *Plugin) finishWatch(jc hostjobs.Context, h host.Host, w watchlist, created int) error {
+func (p *Plugin) finishWatch(jc hostjobs.Context, h host.Host, w watchlist, created int) (int, error) {
 	if err := p.markWatchlist(jc, h, w.ID, "ready", ""); err != nil {
-		return err
+		return 0, err
 	}
 	if err := h.Events().Publish(jc, "watch.completed", w.ID, map[string]any{
 		"watchlistId": w.ID, "name": w.Name, "findings": created,
 	}); err != nil {
-		return err
+		return 0, err
 	}
-	return jc.Progress(1, fmt.Sprintf("%d new findings", created))
+	return created, jc.Progress(1, fmt.Sprintf("%d new findings", created))
 }
 
 // watchRules is the free stage: everything that can be decided in SQL before a

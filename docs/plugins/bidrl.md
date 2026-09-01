@@ -92,16 +92,19 @@ record again.
 and a 400ms minimum interval. HTTP 429 or 403 backs off; three consecutive such responses
 stop the job rather than continuing into a ban.
 
-**Every v1 action is user-triggered.** Collection starts only from "add auction" or
-"collect" on a search/SITES hit, a scan starts only from "scan", search starts only from
-"search", intent matching starts only from "Ask" on the lots catalog, SITES listing starts
-only from "refresh list" or as part of a search, pricing starts only inside that
-requested scan or from "reprice", bids refresh only from "refresh bids", a single-lot
-ItemData refresh only from "enrich", and expired-record deletion only from "Remove ended".
-There is no cron
-or event-triggered work, and the backend manifest sets
-`Automated: false`. Jobs still make each requested operation durable, cancellable,
-budgeted, and subject to the host-capability kill switch.
+**Everything is user-triggered except two scheduled ticks, and those default to off.**
+Collection starts from "add auction" or "collect", a scan from "scan", search from
+"search", intent matching from "Ask", SITES listing from "refresh list", pricing from that
+scan or from "reprice", bids from "refresh bids", a single-lot ItemData refresh from
+"enrich", expired-record deletion from "Remove ended", and a watchlist from "Run now".
+
+The exceptions are `sweep` and `match` — see [automation](#automation). Both check
+`automation.enabled` before doing anything, and it is `false` by default, so a fresh
+install still touches BidRL only when a person asks. Because scheduled work exists at all,
+the manifest sets `Automated: true`: the honest reading is that this plugin *can* start
+work without a person, and the per-plugin budget that flag forces is the point of
+declaring it. Jobs still make every operation durable, cancellable, budgeted, and subject
+to the host-capability kill switch.
 
 Images and analyses are cached until the user deletes the auction or removes ended
 records; identification does not rerun during a bid refresh. Deletion removes the
@@ -185,11 +188,13 @@ right.
 | Surface | Contract |
 |---|---|
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
+| Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — the only scheduled ones, both inert while `automation.enabled` is false |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
 | API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
 | API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |
 | API | `GET /findings?state=&watchlist=`, `POST /findings/{id}/accept`, `POST /findings/{id}/reject` |
+| API | `GET /automation`, `POST /automation/resume` — schedule state and clearing the throttle latch |
 | API | `GET /locations` — the SITES locations you have lots at, with lot counts |
 | API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
@@ -272,6 +277,48 @@ another tab is the obvious wrong flow. Accept and reject are direct writes, not 
 An undecided finding pins its lot against "Remove ended", the same way a save does: a
 finding is the record of what a watchlist turned up, and deleting the lot before you have
 looked would empty the queue of exactly what it exists to show you.
+
+## Automation
+
+Two scheduled jobs, and a long list of reasons either might do nothing.
+
+| Job | Cron (UTC) | Touches BidRL | Does |
+|---|---|---|---|
+| `sweep` | `0 */6 * * *` | yes | Lists open auctions at the chosen locations, then collects ones not already stored, soonest to close first |
+| `match` | `30 */6 * * *` | no | Runs every enabled watchlist's funnel over what is collected |
+
+They are separate and offset on purpose. `sweep` is the only scheduled work that reaches
+the origin and must stop when BidRL says so; `match` never reaches it and should still run
+while a sweep is latched, because there is usually a backlog of collected lots no
+watchlist has looked at.
+
+**`sweep` does nothing unless every guard passes.** Automation off (the default), no
+locations chosen, or a throttle latch each end the tick before a browser session is even
+opened. An empty location list is not treated as "everywhere": an unscoped scheduled
+discovery is a crawl, which is the thing this plugin will not do. `maxAuctionsPerSweep`
+(5) and `maxNewLotsPerSweep` (400) bound one tick; whatever does not fit waits for the
+next one.
+
+**The pacing is not relaxed for being scheduled.** One request in flight, 400ms apart,
+three consecutive 429/403 responses stop the job. What is new is the **throttle latch**:
+when that stop happens, the plugin writes `throttled_until` 24 hours out, and later ticks
+return immediately without opening a session. No tick clears its own stop — only "Resume
+now" on the Overview does, because the whole value of the latch is that it holds until a
+person has looked. The pacer's stop is a wrapped sentinel error rather than a string, so
+the sweep can tell "BidRL is refusing" apart from any other failure; only the first
+latches.
+
+A scoped discovery replaces the cache **only for the locations it visited**. Clearing the
+whole table would delete listings for locations that run never looked at, which then read
+as closed.
+
+One auction failing does not abandon the tick, and one watchlist failing does not stop the
+others — a budget refusal or an unassigned model on one watchlist is recorded on its own
+row. `GET /automation` reports the schedule, both last ticks with what they did, the
+latch, and the count waiting in Findings; the Overview shows that as a strip.
+
+The cadence is fixed rather than configurable: job schedules are declared at registration,
+before plugin config is readable. `automation.enabled` is the switch that matters.
 
 ## Intent
 
@@ -443,6 +490,9 @@ full-window view.
 - Collection rejects more than 500 lots per auction, more than 12 images per lot, an image
   over 10 MiB, or more than 100 MiB of images for one lot; rejected items are recorded with
   a visible reason.
+- With `automation.enabled` false, or no locations chosen, or the latch set, a `sweep`
+  tick returns without opening a browser session; three consecutive 429/403 responses on a
+  tick set the latch, and only `POST /automation/resume` clears it.
 - Scan, reprice, bid-refresh, enrich, search, intent, and SITES-discover job definitions are enqueue-only, have concurrency `1`
   per operation, and time out after two hours. The scan performs at most four concurrent
   AI calls and stops admitting calls when its context is cancelled or budget reservation

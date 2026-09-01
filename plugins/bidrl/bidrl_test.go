@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -147,19 +148,35 @@ func TestPluginContract(t *testing.T) {
 	t.Parallel()
 	p := New()
 	m := p.Manifest()
-	if m.ID != pluginID || m.Automated {
-		t.Fatalf("manifest = %#v, want non-automated %q", m, pluginID)
+	if m.ID != pluginID {
+		t.Fatalf("manifest id = %q, want %q", m.ID, pluginID)
 	}
 	jobs := p.Jobs()
-	if len(jobs) != 9 {
+	if len(jobs) != 11 {
 		t.Fatalf("jobs = %d", len(jobs))
 	}
+	scheduled := map[string]bool{}
 	for _, j := range jobs {
-		if j.Schedule != "" || j.Concurrency != 1 || j.Timeout != jobTO {
+		if j.Concurrency != 1 || j.Timeout != jobTO {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
+		if j.Schedule == "" {
+			continue
+		}
+		// A scheduled job needs a zone, and only these two may have a schedule at
+		// all: everything else stays something a person started.
+		if j.TimeZone == "" || len(strings.Fields(j.Schedule)) != 5 {
+			t.Fatalf("scheduled job %s = %#v", j.Name, j)
+		}
+		scheduled[j.Name] = true
 	}
-	if len(p.Routes()) != 32 {
+	if len(scheduled) != 2 || !scheduled["sweep"] || !scheduled["match"] {
+		t.Fatalf("scheduled = %#v", scheduled)
+	}
+	if !m.Automated {
+		t.Fatalf("a plugin with cron must declare Automated")
+	}
+	if len(p.Routes()) != 34 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -169,8 +186,20 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 10 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") || !strings.Contains(mig.migrations[8].Up, "bidrl_watchlists") || !strings.Contains(mig.migrations[9].Up, "strftime") {
-		t.Fatalf("migrations = %#v", mig.migrations)
+	// Each migration is named by what it must contain, so a merge that drops or
+	// reorders one fails here rather than at the next install.
+	wantMigrations := []string{
+		"bidrl_lots", "bidrl_affiliate_auctions", "itemdata_at", "reused_from_lot_id",
+		"bidrl_intent_searches", "bidrl_lot_embeddings", "affiliate_id",
+		"bidrl_favorites", "bidrl_watchlists", "strftime", "bidrl_automation",
+	}
+	if len(mig.migrations) != len(wantMigrations) {
+		t.Fatalf("migrations = %d, want %d", len(mig.migrations), len(wantMigrations))
+	}
+	for i, want := range wantMigrations {
+		if !strings.Contains(mig.migrations[i].Up, want) {
+			t.Fatalf("migration %d (%q) does not mention %q", i+1, mig.migrations[i].Name, want)
+		}
 	}
 	var defaults map[string]any
 	if err := json.Unmarshal(m.Config.Defaults, &defaults); err != nil {
@@ -1160,5 +1189,90 @@ func TestCleanupKeepsAnUndecidedFinding(t *testing.T) {
 	}}, now)
 	if !plan.DropAuction {
 		t.Fatalf("decided = %#v", plan)
+	}
+}
+
+func TestThrottleLatchHoldsUntilSomeoneClearsIt(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	if throttleHeld("", now) {
+		t.Fatal("an unset latch must not hold")
+	}
+	if !throttleHeld(now.Add(time.Hour).Format(time.RFC3339Nano), now) {
+		t.Fatal("a latch in the future must hold")
+	}
+	if throttleHeld(now.Add(-time.Minute).Format(time.RFC3339Nano), now) {
+		t.Fatal("a latch in the past must not hold")
+	}
+	// Unparseable is treated as not held rather than held forever: a corrupt
+	// timestamp must not silently disable automation with no way back.
+	if throttleHeld("not a time", now) {
+		t.Fatal("an unreadable latch must not hold")
+	}
+}
+
+func TestPacerLatchIsRecognisable(t *testing.T) {
+	// The sweep has to tell "BidRL is refusing" apart from any other failure, because
+	// only the first one latches. A string match would rot; the sentinel will not.
+	p := newPacer(time.Nanosecond)
+	p.backoff = time.Nanosecond
+	ctx := context.Background()
+	var err error
+	for i := 0; i < rateLimitMax; i++ {
+		err = p.observe(ctx, 429)
+	}
+	if !errors.Is(err, errThrottled) {
+		t.Fatalf("after %d refusals err = %v, want errThrottled", rateLimitMax, err)
+	}
+	// A success in between resets the run, so an occasional 403 never latches.
+	p2 := newPacer(time.Nanosecond)
+	p2.backoff = time.Nanosecond
+	_ = p2.observe(ctx, 403)
+	_ = p2.observe(ctx, 200)
+	_ = p2.observe(ctx, 403)
+	if err := p2.observe(ctx, 200); err != nil {
+		t.Fatalf("interrupted run err = %v", err)
+	}
+}
+
+func TestAutomationConfigDefaultsToDoingNothing(t *testing.T) {
+	// The default must be inert: turning the plugin on cannot start traffic.
+	var zero automationConfig
+	got := zero.normalized()
+	if got.Enabled {
+		t.Fatal("automation must default to off")
+	}
+	if len(got.AffiliateIDs) != 0 {
+		t.Fatalf("locations = %#v, want none", got.AffiliateIDs)
+	}
+	if got.MaxAuctionsPerSweep != defaultMaxAuctionsPerSweep || got.MaxNewLotsPerSweep != defaultMaxNewLotsPerSweep {
+		t.Fatalf("caps = %#v", got)
+	}
+
+	// Junk locations are dropped rather than widening the sweep.
+	got = automationConfig{AffiliateIDs: []string{"turlock-19", "", "19", "nope"}}.normalized()
+	if len(got.AffiliateIDs) != 1 || got.AffiliateIDs[0] != "19" {
+		t.Fatalf("locations = %#v", got.AffiliateIDs)
+	}
+}
+
+func TestMigrationVersionsAreUniqueAndIncreasing(t *testing.T) {
+	// Two branches both adding "the next migration" is how a duplicate version gets
+	// in, and the host rejects that at startup rather than at review. Catching it
+	// here means a merge that collides fails a test instead of an install.
+	mig := &captureMigrator{}
+	if err := New().Migrate(mig); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]string{}
+	prev := 0
+	for _, m := range mig.migrations {
+		if other, dup := seen[m.Version]; dup {
+			t.Fatalf("version %d is claimed by both %q and %q", m.Version, other, m.Name)
+		}
+		if m.Version <= prev {
+			t.Fatalf("version %d (%q) does not increase past %d", m.Version, m.Name, prev)
+		}
+		seen[m.Version] = m.Name
+		prev = m.Version
 	}
 }

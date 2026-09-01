@@ -16,6 +16,7 @@ import {
   pct,
   groupSimilarLots,
   affiliateParam,
+  automationSummary,
   groupFindings,
   locationLabel,
   locationLabelOrEmpty,
@@ -451,5 +452,38 @@ describe("watchlists", () => {
     ]);
     expect(groups.map((g) => g.label)).toEqual(["Camping", "Scooter"]);
     expect(groups[0]?.findings.map((f) => f.id)).toEqual(["1", "3"]);
+  });
+});
+
+describe("automationSummary", () => {
+  const base = {
+    enabled: false,
+    locations: 0,
+    sweepSchedule: "0 */6 * * *",
+    matchSchedule: "30 */6 * * *",
+    timeZone: "UTC",
+    lastSweepAt: "",
+    lastSweepNote: "",
+    lastMatchAt: "",
+    lastMatchNote: "",
+    throttledUntil: "",
+    throttled: false,
+    newFindings: 0,
+  };
+
+  it("tells the three ways of doing nothing apart", () => {
+    // Off, on-but-unscoped, and stopped-by-BidRL all mean no traffic, but they need
+    // different things from the operator, so they must not read the same.
+    expect(automationSummary(base)).toBe("Off. Nothing runs on a schedule.");
+    expect(automationSummary({ ...base, enabled: true })).toBe(
+      "On, but no locations chosen — the sweep does nothing.",
+    );
+    expect(automationSummary({ ...base, enabled: true, locations: 1 })).toBe(
+      "On, sweeping 1 location every six hours.",
+    );
+    // A latch outranks everything: it is the only state that needs an answer.
+    expect(automationSummary({ ...base, enabled: true, locations: 3, throttled: true })).toBe(
+      "Stopped: BidRL is refusing requests.",
+    );
   });
 });

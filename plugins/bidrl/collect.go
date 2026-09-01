@@ -52,38 +52,47 @@ func (p *Plugin) collectJob(jc hostjobs.Context) error {
 	if err := jc.Args(&args); err != nil {
 		return err
 	}
-	canonical, hostName, auctionID, err := parseAuctionURL(args.URL)
+	if _, err := p.collectAuction(jc, h, args.URL); err != nil {
+		return err
+	}
+	return jc.Progress(1, "collected")
+}
+
+// collectAuction collects one auction and returns how many lots it stored. The
+// collect job wraps a single call to it; a sweep calls it once per auction it chose.
+func (p *Plugin) collectAuction(jc hostjobs.Context, h host.Host, pageURL string) (int, error) {
+	canonical, hostName, auctionID, err := parseAuctionURL(pageURL)
 	if err != nil {
-		return hostjobs.Permanent(err)
+		return 0, hostjobs.Permanent(err)
 	}
 	_ = jc.Logf("collecting auction %s from %s", auctionID, canonical)
 	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
 	if err := p.upsertAuction(jc, h, auctionID, canonical, hostName, "collecting", now); err != nil {
-		return err
+		return 0, err
 	}
 	if err := jc.Progress(0.05, "opening auction"); err != nil {
-		return err
+		return 0, err
 	}
 
 	lots, title, endsAt, err := p.harvest(jc, h, canonical, hostName, auctionID)
 	if err != nil {
 		_ = p.failAuction(jc, h, auctionID, err.Error(), now)
-		return err
+		return 0, err
 	}
 	if title == "" {
 		title = "Auction " + auctionID
 	}
 	if err := p.storeCollected(jc, h, auctionID, canonical, hostName, title, lots, endsAt, now); err != nil {
 		_ = p.failAuction(jc, h, auctionID, err.Error(), now)
-		return err
+		return 0, err
 	}
 	if err := h.Events().Publish(jc, "auction.collected", auctionID, map[string]any{
 		"auctionId": auctionID, "url": canonical, "title": title, "lotCount": len(lots),
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	_ = jc.Logf("stored %d lots for auction %s", len(lots), auctionID)
-	return jc.Progress(1, "collected")
+	return len(lots), nil
 }
 
 func (p *Plugin) harvest(jc hostjobs.Context, h host.Host, auctionURL, hostName, auctionID string) ([]collectedLot, string, string, error) {

@@ -111,6 +111,23 @@ const routes = new Map<string, unknown>([
     latestEventId: 1,
   }],
   ["/api/plugins/bidrl/watchlists", { watchlists: [WATCHLIST], latestEventId: 1 }],
+  ["/api/plugins/bidrl/automation", {
+    automation: {
+      enabled: true,
+      locations: 2,
+      sweepSchedule: "0 */6 * * *",
+      matchSchedule: "30 */6 * * *",
+      timeZone: "UTC",
+      lastSweepAt: "2026-09-01T06:00:00Z",
+      lastSweepNote: "collected 2 auctions, 140 lots",
+      lastMatchAt: "2026-09-01T06:30:00Z",
+      lastMatchNote: "3 findings from 1 watchlists",
+      throttledUntil: "",
+      throttled: false,
+      newFindings: 3,
+    },
+    latestEventId: 1,
+  }],
   ["/api/plugins/bidrl/findings/wl-1-1001/accept", { id: "wl-1-1001", state: "accepted", lotId: "1001" }],
   ["/api/plugins/bidrl/findings/wl-1-1001/reject", { id: "wl-1-1001", state: "rejected", lotId: "1001" }],
   ["/api/plugins/bidrl/favorites", {
@@ -301,6 +318,12 @@ describe("bidrl screens", () => {
     await renderAt("/bidrl/watchlists");
     expect(container.textContent).toContain("camping gear");
     expect(container.textContent).toContain("under $80.00");
+  });
+
+  it("says what the schedule is doing on the page you open first", async () => {
+    await renderAt("/bidrl");
+    expect(container.textContent).toContain("On, sweeping 2 locations every six hours.");
+    expect(container.textContent).toContain("collected 2 auctions, 140 lots");
   });
 
   it("offers the overview's counts as links into the catalog that proves them", async () => {
