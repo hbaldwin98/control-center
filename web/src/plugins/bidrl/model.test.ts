@@ -15,10 +15,15 @@ import {
   hasEnded,
   pct,
   groupSimilarLots,
+  affiliateParam,
+  groupFindings,
   locationLabel,
+  locationLabelOrEmpty,
+  parseAffiliateParam,
   sortAuctions,
   sortLotGroups,
   sortLots,
+  watchlistRules,
   type Lot,
 } from "./model";
 
@@ -64,9 +69,18 @@ describe("LOT_CATEGORIES", () => {
 
 describe("cleanupMessage", () => {
   it("names what was removed", () => {
-    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0 })).toBe("Nothing had ended.");
-    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0 })).toBe(
+    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, kept: 0 })).toBe("Nothing had ended.");
+    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, kept: 0 })).toBe(
       "Removed 1 ended auction and 4 ended lots.",
+    );
+  });
+
+  it("says what it kept, because a tidy that spared your saved lots looks the same as one that deleted them", () => {
+    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, kept: 2 })).toBe(
+      "Removed 1 ended auction and 4 ended lots. Kept 2 you saved.",
+    );
+    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, kept: 3 })).toBe(
+      "Nothing had ended that you had not saved. Kept 3 you saved.",
     );
   });
 });
@@ -197,6 +211,7 @@ describe("sortAuctions", () => {
         lastError: "",
         collectedAt: "",
         endsAt: "2026-09-03T00:00:00Z",
+        affiliateId: "",
         affiliateName: "",
         city: "",
       },
@@ -209,6 +224,7 @@ describe("sortAuctions", () => {
         lastError: "",
         collectedAt: "",
         endsAt: "2026-09-01T00:00:00Z",
+        affiliateId: "",
         affiliateName: "",
         city: "",
       },
@@ -224,6 +240,12 @@ function fakeLot(over: Partial<Lot> & Pick<Lot, "id">): Lot {
     auctionId: "42",
     url: "",
     lotCode: "",
+    favorite: false,
+    favoriteNote: "",
+    savedAt: "",
+    affiliateId: "",
+    affiliateName: "",
+    city: "",
     title: "",
     description: "",
     currentBidCents: null,
@@ -348,5 +370,81 @@ describe("lotNeighbours", () => {
 
   it("reports nothing for a lot that is not in the list", () => {
     expect(lotNeighbours(lots, "zz")).toEqual({ prev: null, next: null, position: "" });
+  });
+});
+
+describe("locations", () => {
+  it("says nothing rather than inventing a location it does not know", () => {
+    // locationLabel falls back to "Other locations" so grouping has a bucket;
+    // a lot with no location must not inherit that and claim to be somewhere.
+    expect(locationLabel({})).toBe("Other locations");
+    expect(locationLabelOrEmpty({})).toBe("");
+    expect(locationLabelOrEmpty({ affiliateName: "SITES Turlock", city: "Turlock" })).toBe(
+      "SITES Turlock",
+    );
+  });
+
+  it("round-trips several locations through the query string", () => {
+    expect(parseAffiliateParam("19,7")).toEqual(["19", "7"]);
+    expect(parseAffiliateParam(" 19 , ,7,19 ")).toEqual(["19", "7"]);
+    expect(parseAffiliateParam(null)).toEqual([]);
+    expect(affiliateParam(["19", "7", "19", ""])).toBe("19,7");
+    expect(affiliateParam([])).toBe("");
+  });
+
+  it("sorts by location, with unknown locations last in either direction", () => {
+    const lots = [
+      fakeLot({ id: "a", affiliateName: "Turlock" }),
+      fakeLot({ id: "b" }),
+      fakeLot({ id: "c", affiliateName: "Modesto" }),
+    ];
+    expect(sortLots(lots, { column: "location", dir: "asc" }).map((l) => l.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
+    expect(sortLots(lots, { column: "location", dir: "desc" }).map((l) => l.id)).toEqual([
+      "a",
+      "c",
+      "b",
+    ]);
+  });
+});
+
+describe("watchlists", () => {
+  const base = {
+    id: "wl-1",
+    name: "Camping",
+    query: "camping gear",
+    enabled: true,
+    affiliateIds: [] as string[],
+    categories: [] as string[],
+    maxBidCents: null as number | null,
+    minScore: 0.55,
+    status: "ready",
+    lastError: "",
+    lastRunAt: "",
+    createdAt: "",
+    newFindings: 0,
+  };
+
+  it("says what a watchlist narrows to, in location names rather than ids", () => {
+    const labels = new Map([["19", "SITES Turlock"]]);
+    expect(watchlistRules(base, labels)).toBe("Anywhere, any category, any price");
+    expect(
+      watchlistRules({ ...base, affiliateIds: ["19", "7"], categories: ["outdoor"], maxBidCents: 8000 }, labels),
+    ).toBe("SITES Turlock, 7 · outdoor · under $80.00");
+  });
+
+  it("groups findings by watchlist, keeping the order they arrived in", () => {
+    const mk = (id: string, wl: string, name: string) =>
+      ({ id, watchlistId: wl, watchlist: name, score: 1, reason: "", state: "new", createdAt: "", lot: fakeLot({ id }) });
+    const groups = groupFindings([
+      mk("1", "wl-1", "Camping"),
+      mk("2", "wl-2", "Scooter"),
+      mk("3", "wl-1", "Camping"),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(["Camping", "Scooter"]);
+    expect(groups[0]?.findings.map((f) => f.id)).toEqual(["1", "3"]);
   });
 });

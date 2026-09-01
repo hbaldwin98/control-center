@@ -503,16 +503,19 @@ tr.bidrl-similar-row td:first-child {
     font-size: 15px;
   }
 
-  /* Ten columns will not fit a phone, and sideways scrolling to reach the bid defeats the
-     point of the table. Keep photo, name, bid, and close time; the rest is on the lot. */
-  .bidrl-lot-table th:nth-child(2),
-  .bidrl-lot-table td:nth-child(2),
-  .bidrl-lot-table th:nth-child(6),
-  .bidrl-lot-table td:nth-child(6),
-  .bidrl-lot-table th:nth-child(7),
-  .bidrl-lot-table td:nth-child(7),
+  /* Twelve columns will not fit a phone, and sideways scrolling to reach the bid defeats
+     the point of the table. Keep star, photo, name, bid, close time, and location —
+     location stays because ruling a lot out by the drive is exactly what you do from a
+     phone. Lot code (3), category (8), comparable (9), and bucket (11) are on the lot
+     page. */
+  .bidrl-lot-table th:nth-child(3),
+  .bidrl-lot-table td:nth-child(3),
+  .bidrl-lot-table th:nth-child(8),
+  .bidrl-lot-table td:nth-child(8),
   .bidrl-lot-table th:nth-child(9),
-  .bidrl-lot-table td:nth-child(9) {
+  .bidrl-lot-table td:nth-child(9),
+  .bidrl-lot-table th:nth-child(11),
+  .bidrl-lot-table td:nth-child(11) {
     display: none;
   }
 
@@ -555,5 +558,155 @@ tr.bidrl-similar-row td:first-child {
 @media (hover: none) {
   .bidrl-chip {
     border-style: solid;
+  }
+}
+
+.bidrl-lot-location {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14em;
+}
+
+.bidrl-col-location {
+  white-space: nowrap;
+}
+
+/* Location chips: several at once is the normal selection, so they are toggles
+   rather than a single-value select. */
+.bidrl-loc-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The star sits on the photograph on a card and in its own column in the table, so
+   saving works from wherever you are looking rather than only from the lot page. */
+.bidrl-star {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.bidrl-star:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.bidrl-star--on {
+  color: var(--accent);
+}
+
+.bidrl-star:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.bidrl-col-star {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* Bottom right: the gap pill owns the top left and the Ended badge the top right. */
+.bidrl-lot-card__media .bidrl-star {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 22px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.bidrl-lot-card__media .bidrl-star--on {
+  color: #ffd24a;
+}
+
+.bidrl-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* A finding is a decision, not a listing: photo, what it is, why it surfaced, and the
+   two buttons — laid out so the eye lands on the reason and then on Accept. */
+.bidrl-finding {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.bidrl-finding__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bidrl-finding__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.bidrl-finding__reason {
+  margin: 0;
+  color: var(--text);
+}
+
+.bidrl-finding__said {
+  color: var(--text-muted);
+}
+
+.bidrl-finding__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.bidrl-finding-group__name {
+  margin: var(--space-3) 0 0;
+  font-size: 15px;
+}
+
+.bidrl-watchlist {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.bidrl-watchlist__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  /* Stack rather than squeeze: the buttons must stay full-width targets. */
+  .bidrl-finding,
+  .bidrl-watchlist {
+    flex-wrap: wrap;
+  }
+
+  .bidrl-finding__actions {
+    width: 100%;
+  }
+
+  .bidrl-finding__actions button {
+    flex: 1;
   }
 }

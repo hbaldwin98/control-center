@@ -140,6 +140,13 @@ func (p *Plugin) replaceAffiliateAuctions(jc hostjobs.Context, h host.Host, list
 				a.ID, a.URL, a.Title, a.Affiliate, a.Name, a.City, a.ItemCount, a.EndsAt, now); err != nil {
 				return err
 			}
+			// Backfill any auction we already collected. This is how an auction
+			// collected from a pasted URL — never seen on a landing page at collect
+			// time — learns where it is, and how a location lost before migration 7
+			// comes back.
+			if err := stampAuctionLocation(jc, tx, a.ID); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

@@ -68,6 +68,11 @@ func (p *Plugin) Manifest() host.Manifest {
 				Capabilities: []string{"embed"},
 				Purpose:      "Embed collected lot titles so intent search can match by meaning.",
 			},
+			{
+				Name:         "watch-judge",
+				Capabilities: []string{"chat"},
+				Purpose:      "Decide whether a ranked candidate is really the thing a watchlist asked for, from its text alone.",
+			},
 		},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
@@ -105,6 +110,7 @@ func (p *Plugin) Jobs() []hostjobs.Def {
 		{Name: "search", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.searchJob},
 		{Name: "intent", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.intentJob},
 		{Name: "discover", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.discoverJob},
+		{Name: "watch", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.watchJob},
 	}
 }
 
@@ -128,9 +134,21 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
 		{Pattern: "GET /lots", Handler: http.HandlerFunc(p.handleListLots)},
+		{Pattern: "GET /locations", Handler: http.HandlerFunc(p.handleListLocations)},
 		{Pattern: "GET /lots/{id}", Handler: http.HandlerFunc(p.handleGetLot)},
 		{Pattern: "POST /lots/{id}/reprice", Handler: http.HandlerFunc(p.handleReprice)},
 		{Pattern: "POST /lots/{id}/enrich", Handler: http.HandlerFunc(p.handleEnrich)},
+		{Pattern: "POST /lots/{id}/favorite", Handler: http.HandlerFunc(p.handleFavorite)},
+		{Pattern: "DELETE /lots/{id}/favorite", Handler: http.HandlerFunc(p.handleUnfavorite)},
+		{Pattern: "GET /favorites", Handler: http.HandlerFunc(p.handleListFavorites)},
+		{Pattern: "GET /watchlists", Handler: http.HandlerFunc(p.handleListWatchlists)},
+		{Pattern: "POST /watchlists", Handler: http.HandlerFunc(p.handleCreateWatchlist)},
+		{Pattern: "PATCH /watchlists/{id}", Handler: http.HandlerFunc(p.handleUpdateWatchlist)},
+		{Pattern: "DELETE /watchlists/{id}", Handler: http.HandlerFunc(p.handleDeleteWatchlist)},
+		{Pattern: "POST /watchlists/{id}/run", Handler: http.HandlerFunc(p.handleRunWatchlist)},
+		{Pattern: "GET /findings", Handler: http.HandlerFunc(p.handleListFindings)},
+		{Pattern: "POST /findings/{id}/accept", Handler: http.HandlerFunc(p.handleAcceptFinding)},
+		{Pattern: "POST /findings/{id}/reject", Handler: http.HandlerFunc(p.handleRejectFinding)},
 		{Pattern: "POST /search", Handler: http.HandlerFunc(p.handlePostSearch)},
 		{Pattern: "GET /search", Handler: http.HandlerFunc(p.handleGetSearch)},
 		{Pattern: "POST /intent", Handler: http.HandlerFunc(p.handlePostIntent)},

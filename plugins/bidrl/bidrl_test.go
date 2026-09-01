@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -147,7 +148,7 @@ func TestPluginContract(t *testing.T) {
 		t.Fatalf("manifest = %#v, want non-automated %q", m, pluginID)
 	}
 	jobs := p.Jobs()
-	if len(jobs) != 8 {
+	if len(jobs) != 9 {
 		t.Fatalf("jobs = %d", len(jobs))
 	}
 	for _, j := range jobs {
@@ -155,7 +156,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 20 {
+	if len(p.Routes()) != 32 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -165,14 +166,14 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 6 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") {
+	if len(mig.migrations) != 9 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") || !strings.Contains(mig.migrations[8].Up, "bidrl_watchlists") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
 	if err := json.Unmarshal(m.Config.Defaults, &defaults); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Models) != 4 || m.Models[2].Name != "intent-expand" || m.Models[2].Capabilities[0] != "chat" || m.Models[3].Name != "intent-match" || m.Models[3].Capabilities[0] != "embed" {
+	if len(m.Models) != 5 || m.Models[4].Name != "watch-judge" || m.Models[2].Name != "intent-expand" || m.Models[2].Capabilities[0] != "chat" || m.Models[3].Name != "intent-match" || m.Models[3].Capabilities[0] != "embed" {
 		t.Fatalf("models = %#v", m.Models)
 	}
 }
@@ -911,5 +912,137 @@ func TestFeedWhere(t *testing.T) {
 	}
 	if where, _ := feedWhere("all"); where != "1=1" {
 		t.Fatalf(`feedWhere("all") = %q, want every lot`, where)
+	}
+}
+
+func TestAffiliateClauseAcceptsSeveralLocations(t *testing.T) {
+	// Filtering to a handful of locations is the point: "what is within a drive"
+	// is never one location and never all of them.
+	clause, args := affiliateClause(url.Values{"affiliate": {"19,7", "turlock-19", "", "3"}})
+	if clause != " AND au.affiliate_id IN (?,?,?)" {
+		t.Fatalf("clause = %q", clause)
+	}
+	if len(args) != 3 || args[0] != "19" || args[1] != "7" || args[2] != "3" {
+		t.Fatalf("args = %#v", args)
+	}
+	// No parameter means every location, so links written before the filter
+	// existed keep working.
+	if clause, args := affiliateClause(url.Values{}); clause != "" || args != nil {
+		t.Fatalf("empty = %q %#v", clause, args)
+	}
+	if clause, _ := affiliateClause(url.Values{"affiliate": {"", ","}}); clause != "" {
+		t.Fatalf("junk = %q", clause)
+	}
+}
+
+func TestCleanupKeepsWhatYouSaved(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	past := "2026-08-30T00:00:00Z"
+	future := "2026-09-05T00:00:00Z"
+
+	// An ended auction with nothing saved goes whole.
+	plan := cleanupPlan(cleanupAuction{ID: "1", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past},
+		{ID: "b", EndsAt: past},
+	}}, now)
+	if !plan.DropAuction || plan.Kept != 0 {
+		t.Fatalf("ended auction = %#v", plan)
+	}
+
+	// One saved lot keeps the auction as a shell, so the lot keeps its photos and
+	// comparable, but the auction's other ended lots still go.
+	plan = cleanupPlan(cleanupAuction{ID: "2", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past, Favorite: true},
+		{ID: "b", EndsAt: past},
+	}}, now)
+	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+		t.Fatalf("saved auction = %#v", plan)
+	}
+
+	// A saved ended lot in a still-open auction is kept too.
+	plan = cleanupPlan(cleanupAuction{ID: "3", EndsAt: future, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past, Favorite: true},
+		{ID: "b", EndsAt: past},
+		{ID: "c", EndsAt: future},
+	}}, now)
+	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+		t.Fatalf("open auction = %#v", plan)
+	}
+}
+
+func TestWatchRulesNarrowsBeforeAnythingCosts(t *testing.T) {
+	// Everything decidable in SQL happens before a call is made, and a lot already
+	// decided for this watchlist never reaches the funnel again — that is what makes
+	// a rejection free to honour on every later run.
+	where, args := watchRules(watchlist{ID: "wl-1"})
+	if !strings.Contains(where, "bidrl_findings") || len(args) != 1 || args[0] != "wl-1" {
+		t.Fatalf("bare = %q %#v", where, args)
+	}
+
+	max := int64(8000)
+	where, args = watchRules(watchlist{
+		ID:           "wl-2",
+		AffiliateIDs: []string{"19", "7"},
+		Categories:   []string{"outdoor"},
+		MaxBidCents:  &max,
+	})
+	for _, want := range []string{"au.affiliate_id IN (?,?)", "IN (?)", "current_bid_cents IS NULL OR l.current_bid_cents <= ?"} {
+		if !strings.Contains(where, want) {
+			t.Fatalf("where %q missing %q", where, want)
+		}
+	}
+	if len(args) != 5 || args[1] != "19" || args[2] != "7" || args[3] != "outdoor" || args[4] != max {
+		t.Fatalf("args = %#v", args)
+	}
+}
+
+func TestKeepWatchMatchesAppliesTheFloorAndTheCap(t *testing.T) {
+	cards := []intentCard{}
+	matches := []intentMatch{}
+	for i := 0; i < maxJudged+10; i++ {
+		id := fmt.Sprintf("lot-%03d", i)
+		cards = append(cards, intentCard{ID: id, Title: id})
+		matches = append(matches, intentMatch{ID: id, Score: 2 - float64(i)*0.01})
+	}
+	// Everything clears the floor here, so the cap is what bounds the spend.
+	kept := keepWatchMatches(matches, cards, 0.55)
+	if len(kept) != maxJudged {
+		t.Fatalf("kept %d, want the judge cap %d", len(kept), maxJudged)
+	}
+
+	// With a floor biting first, only what clears it reaches the judge.
+	few := []intentCard{{ID: "a", Title: "a"}, {ID: "b", Title: "b"}, {ID: "c", Title: "c"}}
+	kept = keepWatchMatches([]intentMatch{
+		{ID: "a", Score: 1.4}, {ID: "b", Score: 0.6}, {ID: "c", Score: 0.2},
+	}, few, 0.55)
+	if len(kept) != 2 || kept[0].ID != "a" || kept[1].ID != "b" {
+		t.Fatalf("floor = %#v", kept)
+	}
+	// A floor above every score keeps nothing, so no judge call is made at all.
+	if got := keepWatchMatches(matches, cards, 5); len(got) != 0 {
+		t.Fatalf("high floor kept %d", len(got))
+	}
+}
+
+func TestCleanupKeepsAnUndecidedFinding(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	past := "2026-08-30T00:00:00Z"
+
+	// A finding you have not looked at yet pins its lot, so the queue still holds
+	// what the watchlist found while you were asleep.
+	plan := cleanupPlan(cleanupAuction{ID: "1", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past, Pending: true},
+		{ID: "b", EndsAt: past},
+	}}, now)
+	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+		t.Fatalf("pending = %#v", plan)
+	}
+
+	// Once decided, it is no longer pinned and the auction goes whole.
+	plan = cleanupPlan(cleanupAuction{ID: "2", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", EndsAt: past},
+	}}, now)
+	if !plan.DropAuction {
+		t.Fatalf("decided = %#v", plan)
 	}
 }

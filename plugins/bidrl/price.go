@@ -38,11 +38,17 @@ type priceResult struct {
 }
 
 func (p *Plugin) priceEligible(jc hostjobs.Context, h host.Host, auctionID string) error {
+	return p.priceEligibleWhere(jc, h, `l.auction_id = ?`, auctionID)
+}
+
+// priceEligibleWhere prices whatever the predicate selects, so a scan can price an
+// auction and a watchlist run can price only its own survivors.
+func (p *Plugin) priceEligibleWhere(jc hostjobs.Context, h host.Host, where string, args ...any) error {
 	rows, err := h.Store().Query(jc, `SELECT l.id, l.auction_id, l.title, l.current_bid_cents, IFNULL(l.description,''), a.basis, a.model_or_sku, a.identification, IFNULL(a.notes,'')
 		FROM bidrl_lots l
 		JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
-		WHERE l.auction_id = ? AND a.basis IN ('exact_text','barcode')
-		  AND NOT EXISTS (SELECT 1 FROM bidrl_valuations v WHERE v.lot_id = l.id)`, auctionID)
+		WHERE (`+where+`) AND a.basis IN ('exact_text','barcode')
+		  AND NOT EXISTS (SELECT 1 FROM bidrl_valuations v WHERE v.lot_id = l.id)`, args...)
 	if err != nil {
 		return err
 	}

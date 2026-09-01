@@ -177,22 +177,26 @@ right.
 
 | Surface | Contract |
 |---|---|
-| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
+| Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
-| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings |
-| API | `GET /lots?q=&bucket=&category=&ending=soon`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
+| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
+| API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
+| API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |
+| API | `GET /findings?state=&watchlist=`, `POST /findings/{id}/accept`, `POST /findings/{id}/reject` |
+| API | `GET /locations` — the SITES locations you have lots at, with lot counts |
+| API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
 | Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
-| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+| UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/findings`, `/bidrl/watchlists`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at
 `https://www.bidrl.com/auction/42/bidgallery`, plus `POST /api/ItemData` and
 `GET /aucbeat/pusher/` fixtures. Before scanning, connect a provider and
-assign models to the plugin's four declared routes, `cheap-vision` (chat+vision),
-`grounded-price` (chat), `intent-expand` (chat), and `intent-match` (embed). The plugin
-screen lists each by purpose; Models will too. Do not invent other names — the plugin
-asks for these four. Assign `intent-expand` to a cheap chat model and `intent-match` to
+assign models to the plugin's five declared routes, `cheap-vision` (chat+vision),
+`grounded-price` (chat), `intent-expand` (chat), `intent-match` (embed), and
+`watch-judge` (chat). The plugin screen lists each by purpose; Models will too. Do not
+invent other names — the plugin asks for these five. Assign `intent-expand` to a cheap chat model and `intent-match` to
 an embedding model (for example `text-embedding-3-small`).
 
 ---
@@ -223,6 +227,44 @@ electronics, appliances, outdoor, automotive, sporting, household, collectibles,
 can be collected from the list instead of a pasted URL.
 
 ---
+
+## Watchlists and findings
+
+A watchlist is a saved intent plus the rules that keep its queue short: locations,
+categories, a price ceiling, and a score floor. Running one is still user-triggered
+(`POST /watchlists/{id}/run`) — there is no cron yet.
+
+A run is a **funnel, cheapest stage first**, so its cost tracks what you asked for rather
+than how much BidRL listed:
+
+| Stage | Cost | Drops |
+|---|---|---|
+| Rules | free, SQL | Lots outside the watchlist's locations, categories, or price ceiling — and any lot already decided for it |
+| Embedding rank | one embed per changed lot | Everything below the watchlist's `minScore`, then everything past the judge cap of 40 |
+| `watch-judge` | one cheap chat call per survivor | Listings that merely share a word with what you described |
+| Vision, then pricing | the existing scan path | — runs only on what came through all three |
+
+That ordering is the whole cost argument: a 400-lot warehouse auction costs one embed per
+lot and a handful of chat calls, not 400 vision calls.
+
+The judge is a **filter, not a scorer**, and it sees text only — never photographs. Asking
+a cheap chat model to rank things it cannot see produces confident noise, the same failure
+this plugin already refuses for pricing. Its sentence is stored and shown as the model's
+words, attributed. A judge that errors does not silently drop its candidate: the ranking
+already liked it, so it stays with the ranking's own reason.
+
+The expansion is cached on the watchlist and refreshed only when the query text changes or
+the cache passes 30 days, so a repeated run does not pay `intent-expand` again to be told
+"tent, lantern, cooler".
+
+`UNIQUE (watchlist_id, lot_id)` is what makes the queue usable: a lot decided once never
+returns to it, and the rules stage excludes decided lots before they cost anything.
+Accepting a finding also saves the lot — accepting something and then hunting for it in
+another tab is the obvious wrong flow. Accept and reject are direct writes, not jobs.
+
+An undecided finding pins its lot against "Remove ended", the same way a save does: a
+finding is the record of what a watchlist turned up, and deleting the lot before you have
+looked would empty the queue of exactly what it exists to show you.
 
 ## Intent
 
@@ -303,6 +345,37 @@ because they were always the same query — `GET /feed?filter=deals` and
 `filter=all` means every lot, including `pending`. The old feed value for "scanned but not
 necessarily priced" is now spelled `filter=scanned`.
 
+**Location is stored, not joined.** `bidrl_auctions` carries `affiliate_id`,
+`affiliate_name`, and `city`, stamped at collect time from the SITES discovery cache and
+backfilled by every later discover. It used to be a read-time join against
+`bidrl_affiliate_auctions`, which discover wipes and rebuilds on every run — so a collected
+auction lost its location the moment it closed or dropped off its landing page. Lots read
+the location from their own auction.
+
+`affiliate=` takes several ids at once, comma-joined or repeated, because the useful
+question is what is within a drive: a handful of locations, not one and not all of them. No
+parameter means every location. The catalog's location chips are seeded from `GET /locations`
+rather than from the lot list, so selecting one does not delete the rest from the filter.
+Every card and row shows its location, and it stays below 720px — ruling a lot out by the
+drive rather than the price is exactly what you do from a phone. The lot page shows it as a
+link into the catalog filtered to that location. Distance is not modelled: the plugin does
+not know where you live and does not geocode to guess.
+
+**Saving a lot outlives its auction.** A star on every card, row, and lot page writes to
+`bidrl_favorites` directly rather than queueing a job — it is instant and local, and the
+rule that every button queues a job is there for work that takes time. `/bidrl/saved` is
+that list, newest save first, with the same location and category filters as the catalog
+and no similar-lot collapsing, because every row on it was chosen on purpose. A note per
+lot lives on the lot page; writing one saves the lot, since a note about something you did
+not keep is not a thing anyone means to write.
+
+**"Remove ended" never deletes a saved lot.** The point of saving something is to refer
+back to it later, and later is usually after it closed — a favourite that vanishes on the
+next tidy is worse than no favourite. An ended auction holding a saved lot is kept as its
+shell so the lot keeps its photos, comparable, and location; that auction's unsaved lots
+still go, and cleanup reports what it kept as well as what it removed. Deleting an auction
+outright still takes everything in it, saved lots included: that was asked for.
+
 Find filters the visible lots by title, identification, model, and category without
 starting a BidRL search. The catalog's whole state — preset, text, bucket, category,
 ending — lives in the query string, so a filtered list can be linked to and pasted, and
@@ -320,14 +393,14 @@ and the rest. Duplicate or near-duplicate listings — same model, identificatio
 or long identical title — collapse to one representative with the extras behind "N similar".
 
 Every card or row shows a thumb, the BidRL title beside what the photos suggest, the
-current bid, a local countdown from stored `ends_at`, category, and a link back to BidRL.
+current bid, a local countdown from stored `ends_at`, the auction's location, category, and a link back to BidRL.
 On a card the gap rides the photograph as a pill — green past 50%, amber past 20%, quiet
 below that, because a thin gap does not survive a buyer's premium — and the bid is the only
 large figure, with the comparable beside it as "vs $X sold · eBay". A lot whose `ends_at`
 has passed carries an "Ended" pill opposite the gap.
 
-Below 720px the lot table drops lot code, category, comparable, and bucket rather than
-scrolling sideways past the bid — those live on the lot page — the card grid tightens to
+Below 720px the lot table drops lot code, category, comparable, and bucket — but keeps the
+star and location — rather than scrolling sideways past the bid — those live on the lot page — the card grid tightens to
 150px columns, and each filter takes its own row.
 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then

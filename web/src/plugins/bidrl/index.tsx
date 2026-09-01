@@ -52,6 +52,7 @@ import {
   LOT_PRESETS,
   LOT_SORT_DEFAULTS,
   SITES_SORT_DEFAULTS,
+  affiliateParam,
   cents,
   cleanupMessage,
   comparableHint,
@@ -60,22 +61,31 @@ import {
   filterLabel,
   gapTone,
   groupByLocation,
+  groupFindings,
   groupSimilarLots,
   hasEnded,
+  locationLabel,
+  locationLabelOrEmpty,
   lotNeighbours,
+  parseAffiliateParam,
   pct,
   sortAuctions,
   sortLotGroups,
   sortSitesAuctions,
+  watchlistRules,
   type Auction,
   type AuctionPage,
   type AuctionSortColumn,
   type AuctionIndex,
   type AuctionsPage,
   type CleanupResult,
+  type FavoritesPage,
   type FeedPage,
+  type Finding,
+  type FindingsPage,
   type IntentPage,
   type LocationGroup,
+  type LocationsPage,
   type Lot,
   type LotSortColumn,
   type LotsPage,
@@ -86,6 +96,7 @@ import {
   type SitesSortColumn,
   type SortDir,
   type SortState,
+  type WatchlistsPage,
 } from "./model";
 import "./index.css";
 
@@ -141,6 +152,7 @@ function useLots(
   bucket: string,
   category: string,
   ending: string,
+  affiliate: string,
 ): UseSnapshotResult<LotsPage> {
   const load = useCallback(async (signal: AbortSignal) => {
     const params = new URLSearchParams();
@@ -149,10 +161,61 @@ function useLots(
     if (bucket && bucket !== "all") params.set("bucket", bucket);
     if (category && category !== "all") params.set("category", category);
     if (ending) params.set("ending", ending);
+    if (affiliate) params.set("affiliate", affiliate);
     const qs = params.toString();
     const data = await api.get<LotsPage>(`/lots${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [filter, q, bucket, category, ending]);
+  }, [filter, q, bucket, category, ending, affiliate]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useFavorites(
+  q: string,
+  category: string,
+  affiliate: string,
+): UseSnapshotResult<FavoritesPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (category && category !== "all") params.set("category", category);
+    if (affiliate) params.set("affiliate", affiliate);
+    const qs = params.toString();
+    const data = await api.get<FavoritesPage>(`/favorites${qs ? `?${qs}` : ""}`, signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, [q, category, affiliate]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useFindings(state: string, watchlist: string): UseSnapshotResult<FindingsPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (state) params.set("state", state);
+    if (watchlist) params.set("watchlist", watchlist);
+    const qs = params.toString();
+    const data = await api.get<FindingsPage>(`/findings${qs ? `?${qs}` : ""}`, signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, [state, watchlist]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+function useWatchlists(): UseSnapshotResult<WatchlistsPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<WatchlistsPage>("/watchlists", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+/**
+ * The locations you have lots at. Its own request, not derived from the lot list:
+ * deriving it would delete every unselected location from the filter the moment
+ * you picked one.
+ */
+function useLocations(): UseSnapshotResult<LocationsPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<LocationsPage>("/locations", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -429,6 +492,12 @@ const BIDRL_TABS = [
     label: "Lots",
     owns: (path: string) => path === "/bidrl/lots" || path.startsWith("/bidrl/lot/"),
   },
+  {
+    to: "/bidrl/findings",
+    label: "Findings",
+    owns: (path: string) => path === "/bidrl/findings" || path === "/bidrl/watchlists",
+  },
+  { to: "/bidrl/saved", label: "Saved", owns: (path: string) => path === "/bidrl/saved" },
   { to: "/bidrl/intent", label: "Intent", owns: (path: string) => path === "/bidrl/intent" },
 ] as const;
 
@@ -442,6 +511,50 @@ function BidrlTabs() {
         </Link>
       ))}
     </Tabs>
+  );
+}
+
+/**
+ * Saving a lot is a direct write, not a job, so the star has to answer immediately
+ * rather than wait for the snapshot to come round again. It holds its own optimistic
+ * state and falls back to the server's answer when the reload lands.
+ */
+function FavoriteStar({ lot }: { lot: Lot }) {
+  const [saved, setSaved] = useState(lot.favorite);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setSaved(lot.favorite), [lot.favorite, lot.id]);
+
+  const toggle = async () => {
+    const next = !saved;
+    setSaved(next);
+    setBusy(true);
+    try {
+      const path = `/lots/${encodeURIComponent(lot.id)}/favorite`;
+      if (next) await api.post(path);
+      else await api.del(path);
+    } catch {
+      setSaved(!next);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`bidrl-star${saved ? " bidrl-star--on" : ""}`}
+      aria-pressed={saved}
+      aria-label={saved ? `Unsave ${lot.title || lot.id}` : `Save ${lot.title || lot.id}`}
+      title={saved ? "Saved — remove from Saved" : "Save for later"}
+      disabled={busy}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void toggle();
+      }}
+    >
+      {saved ? "\u2605" : "\u2606"}
+    </button>
   );
 }
 
@@ -646,6 +759,71 @@ function LotPhotos({ urls }: { urls: string[] }) {
   );
 }
 
+/**
+ * The saved note. Only on the lot page: a note is something you write once and read
+ * later, so it does not need to be editable from every list that shows the lot.
+ *
+ * Saving a note also saves the lot, because writing "check the charger fits" about
+ * something you have not kept is not a thing anyone means to do.
+ */
+function LotNote({ lot }: { lot: Lot }) {
+  const [draft, setDraft] = useState(lot.favoriteNote);
+  const [saved, setSaved] = useState(lot.favoriteNote);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setDraft(lot.favoriteNote);
+    setSaved(lot.favoriteNote);
+  }, [lot.favoriteNote, lot.id]);
+
+  const commit = async () => {
+    const note = draft.trim();
+    if (note === saved.trim()) return;
+    setBusy(true);
+    setFailed(false);
+    try {
+      await api.post(`/lots/${encodeURIComponent(lot.id)}/favorite`, { note });
+      setSaved(note);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Your note">
+      <Stack>
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void commit();
+          }}
+          placeholder="Why you kept this — a measurement, a question, what to check"
+          aria-label="Note"
+          disabled={busy}
+        />
+        <Hint>
+          {failed
+            ? "Could not save that note."
+            : lot.favorite
+              ? "Saved with this lot. Writing a note keeps the lot too."
+              : "Writing a note saves this lot to Saved."}
+        </Hint>
+      </Stack>
+    </Card>
+  );
+}
+
+/** The day you saved it. A time of day would be noise on a list you scan by date. */
+function savedOn(iso: string): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? "" : at.toLocaleDateString();
+}
+
 function LotMeta({ lot }: { lot: Lot }) {
   return (
     <>
@@ -653,6 +831,17 @@ function LotMeta({ lot }: { lot: Lot }) {
       <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
     </>
   );
+}
+
+/**
+ * Where the lot is. Shown on every card and row, and kept on narrow screens, because
+ * ruling something out on the drive rather than on the price is the whole reason to
+ * put it here — doing that from a phone is the common case, not the edge one.
+ */
+function LotLocation({ lot }: { lot: Lot }) {
+  const label = locationLabelOrEmpty(lot);
+  if (!label) return null;
+  return <span className="bidrl-lot-location" title={`Auction location: ${label}`}>{label}</span>;
 }
 
 function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: boolean }) {
@@ -694,21 +883,34 @@ function LotComparable({ lot }: { lot: Lot }) {
   );
 }
 
-function LotTableRows({ lots, extraClass, showWhy = false }: { lots: Lot[]; extraClass?: string; showWhy?: boolean }) {
+function LotTableRows({
+  lots,
+  extraClass,
+  showWhy = false,
+  showSaved = false,
+}: {
+  lots: Lot[];
+  extraClass?: string;
+  showWhy?: boolean;
+  showSaved?: boolean;
+}) {
   return (
     <>
       {lots.map((lot) => (
         <tr key={lot.id} className={extraClass}>
+          <td className="bidrl-col-star"><FavoriteStar lot={lot} /></td>
           <td><LotThumbLink lot={lot} /></td>
           <td className="cc-nowrap">{lot.lotCode || <Dash />}</td>
           <td><LotTitle lot={lot} showLotCode={false} /></td>
           <td>{cents(lot.currentBidCents)}</td>
           <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
+          <td className="bidrl-col-location">{locationLabelOrEmpty(lot) || <Dash />}</td>
           <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
           <td><LotComparable lot={lot} /></td>
           <td className="cc-num">{lot.dealScore != null ? pct(lot.dealScore) : <Dash />}</td>
           <td><Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge></td>
           {showWhy ? <td>{lot.matchReason || <Dash />}</td> : null}
+          {showSaved ? <td className="cc-nowrap">{savedOn(lot.savedAt) || <Dash />}</td> : null}
         </tr>
       ))}
     </>
@@ -733,6 +935,7 @@ function LotCard({ lot }: { lot: Lot }) {
           </span>
         ) : null}
         {ended ? <span className="bidrl-gap bidrl-gap--ended">Ended</span> : null}
+        <FavoriteStar lot={lot} />
       </div>
       <div className="bidrl-lot-card__title"><LotTitle lot={lot} /></div>
       <div className="bidrl-lot-card__price">
@@ -746,8 +949,10 @@ function LotCard({ lot }: { lot: Lot }) {
       </div>
       <div className="bidrl-lot-card__meta">
         {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+        <LotLocation lot={lot} />
         <LotMeta lot={lot} />
       </div>
+      {lot.favoriteNote ? <p className="bidrl-note">{lot.favoriteNote}</p> : null}
       {lot.matchReason ? <p className="bidrl-intent-reason">{lot.matchReason}</p> : null}
     </>
   );
@@ -795,6 +1000,9 @@ function LotBrowser({
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   const showWhy = lots.some((lot) => Boolean(lot.matchReason));
+  // Only when every row is a saved lot — that is the Saved screen. A "Saved" column on
+  // the catalog would be blank for almost every row and earn none of its width.
+  const showSaved = lots.length > 0 && lots.every((lot) => Boolean(lot.savedAt));
 
   if (lots.length === 0) {
     return <EmptyState>{empty}</EmptyState>;
@@ -815,16 +1023,19 @@ function LotBrowser({
       className="bidrl-lot-table"
       head={
         <>
+          <th><span className="cc-sr-only">Saved</span></th>
           <th></th>
           <SortedHead column="lot" sort={sort} onSort={onSort}>Lot</SortedHead>
           <SortedHead column="name" sort={sort} onSort={onSort}>Name</SortedHead>
           <SortedHead column="bid" sort={sort} onSort={onSort}>Bid</SortedHead>
           <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+          <SortedHead column="location" sort={sort} onSort={onSort}>Location</SortedHead>
           <SortedHead column="category" sort={sort} onSort={onSort}>Category</SortedHead>
           <SortedHead column="price" sort={sort} onSort={onSort}>Price</SortedHead>
           <SortedHead column="gap" sort={sort} onSort={onSort} numeric>Gap</SortedHead>
           <SortedHead column="bucket" sort={sort} onSort={onSort}>Bucket</SortedHead>
           {showWhy ? <SortedHead column="why" sort={sort} onSort={onSort}>Why</SortedHead> : null}
+          {showSaved ? <SortedHead column="saved" sort={sort} onSort={onSort}>Saved</SortedHead> : null}
         </>
       }
     >
@@ -835,6 +1046,7 @@ function LotBrowser({
           open={Boolean(open[group.key])}
           onToggle={() => toggle(group.key)}
           showWhy={showWhy}
+          showSaved={showSaved}
         />
       ))}
     </Table>
@@ -873,11 +1085,13 @@ function LotGroupRows({
   open,
   onToggle,
   showWhy = false,
+  showSaved = false,
 }: {
   group: SimilarGroup;
   open: boolean;
   onToggle: () => void;
   showWhy?: boolean;
+  showSaved?: boolean;
 }) {
   const head = group.lots[0];
   if (!head) return null;
@@ -885,6 +1099,7 @@ function LotGroupRows({
   return (
     <>
       <tr>
+        <td className="bidrl-col-star"><FavoriteStar lot={head} /></td>
         <td><LotThumbLink lot={head} /></td>
         <td className="cc-nowrap">{head.lotCode || <Dash />}</td>
         <td>
@@ -899,13 +1114,22 @@ function LotGroupRows({
         </td>
         <td>{cents(head.currentBidCents)}</td>
         <td>{head.endsAt ? <Countdown iso={head.endsAt} /> : <Dash />}</td>
+        <td className="bidrl-col-location">{locationLabelOrEmpty(head) || <Dash />}</td>
         <td>{head.category ? <Badge>{head.category}</Badge> : <Dash />}</td>
         <td><LotComparable lot={head} /></td>
         <td className="cc-num">{head.dealScore != null ? pct(head.dealScore) : <Dash />}</td>
         <td><Badge tone={bucketTone(head.bucket)}>{head.bucket.replace("_", " ")}</Badge></td>
         {showWhy ? <td>{head.matchReason || <Dash />}</td> : null}
+        {showSaved ? <td className="cc-nowrap">{savedOn(head.savedAt) || <Dash />}</td> : null}
       </tr>
-      {open ? <LotTableRows lots={rest} extraClass="bidrl-similar-row" showWhy={showWhy} /> : null}
+      {open ? (
+        <LotTableRows
+          lots={rest}
+          extraClass="bidrl-similar-row"
+          showWhy={showWhy}
+          showSaved={showSaved}
+        />
+      ) : null}
     </>
   );
 }
@@ -1172,8 +1396,536 @@ function Auctions() {
   );
 }
 
+const FINDING_STATES = [
+  { value: "new", label: "To review" },
+  { value: "accepted", label: "Accepted" },
+  { value: "rejected", label: "Rejected" },
+  { value: "all", label: "Everything" },
+] as const;
+
 /**
- * The one catalog. Its whole state — preset, text, bucket, category, ending — lives in
+ * One finding, as a decision rather than a listing. The judge's sentence is shown as
+ * the model's words, attributed — it is why this reached the queue, not a fact about
+ * the lot.
+ */
+function FindingRow({
+  finding,
+  onDecide,
+  busy,
+}: {
+  finding: Finding;
+  onDecide: (state: "accepted" | "rejected") => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="bidrl-finding">
+      <LotThumbLink lot={finding.lot} />
+      <div className="bidrl-finding__body">
+        <LotTitle lot={finding.lot} />
+        <div className="bidrl-finding__meta">
+          {cents(finding.lot.currentBidCents)}
+          {finding.lot.endsAt ? (
+            <>
+              {" · "}
+              <Countdown iso={finding.lot.endsAt} />
+            </>
+          ) : null}
+          <LotLocation lot={finding.lot} />
+          <LotMeta lot={finding.lot} />
+        </div>
+        {finding.reason ? (
+          <p className="bidrl-finding__reason">
+            <span className="bidrl-finding__said">Matched because</span> {finding.reason}
+          </p>
+        ) : null}
+      </div>
+      {finding.state === "new" ? (
+        <div className="bidrl-finding__actions">
+          <Button variant="primary" size="sm" disabled={busy} onClick={() => onDecide("accepted")}>
+            Accept
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => onDecide("rejected")}>
+            Reject
+          </Button>
+        </div>
+      ) : (
+        <div className="bidrl-finding__actions">
+          <Badge tone={finding.state === "accepted" ? "ok" : "neutral"}>{finding.state}</Badge>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The review queue. Grouped by watchlist, newest first, with Accept and Reject as
+ * direct writes — they are instant and local, so they do not queue a job.
+ *
+ * Accepting saves the lot as well as clearing it, because accepting something and then
+ * hunting for it in another tab is the obvious wrong flow. A rejection is permanent:
+ * the same lot never comes back to this queue for the same watchlist, and later runs
+ * skip it before it costs a call.
+ */
+function Findings() {
+  const [state, setState] = useQueryState("state", "new");
+  const [watchlist, setWatchlist] = useQueryState("watchlist");
+  const snap = useFindings(state, watchlist);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const disabled = snap.error instanceof PluginDisabledError;
+
+  const decide = async (id: string, next: "accepted" | "rejected") => {
+    setBusy(id);
+    setError(null);
+    try {
+      await api.post(`/findings/${encodeURIComponent(id)}/${next === "accepted" ? "accept" : "reject"}`);
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not record that.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const groups = snap.status === "ready" ? groupFindings(snap.data.findings) : [];
+  const watchlists = snap.status === "ready" ? snap.data.watchlists : [];
+
+  return (
+    <Page>
+      <PageHeader
+        title="Findings"
+        lede="What your watchlists turned up, waiting on you. Accepting saves the lot; rejecting is permanent, and the same lot never costs another call for that watchlist."
+      />
+      <Stack>
+        <BidrlTabs />
+        <Notices message={null} error={error} disabled={disabled} />
+        <Card
+          title="Review queue"
+          actions={<Link to="/bidrl/watchlists">Watchlists</Link>}
+        >
+          <Toolbar>
+            <Field label="Show">
+              <Select value={state} onChange={(e) => setState(e.target.value)} aria-label="State">
+                {FINDING_STATES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Watchlist">
+              <Select
+                value={watchlist}
+                onChange={(e) => setWatchlist(e.target.value)}
+                aria-label="Watchlist"
+              >
+                <option value="">All watchlists</option>
+                {watchlists.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </Select>
+            </Field>
+          </Toolbar>
+          {snap.status === "loading" ? <Loading label="Loading findings…" /> : null}
+          {snap.status === "error" && !disabled ? (
+            <Callout tone="danger">{snap.error.message}</Callout>
+          ) : null}
+          {snap.status === "ready" && snap.data.findings.length === 0 ? (
+            <EmptyState>
+              {watchlists.length === 0
+                ? "No watchlists yet. Describe what you are looking for and run it — nothing happens on its own."
+                : state === "new"
+                  ? "Nothing waiting. Run a watchlist to look again."
+                  : "No findings in that state."}
+            </EmptyState>
+          ) : null}
+          {groups.map((group) => (
+            <div key={group.id} className="bidrl-finding-group">
+              <h3 className="bidrl-finding-group__name">
+                {group.label} <Hint>{group.findings.length}</Hint>
+              </h3>
+              {group.findings.map((f) => (
+                <FindingRow
+                  key={f.id}
+                  finding={f}
+                  busy={busy === f.id}
+                  onDecide={(next) => void decide(f.id, next)}
+                />
+              ))}
+            </div>
+          ))}
+        </Card>
+      </Stack>
+    </Page>
+  );
+}
+
+/**
+ * Watchlists: a description of what you want, plus the rules that keep the queue short.
+ * Running one is a job — it embeds, judges, and may read photographs — so the button
+ * says what it queued rather than pretending the work is done.
+ */
+function Watchlists() {
+  const snap = useWatchlists();
+  const locations = useLocations();
+  const [name, setName] = useState("");
+  const [query, setQuery] = useState("");
+  const [maxBid, setMaxBid] = useState("");
+  const [affiliates, setAffiliates] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const disabled = snap.error instanceof PluginDisabledError;
+
+  const labels = useMemo(() => {
+    const map = new Map<string, string>();
+    if (locations.status === "ready") {
+      for (const loc of locations.data.locations) map.set(loc.id, locationLabel(loc));
+    }
+    return map;
+  }, [locations]);
+
+  const toggle = (list: string[], set: (next: string[]) => void, value: string) => {
+    set(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+  };
+
+  const create = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const dollars = Number.parseFloat(maxBid);
+      await api.post("/watchlists", {
+        name: name.trim(),
+        query: q,
+        affiliateIds: affiliates,
+        categories,
+        maxBidCents: Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : null,
+      });
+      setName("");
+      setQuery("");
+      setMaxBid("");
+      setAffiliates([]);
+      setCategories([]);
+      setNotice("Watchlist saved. Run it to look through what you have collected.");
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save that watchlist.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (fn: () => Promise<unknown>, message: string) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+      setNotice(message);
+      snap.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Page>
+      <PageHeader
+        title="Watchlists"
+        lede="Describe what you are after and how far you would drive for it. Running one costs a little: it ranks your collected lots locally, asks a cheap model about the few that survive, and only then reads photographs."
+      />
+      <Stack>
+        <BidrlTabs />
+        <Notices message={notice} error={error} disabled={disabled} />
+        <Card title="New watchlist">
+          <Stack>
+            <Toolbar>
+              <Field label="Name">
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Camping"
+                  aria-label="Watchlist name"
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label="Looking for">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void create();
+                  }}
+                  placeholder="camping gear — tent, stove, sleeping bag"
+                  aria-label="Watchlist query"
+                  disabled={disabled}
+                />
+              </Field>
+              <Field label="Max bid ($)">
+                <Input
+                  value={maxBid}
+                  onChange={(e) => setMaxBid(e.target.value)}
+                  placeholder="80"
+                  inputMode="decimal"
+                  aria-label="Max bid"
+                  disabled={disabled}
+                />
+              </Field>
+            </Toolbar>
+            {locations.status === "ready" && locations.data.locations.length > 0 ? (
+              <Field label="Locations">
+                <div className="bidrl-loc-filter">
+                  {locations.data.locations.map((loc) => (
+                    <Button
+                      key={loc.id}
+                      size="sm"
+                      pressed={affiliates.includes(loc.id)}
+                      disabled={disabled}
+                      onClick={() => toggle(affiliates, setAffiliates, loc.id)}
+                    >
+                      {locationLabel(loc)}
+                    </Button>
+                  ))}
+                </div>
+              </Field>
+            ) : null}
+            <Field label="Categories">
+              <div className="bidrl-loc-filter">
+                {LOT_CATEGORIES.map((c) => (
+                  <Button
+                    key={c}
+                    size="sm"
+                    pressed={categories.includes(c)}
+                    disabled={disabled}
+                    onClick={() => toggle(categories, setCategories, c)}
+                  >
+                    {c}
+                  </Button>
+                ))}
+              </div>
+            </Field>
+            <Hint>
+              Leaving locations or categories unchosen means every one of them. A category
+              only narrows lots a scan has already looked at.
+            </Hint>
+            <div className="bidrl-actions">
+              <Button variant="primary" disabled={disabled || busy || !query.trim()} onClick={() => void create()}>
+                Save watchlist
+              </Button>
+            </div>
+          </Stack>
+        </Card>
+        <Card title="Your watchlists">
+          {snap.status === "loading" ? <Loading label="Loading watchlists…" /> : null}
+          {snap.status === "ready" && snap.data.watchlists.length === 0 ? (
+            <EmptyState>Nothing watched yet.</EmptyState>
+          ) : null}
+          {snap.status === "ready"
+            ? snap.data.watchlists.map((w) => (
+                <div key={w.id} className="bidrl-watchlist">
+                  <div className="bidrl-watchlist__body">
+                    <strong>{w.name}</strong>
+                    {w.enabled ? null : <Badge>paused</Badge>}
+                    {w.newFindings > 0 ? (
+                      <Link to={`/bidrl/findings?watchlist=${encodeURIComponent(w.id)}`}>
+                        <Badge tone="ok">{w.newFindings} to review</Badge>
+                      </Link>
+                    ) : null}
+                    <Hint>{w.query}</Hint>
+                    <Hint>{watchlistRules(w, labels)}</Hint>
+                    {w.lastError ? <Callout tone="danger">{w.lastError}</Callout> : null}
+                  </div>
+                  <div className="bidrl-finding__actions">
+                    <Button
+                      size="sm"
+                      disabled={disabled || busy}
+                      onClick={() =>
+                        void act(
+                          () => api.post(`/watchlists/${encodeURIComponent(w.id)}/run`),
+                          `Queued a run of “${w.name}”.`,
+                        )
+                      }
+                    >
+                      Run now
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={disabled || busy}
+                      onClick={() =>
+                        void act(
+                          () => api.patch(`/watchlists/${encodeURIComponent(w.id)}`, { enabled: !w.enabled }),
+                          w.enabled ? `Paused “${w.name}”.` : `Resumed “${w.name}”.`,
+                        )
+                      }
+                    >
+                      {w.enabled ? "Pause" : "Resume"}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={disabled || busy}
+                      onClick={() =>
+                        void act(
+                          () => api.del(`/watchlists/${encodeURIComponent(w.id)}`),
+                          `Deleted “${w.name}” and its findings.`,
+                        )
+                      }
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))
+            : null}
+        </Card>
+      </Stack>
+    </Page>
+  );
+}
+
+/**
+ * Saved lots. The same card/table browser and the same location and category filters as
+ * the catalog, because it is the same kind of list — what differs is that you chose
+ * every row on it, so it is sorted by when you saved rather than by lot id, and the note
+ * you left is part of the row.
+ *
+ * "Remove ended" never deletes a saved lot, so this list keeps working after the auction
+ * closes; that is the point of saving something.
+ */
+function SavedLots() {
+  const [q, setQ] = useQueryState("q");
+  const [category, setCategory] = useQueryState("category", "all");
+  const [affiliate, setAffiliate] = useQueryState("affiliate");
+  const [draft, setDraft] = useState(q);
+  const [view, setView] = useLotView();
+  const snap = useFavorites(q, category, affiliate);
+  const locations = useLocations();
+  const disabled = snap.error instanceof PluginDisabledError;
+  const selected = parseAffiliateParam(affiliate);
+  const narrowed = Boolean(q || affiliate) || category !== "all";
+
+  useEffect(() => setDraft(q), [q]);
+
+  const toggleLocation = (id: string) => {
+    setAffiliate(
+      affiliateParam(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]),
+    );
+  };
+
+  return (
+    <Page>
+      <PageHeader
+        title="Saved"
+        lede="Lots you starred, newest first. Nothing here is removed by “Remove ended” — a saved lot keeps its photos, comparable, and location after the auction closes."
+      />
+      <Stack>
+        <BidrlTabs />
+        <Notices message={null} error={null} disabled={disabled} />
+        <Card
+          title="Saved lots"
+          actions={
+            <>
+              {narrowed ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setDraft("");
+                    setQ("");
+                    setCategory("all");
+                    setAffiliate("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : null}
+              <ViewToggle value={view} onChange={setView} />
+            </>
+          }
+        >
+          <Toolbar>
+            <Field label="Find">
+              <Input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setQ(draft);
+                }}
+                placeholder="Title, identification, model, category…"
+                disabled={disabled}
+                aria-label="Saved search"
+              />
+            </Field>
+            <Button disabled={disabled} onClick={() => setQ(draft)}>
+              Find
+            </Button>
+            <Field label="Category">
+              <Select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                aria-label="Category"
+              >
+                <option value="all">All categories</option>
+                {LOT_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </Select>
+            </Field>
+          </Toolbar>
+          {locations.status === "ready" && locations.data.locations.length > 0 ? (
+            <Field label="Locations">
+              <div className="bidrl-loc-filter">
+                {locations.data.locations.map((loc) => (
+                  <Button
+                    key={loc.id}
+                    size="sm"
+                    pressed={selected.includes(loc.id)}
+                    disabled={disabled}
+                    onClick={() => toggleLocation(loc.id)}
+                  >
+                    {locationLabel(loc)} · {loc.lotCount}
+                  </Button>
+                ))}
+                {selected.length > 0 ? (
+                  <Button size="sm" onClick={() => setAffiliate("")}>
+                    All locations
+                  </Button>
+                ) : null}
+              </div>
+            </Field>
+          ) : null}
+          {snap.status === "ready" ? (
+            <Hint>{snap.data.lots.length} saved</Hint>
+          ) : null}
+          {snap.status === "loading" ? <Loading label="Loading saved lots…" /> : null}
+          {snap.status === "error" && !disabled ? (
+            <Callout tone="danger">{snap.error.message}</Callout>
+          ) : null}
+          {snap.status === "ready" ? (
+            <LotBrowser
+              lots={snap.data.lots}
+              empty={
+                narrowed
+                  ? "No saved lot matches these filters."
+                  : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
+              }
+              view={view}
+              // Every row here was chosen on purpose, so two similar lots must both
+              // show rather than collapsing into "1 similar".
+              groupSimilar={false}
+            />
+          ) : null}
+        </Card>
+      </Stack>
+    </Page>
+  );
+}
+
+/**
+ * The one catalog. Its whole state — preset, text, bucket, category, ending, locations — lives in
  * the query string, so a filtered list can be linked to, and going into a lot and back
  * returns the list you left rather than a reset one.
  */
@@ -1183,11 +1935,21 @@ function LotsCatalog() {
   const [bucket, setBucket] = useQueryState("bucket", "all");
   const [category, setCategory] = useQueryState("category", "all");
   const [ending, setEnding] = useQueryState("ending");
+  const [affiliate, setAffiliate] = useQueryState("affiliate");
   const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
-  const snap = useLots(filter, q, bucket, category, ending);
+  const snap = useLots(filter, q, bucket, category, ending, affiliate);
+  const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
-  const narrowed = Boolean(filter || q || ending) || bucket !== "all" || category !== "all";
+  const selected = parseAffiliateParam(affiliate);
+  const narrowed =
+    Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
+
+  const toggleLocation = (id: string) => {
+    setAffiliate(
+      affiliateParam(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]),
+    );
+  };
 
   // A query typed on another screen, or arrived at by link, has to show in the box.
   useEffect(() => setDraft(q), [q]);
@@ -1199,13 +1961,14 @@ function LotsCatalog() {
     setBucket("all");
     setCategory("all");
     setEnding("");
+    setAffiliate("");
   };
 
   return (
     <Page>
       <PageHeader
         title="Lots"
-        lede="Every collected lot. Start from a preset, then narrow by text, bucket, or category. Looking for something by purpose rather than by word? Ask on the Intent tab."
+        lede="Every collected lot. Start from a preset, then narrow by text, bucket, category, or the locations you can actually drive to. Looking for something by purpose rather than by word? Ask on the Intent tab."
       />
       <Stack>
         <BidrlTabs />
@@ -1272,6 +2035,28 @@ function LotsCatalog() {
               disabled={disabled}
             />
           </Toolbar>
+          {locations.status === "ready" && locations.data.locations.length > 0 ? (
+            <Field label="Locations">
+              <div className="bidrl-loc-filter">
+                {locations.data.locations.map((loc) => (
+                  <Button
+                    key={loc.id}
+                    size="sm"
+                    pressed={selected.includes(loc.id)}
+                    disabled={disabled}
+                    onClick={() => toggleLocation(loc.id)}
+                  >
+                    {locationLabel(loc)} · {loc.lotCount}
+                  </Button>
+                ))}
+                {selected.length > 0 ? (
+                  <Button size="sm" onClick={() => setAffiliate("")}>
+                    All locations
+                  </Button>
+                ) : null}
+              </div>
+            </Field>
+          ) : null}
           <Hint>
             {filterLabel(filter)}
             {snap.status === "ready" ? ` · ${snap.data.lots.length} shown` : ""}
@@ -1576,6 +2361,23 @@ function LotView() {
                 tone={gapTone(lot.dealScore)}
               />
               <Metric label="Ends" value={lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />} />
+              <Metric label="Saved" value={<FavoriteStar lot={lot} />} />
+              <Metric
+                label="Location"
+                value={
+                  locationLabelOrEmpty(lot) ? (
+                    lot.affiliateId ? (
+                      <Link to={`/bidrl/lots?affiliate=${encodeURIComponent(lot.affiliateId)}`}>
+                        {locationLabelOrEmpty(lot)}
+                      </Link>
+                    ) : (
+                      locationLabelOrEmpty(lot)
+                    )
+                  ) : (
+                    <Dash />
+                  )
+                }
+              />
             </Grid>
             {lot.photoUrls && lot.photoUrls.length > 0 ? (
               <LotPhotos key={lot.id} urls={lot.photoUrls} />
@@ -1592,6 +2394,7 @@ function LotView() {
                 {lot.description ? <p>{lot.description}</p> : null}
               </Stack>
             </Card>
+            <LotNote lot={lot} />
             <Card title="Bidding">
               <Grid density="metric">
                 <Metric label="High bidder" value={lot.highBidder || <Dash />} />
@@ -1693,6 +2496,9 @@ const bidrl: PluginModule = {
     { path: "/bidrl", element: <Overview /> },
     { path: "/bidrl/auctions", element: <Auctions /> },
     { path: "/bidrl/lots", element: <LotsCatalog /> },
+    { path: "/bidrl/findings", element: <Findings /> },
+    { path: "/bidrl/watchlists", element: <Watchlists /> },
+    { path: "/bidrl/saved", element: <SavedLots /> },
     { path: "/bidrl/intent", element: <IntentSearch /> },
     { path: "/bidrl/auction/:id", element: <AuctionView /> },
     { path: "/bidrl/lot/:id", element: <LotView /> },

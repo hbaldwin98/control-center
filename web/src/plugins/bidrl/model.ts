@@ -9,6 +9,7 @@ export type Auction = {
   lastError: string;
   collectedAt: string;
   endsAt: string;
+  affiliateId: string;
   affiliateName: string;
   city: string;
 };
@@ -30,6 +31,9 @@ export type Lot = {
   reserveMet: boolean;
   category: string;
   bucket: string;
+  affiliateId: string;
+  affiliateName: string;
+  city: string;
   identification: string;
   basis: string;
   modelOrSku: string;
@@ -48,6 +52,9 @@ export type Lot = {
   matchScore?: number | null;
   matchReason?: string;
   thumbUrl: string;
+  favorite: boolean;
+  favoriteNote: string;
+  savedAt: string;
   photoUrls?: string[];
   latestEventId?: number;
 };
@@ -56,6 +63,84 @@ export type LotsPage = {
   lots: Lot[];
   latestEventId: number;
 };
+
+export type FavoritesPage = {
+  lots: Lot[];
+  latestEventId: number;
+};
+
+export type Watchlist = {
+  id: string;
+  name: string;
+  query: string;
+  enabled: boolean;
+  affiliateIds: string[];
+  categories: string[];
+  maxBidCents: number | null;
+  minScore: number;
+  status: string;
+  lastError: string;
+  lastRunAt: string;
+  createdAt: string;
+  newFindings: number;
+};
+
+export type Finding = {
+  id: string;
+  watchlistId: string;
+  watchlist: string;
+  score: number;
+  reason: string;
+  state: string;
+  createdAt: string;
+  lot: Lot;
+};
+
+export type FindingsPage = {
+  findings: Finding[];
+  watchlists: Watchlist[];
+  state: string;
+  latestEventId: number;
+};
+
+export type WatchlistsPage = {
+  watchlists: Watchlist[];
+  latestEventId: number;
+};
+
+/**
+ * Findings grouped by the watchlist that found them. A queue you work through reads
+ * better in runs of one topic than interleaved: deciding on ten camping items in a row
+ * is one judgement, alternating between camping and scooters is ten.
+ */
+export function groupFindings(findings: Finding[]): { id: string; label: string; findings: Finding[] }[] {
+  const map = new Map<string, { id: string; label: string; findings: Finding[] }>();
+  const order: string[] = [];
+  for (const f of findings) {
+    let group = map.get(f.watchlistId);
+    if (!group) {
+      group = { id: f.watchlistId, label: f.watchlist || "Watchlist", findings: [] };
+      map.set(f.watchlistId, group);
+      order.push(f.watchlistId);
+    }
+    group.findings.push(f);
+  }
+  return order.map((id) => map.get(id)!);
+}
+
+/** What a watchlist narrows to, in a line, so a card says its rules without a form. */
+export function watchlistRules(
+  w: Watchlist,
+  locationLabels: Map<string, string>,
+): string {
+  const parts: string[] = [];
+  if (w.affiliateIds.length > 0) {
+    parts.push(w.affiliateIds.map((id) => locationLabels.get(id) ?? id).join(", "));
+  }
+  if (w.categories.length > 0) parts.push(w.categories.join(", "));
+  if (w.maxBidCents != null) parts.push(`under ${cents(w.maxBidCents)}`);
+  return parts.length > 0 ? parts.join(" · ") : "Anywhere, any category, any price";
+}
 
 export type FeedPage = {
   filter: string;
@@ -260,6 +345,18 @@ export const INTENT_EXAMPLES = [
   "Gear for a road trip",
 ] as const;
 
+export type Location = {
+  id: string;
+  affiliateName: string;
+  city: string;
+  lotCount: number;
+};
+
+export type LocationsPage = {
+  locations: Location[];
+  latestEventId: number;
+};
+
 export type LocationGroup<T> = {
   key: string;
   label: string;
@@ -273,6 +370,27 @@ export function locationLabel(item: { affiliateName?: string; city?: string }): 
     return `${name} · ${city}`;
   }
   return name || city || "Other locations";
+}
+
+/**
+ * The location as shown on a lot, or "" when we do not know it. Distinct from
+ * locationLabel, which falls back to "Other locations" for grouping — a lot with
+ * no known location should say nothing rather than claim to be somewhere.
+ */
+export function locationLabelOrEmpty(item: { affiliateName?: string; city?: string }): string {
+  const name = (item.affiliateName ?? "").trim();
+  const city = (item.city ?? "").trim();
+  if (!name && !city) return "";
+  return locationLabel(item);
+}
+
+/** Comma-joined ?affiliate= value, parsed and re-serialized for the query string. */
+export function parseAffiliateParam(raw: string | null | undefined): string[] {
+  return [...new Set((raw ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
+}
+
+export function affiliateParam(ids: string[]): string {
+  return [...new Set(ids.filter(Boolean))].join(",");
 }
 
 export function groupByLocation<T extends { affiliateName?: string; city?: string }>(
@@ -382,9 +500,11 @@ export type LotSortColumn =
   | "bid"
   | "ends"
   | "category"
+  | "location"
   | "price"
   | "gap"
   | "bucket"
+  | "saved"
   | "why";
 
 export type AuctionSortColumn = "title" | "status" | "lots" | "ends";
@@ -397,7 +517,9 @@ export const LOT_SORT_DEFAULTS: Record<LotSortColumn, SortDir> = {
   bid: "asc",
   ends: "asc",
   category: "asc",
+  location: "asc",
   price: "desc",
+  saved: "desc",
   gap: "desc",
   bucket: "asc",
   why: "asc",
@@ -468,12 +590,16 @@ function lotSortValue(lot: Lot, column: LotSortColumn): SortValue {
       return textValue(lot.endsAt);
     case "category":
       return textValue(lot.category);
+    case "location":
+      return textValue(locationLabelOrEmpty(lot));
     case "price":
       return numberValue(lot.priceCents);
     case "gap":
       return numberValue(lot.dealScore);
     case "bucket":
       return textValue(lot.bucket);
+    case "saved":
+      return textValue(lot.savedAt);
     case "why":
       return textValue(lot.matchReason);
   }
@@ -554,6 +680,7 @@ export type CleanupResult = {
   auctions: number;
   lots: number;
   sites: number;
+  kept: number;
 };
 
 export function cleanupMessage(result: CleanupResult): string {
@@ -567,10 +694,14 @@ export function cleanupMessage(result: CleanupResult): string {
   if (result.sites > 0) {
     parts.push(`${result.sites} ended SITES listing${result.sites === 1 ? "" : "s"}`);
   }
+  // Saying what was kept matters more than saying what went: a tidy that silently
+  // spared your saved lots looks identical to one that quietly deleted them.
+  const kept =
+    result.kept > 0 ? ` Kept ${result.kept} you saved.` : "";
   if (parts.length === 0) {
-    return "Nothing had ended.";
+    return kept ? `Nothing had ended that you had not saved.${kept}` : "Nothing had ended.";
   }
-  return `Removed ${parts.join(" and ")}.`;
+  return `Removed ${parts.join(" and ")}.${kept}`;
 }
 
 /**
