@@ -116,7 +116,7 @@ export function Events() {
           <EmptyState>No events match this pattern yet.</EmptyState>
         ) : (
           <Card title={`${rows.length} event${rows.length === 1 ? "" : "s"}`}>
-            <div style={{ overflowX: "auto" }}>
+            <div className="cc-table-scroll">
               <table className="cc-table">
                 <thead>
                   <tr>
@@ -181,7 +181,7 @@ function Subscribers() {
 
   return (
     <Card title="Durable subscribers">
-      <div style={{ overflowX: "auto" }}>
+      <div className="cc-table-scroll">
         <table className="cc-table">
           <thead>
             <tr>

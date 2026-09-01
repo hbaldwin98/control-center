@@ -110,6 +110,14 @@ export function Badge({
   return <span className={classes.join(" ")}>{children}</span>;
 }
 
+/**
+ * Horizontal scroll container for a `cc-table`. Tables keep their natural column widths
+ * and scroll inside this instead of forcing the page to scroll sideways on a phone.
+ */
+export function TableScroll({ children }: { children: ReactNode }) {
+  return <div className="cc-table-scroll">{children}</div>;
+}
+
 export function EmptyState({ children }: { children: ReactNode }) {
   return <div className="cc-empty">{children}</div>;
 }

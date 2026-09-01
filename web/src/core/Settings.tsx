@@ -69,6 +69,7 @@ export function Settings() {
           <Callout tone={oauthFlash.startsWith("OAuth credential") ? "neutral" : "danger"}>{oauthFlash}</Callout>
         ) : null}
         {creds.status === "error" ? <Callout tone="danger">{creds.error.message}</Callout> : null}
+        <ChangePasswordCard />
         <ReauthCard />
         <CreateKeyCard onChanged={creds.reload} />
         <OAuthCard onChanged={creds.reload} />
@@ -130,6 +131,88 @@ function isReauth(err: unknown): boolean {
 
 function formatErr(err: unknown): string {
   return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The administrator password. There is no reset flow, so this is the only way to rotate
+ * the one chosen at first-run setup. The endpoint signs out every other session.
+ */
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setOk(false);
+    if (next !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post("/api/auth/password", { currentPassword: current, newPassword: next });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setOk(true);
+    } catch (err) {
+      setError(formatErr(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Administrator password">
+      <p className="cc-field__hint">
+        Changing the password signs out every other device. This session stays signed in.
+      </p>
+      <form onSubmit={onSubmit}>
+        <Stack>
+          {error ? <Callout tone="danger">{error}</Callout> : null}
+          {ok ? <Callout>Password changed. Other sessions were signed out.</Callout> : null}
+          <Field label="Current password">
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="New password" hint="At least 12 characters. There is no reset flow.">
+            <Input
+              type="password"
+              autoComplete="new-password"
+              minLength={12}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+            />
+          </Field>
+          <Row>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Changing…" : "Change password"}
+            </Button>
+          </Row>
+        </Stack>
+      </form>
+    </Card>
+  );
 }
 
 function ReauthCard() {

@@ -50,4 +50,5 @@ export {
   PageHeader,
   Row,
   Stack,
+  TableScroll,
 } from "./components";
