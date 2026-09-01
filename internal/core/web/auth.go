@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -236,21 +237,19 @@ func (s *session) reauthFresh(now time.Time, window time.Duration) bool {
 func (a *authStore) create(ctx context.Context, absolute time.Duration) (cookie, csrf string, err error) {
 	id := randomToken(16)
 	secret := randomToken(32)
-	csrf = randomToken(32)
 	tokenSum := sha256.Sum256([]byte(secret))
-	csrfSum := sha256.Sum256([]byte(csrf))
 	now := a.now().UTC()
 
 	_, err = a.db.Exec(ctx,
-		`INSERT INTO core_sessions(id, token_hash, csrf_hash, created_at, last_seen_at, expires_at, reauth_at)
-		 VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-		id, tokenSum[:], csrfSum[:],
+		`INSERT INTO core_sessions(id, token_hash, created_at, last_seen_at, expires_at, reauth_at)
+		 VALUES (?, ?, ?, ?, ?, NULL)`,
+		id, tokenSum[:],
 		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
 		now.Add(absolute).Format(time.RFC3339Nano))
 	if err != nil {
 		return "", "", err
 	}
-	return id + "." + secret, csrf, nil
+	return id + "." + secret, deriveCSRF(tokenSum[:], id), nil
 }
 
 // lookup validates a session cookie against the absolute and idle policies and refreshes
@@ -307,30 +306,49 @@ func (a *authStore) lookup(ctx context.Context, cookie string, idle time.Duratio
 	return s, nil
 }
 
+// deriveCSRF computes the session's synchronizer token as HMAC(token_hash, sessionID).
+// Deriving rather than storing keeps the token stable for the life of the session, so
+// every tab that bootstraps the same session gets the same token instead of retiring the
+// one its siblings are still holding. The key is the digest of the cookie secret: unique
+// per session, never sent to a client, and gone the moment the session is deleted.
+func deriveCSRF(tokenHash []byte, sessionID string) string {
+	mac := hmac.New(sha256.New, tokenHash)
+	mac.Write([]byte(sessionID))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// sessionTokenHash reads the stored digest of a session's cookie secret, the key the
+// synchronizer token is derived from.
+func (a *authStore) sessionTokenHash(ctx context.Context, sessionID string) ([]byte, error) {
+	var stored []byte
+	if err := a.db.QueryRow(ctx,
+		`SELECT token_hash FROM core_sessions WHERE id = ?`, sessionID).Scan(&stored); err != nil {
+		return nil, err
+	}
+	return stored, nil
+}
+
 // checkCSRF compares a submitted synchronizer token against the one bound to the session.
 func (a *authStore) checkCSRF(ctx context.Context, sessionID, token string) bool {
 	if token == "" {
 		return false
 	}
-	var stored []byte
-	if err := a.db.QueryRow(ctx,
-		`SELECT csrf_hash FROM core_sessions WHERE id = ?`, sessionID).Scan(&stored); err != nil {
+	tokenHash, err := a.sessionTokenHash(ctx, sessionID)
+	if err != nil {
 		return false
 	}
-	sum := sha256.Sum256([]byte(token))
-	return subtle.ConstantTimeCompare(stored, sum[:]) == 1
+	want := deriveCSRF(tokenHash, sessionID)
+	return subtle.ConstantTimeCompare([]byte(want), []byte(token)) == 1
 }
 
-// rotateCSRF re-issues the session's synchronizer token. /api/bootstrap returns it so the
+// csrfToken returns the session's synchronizer token. /api/bootstrap returns it so the
 // shell can send mutations after a page reload without logging in again.
-func (a *authStore) rotateCSRF(ctx context.Context, sessionID string) (string, error) {
-	csrf := randomToken(32)
-	sum := sha256.Sum256([]byte(csrf))
-	if _, err := a.db.Exec(ctx,
-		`UPDATE core_sessions SET csrf_hash = ? WHERE id = ?`, sum[:], sessionID); err != nil {
+func (a *authStore) csrfToken(ctx context.Context, sessionID string) (string, error) {
+	tokenHash, err := a.sessionTokenHash(ctx, sessionID)
+	if err != nil {
 		return "", err
 	}
-	return csrf, nil
+	return deriveCSRF(tokenHash, sessionID), nil
 }
 
 func (a *authStore) markReauth(ctx context.Context, sessionID string) error {

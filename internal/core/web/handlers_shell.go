@@ -40,11 +40,11 @@ type sessionInfo struct {
 func (s *Server) handleShellBootstrap(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 
-	// A fresh synchronizer token per bootstrap keeps a reloaded tab able to mutate
-	// without another login, and retires the previous token.
-	csrf, err := s.auth.rotateCSRF(r.Context(), sess.ID)
+	// The session's synchronizer token, so a reloaded tab can mutate without another
+	// login. It is derived from the session, not re-minted, so concurrent tabs agree.
+	csrf, err := s.auth.csrfToken(r.Context(), sess.ID)
 	if err != nil {
-		s.fail(w, "rotate csrf", err)
+		s.fail(w, "csrf token", err)
 		return
 	}
 

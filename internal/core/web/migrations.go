@@ -33,4 +33,9 @@ CREATE TABLE core_sessions (
 
 CREATE INDEX core_sessions_expiry ON core_sessions(expires_at);
 `},
+	// The synchronizer token is now derived from the session (see deriveCSRF) instead of
+	// being stored and re-minted on every bootstrap, so the column has no readers left.
+	{Version: 2, Name: "drop_stored_csrf", Up: `
+ALTER TABLE core_sessions DROP COLUMN csrf_hash;
+`},
 }

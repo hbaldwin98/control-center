@@ -258,6 +258,37 @@ func TestFirstRunBootstrapAndLogin(t *testing.T) {
 	}
 }
 
+// A second tab bootstrapping the same session must not retire the token the first tab is
+// still holding: the shell keeps one token in memory per page, so a re-minted token left
+// every other tab 403ing with csrf_invalid on its next mutation.
+func TestBootstrapKeepsCSRFTokenStable(t *testing.T) {
+	h := newHarness(t)
+	token := h.issueToken()
+	if rec := h.do(http.MethodPost, "/api/auth/bootstrap",
+		map[string]string{"token": token, "password": testPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("bootstrap: %d %s", rec.Code, rec.Body)
+	}
+
+	first := h.csrf
+	if first == "" {
+		t.Fatal("bootstrap did not issue a synchronizer token")
+	}
+
+	// Stand in for a second tab loading the shell.
+	if rec := h.do(http.MethodGet, "/api/bootstrap", nil); rec.Code != http.StatusOK {
+		t.Fatalf("shell bootstrap: %d %s", rec.Code, rec.Body)
+	}
+	if h.csrf != first {
+		t.Fatalf("bootstrap re-minted the token: got %q, want %q", h.csrf, first)
+	}
+
+	// The first tab's token still authorizes a mutation.
+	h.csrf = first
+	if rec := h.do(http.MethodPost, "/api/auth/logout", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("mutation with the original token: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestBootstrapRejectsNonLoopbackPeer(t *testing.T) {
 	h := newHarness(t)
 	token := h.issueToken()
