@@ -17,6 +17,7 @@ import {
   Loading,
   Page,
   PageHeader,
+  PluginAIHint,
   PluginDisabledError,
   RelativeTime,
   Stack,
@@ -149,6 +150,7 @@ function History() {
             Hello is disabled. Enable it on the <a href="/plugins">Plugins</a> screen to run ticks.
           </Callout>
         ) : null}
+        <PluginAIHint pluginId="hello" />
         {snap.status === "error" && !disabled ? (
           <Callout tone="danger">{snap.error.message}</Callout>
         ) : null}

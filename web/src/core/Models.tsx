@@ -23,6 +23,7 @@ import {
   formatUSD,
   useSnapshot,
 } from "@cc/ui";
+import { ConnectProvider, PluginNeedsPanel } from "./aiSetup";
 
 type Billing = "metered" | "subscription";
 type ProviderKind = "openai_compatible" | "codex" | "fake";
@@ -114,35 +115,48 @@ export function Models() {
     <Page>
       <PageHeader
         title="Models"
-        lede="Where requests may go, what those providers publish, and the routes plugins name."
+        lede="Connect a provider, then pick a model for each thing a plugin needs. Fallbacks, prices, and extra routes live further down."
       />
       <Stack>
-        <div className="cc-group__title">Providers</div>
-        <Hint>
-          A provider is a base URL, a credential, and how it charges. Plugins never see one: they
-          name a route, and the route names these.
-        </Hint>
-        <Async state={providers} loading="Loading providers…" empty={<NoProviders />}>
-          {(list) => (
-            <Stack>
-              {list.map((p) => (
-                <ProviderCard
-                  key={p.id}
-                  provider={p}
-                  credentials={credentialList}
-                  catalog={catalogs.get(p.id)}
-                  onLoadCatalog={(refresh) => void catalogs.load(p.id, refresh)}
-                  onChanged={reloadAll}
-                />
-              ))}
-            </Stack>
-          )}
-        </Async>
-        <Card title="Add a provider">
-          <ProviderForm credentials={credentialList} onSaved={reloadAll} />
-        </Card>
+        {providerList.length === 0 ? (
+          <Card title="Connect a provider">
+            <ConnectProvider credentials={credentialList} onConnected={reloadAll} />
+          </Card>
+        ) : null}
 
-        <div className="cc-group__title">Routes</div>
+        <div className="cc-group__title">What plugins need</div>
+        <PluginNeedsPanel providers={providerList} onChanged={reloadAll} />
+
+        {providerList.length > 0 ? (
+          <>
+            <div className="cc-group__title">Providers</div>
+            <Hint>
+              A provider is a base URL, a credential, and how it charges. Plugins never see one: they
+              name a route, and the route names these.
+            </Hint>
+            <Async state={providers} loading="Loading providers…" empty={<NoProviders />}>
+              {(list) => (
+                <Stack>
+                  {list.map((p) => (
+                    <ProviderCard
+                      key={p.id}
+                      provider={p}
+                      credentials={credentialList}
+                      catalog={catalogs.get(p.id)}
+                      onLoadCatalog={(refresh) => void catalogs.load(p.id, refresh)}
+                      onChanged={reloadAll}
+                    />
+                  ))}
+                  <Card title="Connect another provider">
+                    <ConnectProvider credentials={credentialList} onConnected={reloadAll} />
+                  </Card>
+                </Stack>
+              )}
+            </Async>
+          </>
+        ) : null}
+
+        <div className="cc-group__title">Advanced routes</div>
         <Hint>
           A route is the name a plugin asks for and the ordered attempts behind it. The prices here
           are the ones a call is admitted against; refreshing a catalog never reprices a route on

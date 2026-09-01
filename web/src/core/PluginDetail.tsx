@@ -39,6 +39,7 @@ import {
 import type { Event, PluginModule } from "@cc/ui";
 import { ConfigForm } from "./ConfigForm";
 import { fieldsFromSchema } from "./configSchema";
+import { PluginAI } from "./PluginAI";
 import { PluginSurface } from "./PluginSurface";
 import {
   BudgetForm,
@@ -143,6 +144,8 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
 
         <PluginProblems state={state} />
         {error ? <Callout tone="danger">{error}</Callout> : null}
+
+        <PluginAI state={state} onChanged={states.reload} />
 
         <Grid density="metric">
           <Metric

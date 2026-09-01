@@ -50,7 +50,21 @@ type Manifest struct {
 	// such as cron or an event handler. Such plugins require a daily budget.
 	Automated bool
 
+	// Models are the logical AI routes this plugin will request. The host does not
+	// create them; the operator assigns a provider model to each name. Declaring
+	// them is how the UI knows what to ask for instead of hoping the names match.
+	Models []ModelNeed
+
 	Config ConfigSpec
+}
+
+// ModelNeed is one logical route a plugin will pass to AI(). The Name must match
+// the Chat/Embed request; Capabilities are the route contract the operator must
+// satisfy (chat, vision, grounding, embed).
+type ModelNeed struct {
+	Name         string
+	Capabilities []string
+	Purpose      string
 }
 
 // ConfigSpec is the closed JSON Schema 2020-12 subset the host validates and renders.

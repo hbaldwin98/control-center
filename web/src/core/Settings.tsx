@@ -69,7 +69,7 @@ export function Settings() {
     <Page>
       <PageHeader
         title="Settings"
-        lede="Credentials and reauthentication. Providers and routes live under Models."
+        lede="API keys and logins. After you save a key, connect it as a provider under Models — that is what plugins use."
       />
       <Stack>
         {oauthFlash ? <Callout tone={oauthFlash.tone}>{oauthFlash.text}</Callout> : null}

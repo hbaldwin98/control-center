@@ -63,6 +63,8 @@ before migrating or initializing any of them:
   subscriptions have a name
 - declared HTTP method/path pairs are relative to the plugin mount, canonical, and unique
 - config schemas use the supported JSON Schema subset and validate their defaults
+- declared AI model names are valid route names, unique per plugin, have a purpose, and
+  use only known capabilities (`chat`, `vision`, `grounding`, `embed`)
 - route, job, and subscription declarations do not collide
 
 Declarations must be readable before `Init`; handlers are not invoked during

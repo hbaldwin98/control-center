@@ -11,8 +11,10 @@ plugin SQL, transactional events, a durable subscriber, HTTP, SSE, and notificat
 
 ## Setup
 
-1. Configure a healthy `cheap-chat` model route with at least 128 input tokens and 64 output
-   tokens. The fake provider is enough for a local pipeline check.
+1. On the Page Watch plugin screen (or Models), connect a provider and pick a model for
+   **A short assessment when the watched page changes** (`cheap-chat`, chat). The fake
+   provider is enough for a local pipeline check. The route needs at least 128 input tokens
+   and 64 output tokens; assignment picks conservative defaults.
 2. Give `pagewatch` a finite daily budget. It is an automated plugin, so the host will not
    enable it without one.
 3. Enable Page Watch under Plugins.

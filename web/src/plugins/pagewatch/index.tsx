@@ -14,6 +14,7 @@ import {
   Money,
   Page,
   PageHeader,
+  PluginAIHint,
   PluginDisabledError,
   RelativeTime,
   Row,
@@ -110,6 +111,7 @@ function HistoryMessages({ message, error, disabled }: {
           Page Watch is disabled. Set a daily budget and enable it on the <a href="/plugins/pagewatch">plugin screen</a>.
         </Callout>
       ) : null}
+      <PluginAIHint pluginId="pagewatch" />
     </>
   );
 }

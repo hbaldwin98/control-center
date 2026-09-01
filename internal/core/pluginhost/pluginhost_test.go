@@ -24,14 +24,14 @@ import (
 )
 
 type fixture struct {
-	t    *testing.T
-	ctx  context.Context
+	t     *testing.T
+	ctx   context.Context
 	store *storage.Store
 	blobs *storage.BlobStore
-	bus  *events.Log
-	pol  *policy.Store
-	q    *jobs.Queue
-	reg  *Registry
+	bus   *events.Log
+	pol   *policy.Store
+	q     *jobs.Queue
+	reg   *Registry
 }
 
 func newFixture(t *testing.T, plugins ...host.Plugin) *fixture {
@@ -185,6 +185,30 @@ type invalidID struct{ probe }
 
 func (invalidID) Manifest() host.Manifest {
 	return host.Manifest{ID: "CORE", Name: "nope"}
+}
+
+type badModel struct{ probe }
+
+func (badModel) Manifest() host.Manifest {
+	m := newProbe().Manifest()
+	m.Models = []host.ModelNeed{{Name: "CheapVision", Capabilities: []string{"chat"}, Purpose: "nope"}}
+	return m
+}
+
+func TestRegisterAllRejectsInvalidModelNeeds(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "cc.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	reg, err := New(ctx, store, Options{DB: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterAll(&badModel{}); err == nil {
+		t.Fatal("expected invalid model name rejection")
+	}
 }
 
 func TestDisabledPluginEnforcementMatrix(t *testing.T) {

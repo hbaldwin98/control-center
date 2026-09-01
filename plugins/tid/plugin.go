@@ -32,6 +32,11 @@ func (p *Plugin) Manifest() host.Manifest {
 		Version:     "0.1.0",
 		Description: "Pulls energy usage from My TID (Origin CX) and shows daily metrics and an insight.",
 		Automated:   true,
+		Models: []host.ModelNeed{{
+			Name:         "cheap-chat",
+			Capabilities: []string{"chat"},
+			Purpose:      "A reading of the last month of usage.",
+		}},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
 				"type":"object",

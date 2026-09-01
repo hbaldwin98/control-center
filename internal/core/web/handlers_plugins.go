@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
@@ -21,18 +22,29 @@ type pluginView struct {
 	Jobs         []string          `json:"jobs,omitempty"`
 	Config       json.RawMessage   `json:"config,omitempty"`
 	ConfigSchema json.RawMessage   `json:"configSchema,omitempty"`
+	Models       []modelNeedView   `json:"models,omitempty"`
 }
 
 // handlePluginList returns every registered plugin's state, budget, live spend, and
 // the schema-backed config the Plugins screen renders.
 func (s *Server) handlePluginList(w http.ResponseWriter, r *http.Request) {
 	if s.deps.PluginHost != nil {
+		var routes []ai.RouteDescriptor
+		if s.deps.AI != nil {
+			list, err := s.deps.AI.Routes(r.Context())
+			if err != nil {
+				s.fail(w, "list ai routes", err)
+				return
+			}
+			routes = list
+		}
 		list := s.deps.PluginHost.List()
 		views := make([]pluginView, 0, len(list))
 		for _, d := range list {
 			v := pluginView{
 				State: d.State, Name: d.Manifest.Name, Description: d.Manifest.Description,
 				Health: d.Health, Jobs: d.Jobs, ConfigSchema: d.Manifest.Config.Schema,
+				Models: bindModelNeeds(d.Manifest.Models, routes),
 			}
 			if raw, err := s.deps.PluginHost.GetConfig(r.Context(), d.Manifest.ID); err == nil {
 				v.Config = raw

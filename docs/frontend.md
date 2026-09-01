@@ -200,36 +200,43 @@ affected resource rather than reconstructing it from partial event payloads.
 | Screen | Shows |
 |---|---|
 | Dashboard | one live tile per plugin in a grid, plus totals, running jobs, and recent alerts |
-| Plugin detail | one plugin in full: live activity, its own surface, jobs, spend, and every control |
-| Plugins | enable/disable toggles, budgets, health, last error, schema-backed config |
+| Plugin detail | one plugin in full: AI setup, live activity, its own surface, jobs, spend, and every control |
+| Plugins | enable/disable, AI model assignment, budgets, health, schema-backed config |
 | Jobs | queue, history, per-job progress and logs, cancel; filterable by plugin from the URL |
 | Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
-| Models | AI providers, the model catalogs they publish, and the routes plugins name |
+| Models | connect a provider, then pick a model for each name plugins declared; advanced fallbacks below |
 | Inbox | rule-matched notifications, mark-read, links into the rest of the shell |
-| Settings | credentials (with re-auth), API keys, OAuth logins, notification rules and channels |
+| Settings | credentials (with re-auth), API keys, OAuth logins, notification rules and channels. Keys are not enough: connect them as a provider under Models. |
 
 The dashboard is a grid of plugin tiles. Each tile carries the plugin's state, what it has
 spent today against its daily budget, its open and failed work, its live indicator and
 activity history, and whatever surface the plugin contributed. Clicking one opens
-`/plugins/<id>`: the same live view at full size, that plugin's jobs and event feed, its
+`/plugins/<id>`: the same live view at full size, that plugin's AI needs, jobs and event feed, its
 spend in every budget window, and the same controls the Plugins screen offers — kill
 switch, budgets, and config — because an operator who has drilled into a plugin should not
 have to navigate back to turn it off.
 
 The Plugins screen is where the host-capability kill switch lives. Disabled plugins are
-greyed with the reason and timestamp, never hidden. Disable rejects new host-managed jobs,
-AI dispatches, event handlers, plugin HTTP requests, event publications, and storage/blob
-mutations, closes that plugin's browser sessions, and cancels admitted contexts. Reads and
-logs remain available. It does not claim to terminate trusted in-process code that ignores
-cancellation or uses direct networking. An already-admitted paid call may finish and
-remains accounted. Schema-backed plugin config is edited on the same screen.
+greyed with the reason and timestamp, never hidden. A plugin that declared `Manifest.Models`
+shows those needs on the same screen: connect a provider if none exist, then pick a model
+for each name. That assignment creates the logical route with the capabilities the plugin
+declared, so an operator never has to invent `cheap-vision`.
+
+Disable rejects new host-managed jobs, AI dispatches, event handlers, plugin HTTP requests,
+event publications, and storage/blob mutations, closes that plugin's browser sessions, and
+cancels admitted contexts. Reads and logs remain available. It does not claim to terminate
+trusted in-process code that ignores cancellation or uses direct networking. An already-admitted
+paid call may finish and remains accounted. Schema-backed plugin config is edited on the same
+screen.
 
 The Models screen is administration, not secrets: it edits providers and routes with a
-session and CSRF, and shows credential ids without ever showing credential material. A
-model catalog is read from its last fetch until someone asks to refresh it, so opening the
-screen never calls out to every configured provider. A route's prices are the ones it was
-saved with, and the editor states the reservation a call will take before it is saved.
+session and CSRF, and shows credential ids without ever showing credential material. The
+first job on that screen is connecting a provider and assigning models to the names
+plugins already declared. A model catalog is read from its last fetch until someone asks
+to refresh it, so opening the screen never calls out to every configured provider. A
+route's prices are the ones it was saved with, and the advanced editor states the
+reservation a call will take before it is saved.
 
 For `Automated: true` plugins, the toggle is disabled until a daily budget is set, with the
 reason shown inline — the UI half of the guardrail enforced in

@@ -77,7 +77,18 @@ type Manifest struct {
     // such as cron or an event handler. Such plugins require a daily budget.
     Automated bool
 
+    // Models are the logical AI routes this plugin will request. Declare every
+    // name you pass to AI().Chat / Embed; the UI asks the operator to point each
+    // one at a provider model. The host does not create the routes for you.
+    Models []ModelNeed
+
     Config ConfigSpec
+}
+
+type ModelNeed struct {
+    Name         string   // "cheap-vision"; must match ChatRequest.Model
+    Capabilities []string // chat, vision, grounding, embed
+    Purpose      string   // shown in the UI: "Identify lots from photographs."
 }
 
 type ConfigSpec struct {
@@ -176,7 +187,7 @@ but invoke no plugin code.
 
 | Missing | Why | Do this instead |
 |---|---|---|
-| Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`. |
+| Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`, and declare that name on `Manifest.Models`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
 | Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). For a login form, `Fill` / `Click` / `FillCredential` — the host types the password; you never see it. For an SPA that POSTs JSON after login, parse `Responses`. |
@@ -206,6 +217,18 @@ classify the code rather than treating every `503` as a disabled plugin.
 ---
 
 ## 4. Using AI
+
+Declare every logical name on the manifest first. That is how the Plugins and Models
+screens know what to offer; a hardcoded string the UI has never heard of is how operators
+get stuck.
+
+```go
+Models: []host.ModelNeed{{
+    Name:         "cheap-vision",
+    Capabilities: []string{"chat", "vision"},
+    Purpose:      "Identify lots from photographs.",
+}},
+```
 
 ```go
 resp, err := h.AI().Chat(ctx, ai.ChatRequest{

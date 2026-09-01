@@ -20,6 +20,7 @@ import {
   Metric,
   Page,
   PageHeader,
+  PluginAIHint,
   PluginDisabledError,
   Row,
   Select,
@@ -158,6 +159,7 @@ function Feed() {
             BIDRL is disabled. Enable it on the <a href="/plugins/bidrl">plugin screen</a>.
           </Callout>
         ) : null}
+        <PluginAIHint pluginId="bidrl" />
         <Card title="Add auction">
           <Stack>
             <Hint>
@@ -267,6 +269,7 @@ function AuctionView() {
       />
       <Stack>
         {error ? <Callout tone="danger">{error}</Callout> : null}
+        <PluginAIHint pluginId="bidrl" />
         {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
         {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
         {snap.status === "ready" ? <LotTable lots={snap.data.lots} /> : null}

@@ -75,3 +75,4 @@ export {
   Time,
   Toolbar,
 } from "./components";
+export { PluginAIHint } from "./setup";

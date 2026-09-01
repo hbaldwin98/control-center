@@ -35,6 +35,11 @@ func (p *Plugin) Manifest() host.Manifest {
 		Version:     "0.1.0",
 		Description: "Checks one public page through the real capability pipeline and reports drift or failure.",
 		Automated:   true,
+		Models: []host.ModelNeed{{
+			Name:         "cheap-chat",
+			Capabilities: []string{"chat"},
+			Purpose:      "A short assessment when the watched page changes.",
+		}},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
 				"type":"object",

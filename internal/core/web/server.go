@@ -191,6 +191,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/admin/ai/providers/{id}/models", s.authenticated(s.handleAIModels))
 	s.mux.HandleFunc("GET /api/admin/ai/routes", s.authenticated(s.handleAIRoutes))
 	s.mux.HandleFunc("PUT /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRoutePut))
+	s.mux.HandleFunc("PUT /api/admin/ai/routes/{name}/assign", s.authenticated(s.handleAIAssign))
 	s.mux.HandleFunc("DELETE /api/admin/ai/routes/{name}", s.authenticated(s.handleAIRouteDelete))
 	s.mux.HandleFunc("GET /api/ai/calls", s.authenticated(s.handleAICalls))
 
