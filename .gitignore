@@ -24,5 +24,5 @@ node_modules/
 .opencode/
 .DS_Store
 
-# Machine-local agent settings
-/.claude/settings.local.json
+# Machine-local agent state
+/.claude/
