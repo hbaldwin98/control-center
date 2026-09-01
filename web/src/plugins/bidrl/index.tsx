@@ -945,12 +945,19 @@ function LotCard({ lot }: { lot: Lot }) {
             vs {cents(lot.priceCents)}
             {comparableHint(lot) ? ` ${comparableHint(lot)}` : ""}
           </span>
-        ) : null}
+        ) : (
+          <span className="bidrl-lot-card__comp" />
+        )}
       </div>
-      <div className="bidrl-lot-card__meta">
-        {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
-        <LotLocation lot={lot} />
-        <LotMeta lot={lot} />
+      <div className="bidrl-lot-card__facts">
+        <div className="bidrl-lot-card__when">
+          {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+        </div>
+        <div className="bidrl-lot-card__where">
+          {locationLabelOrEmpty(lot) ? <LotLocation lot={lot} /> : <Dash />}
+        </div>
+        {lot.category ? <Badge>{lot.category}</Badge> : <span className="bidrl-lot-card__chip-slot" />}
+        <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
       </div>
       {lot.favoriteNote ? <p className="bidrl-note">{lot.favoriteNote}</p> : null}
       {lot.matchReason ? <p className="bidrl-intent-reason">{lot.matchReason}</p> : null}

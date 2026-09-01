@@ -183,21 +183,42 @@
   border-color: var(--border-strong);
 }
 
+/* Two lines of title and one of the lot-code hint, always, so a long name does
+   not push the bid and the facts around from card to card. */
 .bidrl-lot-card__title {
+  display: grid;
+  grid-template-rows: 2.6em 1.4em;
+  min-width: 0;
   font-weight: 600;
-  overflow-wrap: anywhere;
+}
+
+.bidrl-lot-card__title > a {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+}
+
+.bidrl-lot-card__title > .cc-hint {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 /* The bid is the figure you would act on, so it is the only large number on the card. */
 .bidrl-lot-card__price {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-2);
   min-width: 0;
+  min-height: 1.4em;
+  overflow: hidden;
 }
 
 .bidrl-lot-card__bid {
+  flex: 0 0 auto;
   font-size: 17px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
@@ -207,15 +228,56 @@
   min-width: 0;
   color: var(--text-muted);
   font-size: 12.5px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bidrl-lot-card__meta {
-  display: flex;
-  flex-wrap: wrap;
+/* Time, location, and the two chips each own a cell of a 2×2 so a long
+   category cannot shove the close time onto a second line on one card and
+   not the next. */
+.bidrl-lot-card__facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: 1.5em 22px;
+  gap: var(--space-1) var(--space-2);
   align-items: center;
-  gap: var(--space-2);
+  min-width: 0;
   font-size: 12.5px;
+}
+
+.bidrl-lot-card__when,
+.bidrl-lot-card__where {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.5;
+}
+
+.bidrl-lot-card__when {
+  font-variant-numeric: tabular-nums;
+}
+
+.bidrl-lot-card__where {
+  color: var(--text-muted);
+}
+
+.bidrl-lot-card__where .bidrl-lot-location {
+  display: block;
+  max-width: none;
+}
+
+.bidrl-lot-card__facts > .cc-badge,
+.bidrl-lot-card__chip-slot {
+  min-width: 0;
+  width: 100%;
+  height: 22px;
+  justify-content: center;
+}
+
+.bidrl-lot-card__chip-slot {
+  display: block;
 }
 
 /* Seeded intents. They are shortcuts into the box above, not commands, so they read as

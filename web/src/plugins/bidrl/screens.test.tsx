@@ -222,6 +222,15 @@ describe("bidrl screens", () => {
     expect(container.textContent).toContain("Turlock");
   });
 
+  it("puts time, location, and chips in a fixed 2×2 on catalog cards", async () => {
+    await renderAt("/bidrl/lots");
+    const facts = container.querySelector(".bidrl-lot-card__facts");
+    expect(facts).not.toBeNull();
+    expect(facts?.querySelector(".bidrl-lot-card__where")?.textContent).toContain("Turlock");
+    expect(facts?.querySelector(".bidrl-lot-card__when")?.textContent).toBeTruthy();
+    expect(facts?.querySelectorAll(".cc-badge")).toHaveLength(2);
+  });
+
   it("reads several locations out of the query string and asks the API for exactly those", async () => {
     await renderAt("/bidrl/lots?affiliate=19,7");
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
