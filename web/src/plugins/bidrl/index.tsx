@@ -36,11 +36,13 @@ import {
   Textarea,
   Toolbar,
   pluginApi,
+  useNow,
   useSnapshot,
 } from "@cc/ui";
 import type { PluginModule, PluginSurfaceProps, UseSnapshotResult } from "@cc/ui";
 import {
   AUCTION_SORT_DEFAULTS,
+  INTENT_EXAMPLES,
   LOT_CATEGORIES,
   LOT_SORT_DEFAULTS,
   SITES_SORT_DEFAULTS,
@@ -50,8 +52,11 @@ import {
   cycleSort,
   eventBoundary,
   filterLabel,
+  gapTone,
   groupByLocation,
   groupSimilarLots,
+  hasEnded,
+  pct,
   sortAuctions,
   sortLotGroups,
   sortSitesAuctions,
@@ -166,9 +171,13 @@ function useLotView(): ["grid" | "table", (view: "grid" | "table") => void] {
   return [view, change];
 }
 
+/**
+ * Grid and table are two views of one list, not two actions, so they sit in a single
+ * joined control where the pressed half reads as the current view.
+ */
 function ViewToggle({ value, onChange }: { value: "grid" | "table"; onChange: (view: "grid" | "table") => void }) {
   return (
-    <div className="bidrl-actions">
+    <div className="bidrl-seg" role="group" aria-label="Lot view">
       <Button size="sm" pressed={value === "grid"} onClick={() => onChange("grid")}>
         Grid
       </Button>
@@ -362,7 +371,8 @@ function BidrlTabs() {
 
 function LotThumb({ lot, className }: { lot: Lot; className?: string | undefined }) {
   if (!lot.thumbUrl) {
-    return className ? <div className={`${className}-empty`}><Dash /></div> : <Dash />;
+    /* A box, not a dash: a missing photo must not shorten the row it sits in. */
+    return <div className={className ? `${className}-empty` : "cc-lot-thumb bidrl-thumb-empty"}><Dash /></div>;
   }
   return <img className={className ?? "cc-lot-thumb"} src={lot.thumbUrl} alt="" width={className ? 220 : 48} height={className ? 220 : 48} />;
 }
@@ -563,8 +573,6 @@ function LotPhotos({ urls }: { urls: string[] }) {
 function LotMeta({ lot }: { lot: Lot }) {
   return (
     <>
-      <span>{cents(lot.currentBidCents)}</span>
-      {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
       {lot.category ? <Badge>{lot.category}</Badge> : null}
       <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
     </>
@@ -622,7 +630,7 @@ function LotTableRows({ lots, extraClass, showWhy = false }: { lots: Lot[]; extr
           <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
           <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
           <td><LotComparable lot={lot} /></td>
-          <td className="cc-num">{lot.dealScore != null ? `${Math.round(lot.dealScore * 100)}%` : <Dash />}</td>
+          <td className="cc-num">{lot.dealScore != null ? pct(lot.dealScore) : <Dash />}</td>
           <td><Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge></td>
           {showWhy ? <td>{lot.matchReason || <Dash />}</td> : null}
         </tr>
@@ -631,21 +639,39 @@ function LotTableRows({ lots, extraClass, showWhy = false }: { lots: Lot[]; extr
   );
 }
 
+/**
+ * A card is scanned, not read. The photograph carries the gap — the one number the whole
+ * plugin exists to produce — and the bid sits under it as the figure you would act on;
+ * everything else is secondary text below the fold of the eye.
+ */
 function LotCard({ lot }: { lot: Lot }) {
+  const now = useNow();
+  const ended = hasEnded(lot.endsAt, now);
   return (
     <>
-      <LotThumbLink lot={lot} className="bidrl-lot-card__img" />
+      <div className="bidrl-lot-card__media">
+        <LotThumbLink lot={lot} className="bidrl-lot-card__img" />
+        {lot.dealScore != null ? (
+          <span className={`bidrl-gap bidrl-gap--${gapTone(lot.dealScore)}`}>
+            {pct(lot.dealScore)} under
+          </span>
+        ) : null}
+        {ended ? <span className="bidrl-gap bidrl-gap--ended">Ended</span> : null}
+      </div>
       <div className="bidrl-lot-card__title"><LotTitle lot={lot} /></div>
+      <div className="bidrl-lot-card__price">
+        <span className="bidrl-lot-card__bid">{cents(lot.currentBidCents)}</span>
+        {lot.priceCents != null ? (
+          <span className="bidrl-lot-card__comp">
+            vs {cents(lot.priceCents)}
+            {comparableHint(lot) ? ` ${comparableHint(lot)}` : ""}
+          </span>
+        ) : null}
+      </div>
       <div className="bidrl-lot-card__meta">
+        {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
         <LotMeta lot={lot} />
       </div>
-      {lot.priceCents != null ? (
-        <Hint>
-          {cents(lot.priceCents)}
-          {lot.dealScore != null ? ` · ${Math.round(lot.dealScore * 100)}% gap` : ""}
-          {comparableHint(lot) ? ` · ${comparableHint(lot)}` : ""}
-        </Hint>
-      ) : null}
       {lot.matchReason ? <p className="bidrl-intent-reason">{lot.matchReason}</p> : null}
     </>
   );
@@ -798,7 +824,7 @@ function LotGroupRows({
         <td>{head.endsAt ? <Countdown iso={head.endsAt} /> : <Dash />}</td>
         <td>{head.category ? <Badge>{head.category}</Badge> : <Dash />}</td>
         <td><LotComparable lot={head} /></td>
-        <td className="cc-num">{head.dealScore != null ? `${Math.round(head.dealScore * 100)}%` : <Dash />}</td>
+        <td className="cc-num">{head.dealScore != null ? pct(head.dealScore) : <Dash />}</td>
         <td><Badge tone={bucketTone(head.bucket)}>{head.bucket.replace("_", " ")}</Badge></td>
         {showWhy ? <td>{head.matchReason || <Dash />}</td> : null}
       </tr>
@@ -867,6 +893,17 @@ function Feed() {
             <Button disabled={disabled} onClick={() => setQ(draft)}>
               Find
             </Button>
+            {q ? (
+              <Button
+                disabled={disabled}
+                onClick={() => {
+                  setDraft("");
+                  setQ("");
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
             <Field label="Show">
               <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Feed filter">
                 <option value="deals">Best deals</option>
@@ -1065,8 +1102,7 @@ function LotsCatalog() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
-        <PluginAIHint pluginId="bidrl" />
-        <Card title="Filter">
+        <Card title="Catalog" actions={<ViewToggle value={view} onChange={setView} />}>
           <Toolbar>
             <Field label="Find">
               <Input
@@ -1083,6 +1119,17 @@ function LotsCatalog() {
             <Button disabled={disabled} onClick={() => setQ(draft)}>
               Find
             </Button>
+            {q ? (
+              <Button
+                disabled={disabled}
+                onClick={() => {
+                  setDraft("");
+                  setQ("");
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
             <Field label="Bucket">
               <Select value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Bucket">
                 <option value="all">All buckets</option>
@@ -1109,8 +1156,6 @@ function LotsCatalog() {
               disabled={disabled}
             />
           </Toolbar>
-        </Card>
-        <Card title="Catalog" actions={<ViewToggle value={view} onChange={setView} />}>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
           {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
           {snap.status === "ready" ? (
@@ -1157,7 +1202,6 @@ function IntentSearch() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={intentError} disabled={disabled} />
-        <PluginAIHint pluginId="bidrl" />
         <Card title="Intent">
           <Stack>
             <Hint>
@@ -1186,6 +1230,21 @@ function IntentSearch() {
               <Button variant="primary" disabled={disabled || intentRunning || !intentDraft.trim()} onClick={() => void ask()}>
                 {intentRunning ? "Matching…" : "Ask"}
               </Button>
+              <Hint>Enter to ask, Shift+Enter for a new line.</Hint>
+            </div>
+            <div className="bidrl-examples">
+              <span className="bidrl-examples__label">Try</span>
+              {INTENT_EXAMPLES.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  className="bidrl-chip"
+                  disabled={disabled || intentRunning}
+                  onClick={() => setIntentDraft(example)}
+                >
+                  {example}
+                </button>
+              ))}
             </div>
             {search?.status === "failed" && search.lastError ? (
               <Callout tone="danger">{search.lastError}</Callout>
@@ -1215,7 +1274,13 @@ function IntentSearch() {
             ) : null}
           </Card>
         ) : (
-          <EmptyState>Describe what you want to do and BIDRL will rank collected lots against it.</EmptyState>
+          <Card title="Matches">
+            <EmptyState>
+              Describe what you want to do and BIDRL ranks every collected lot against it. Nothing is
+              fetched from BidRL and no photograph is sent — this reads titles and descriptions you
+              have already collected.
+            </EmptyState>
+          </Card>
         )}
       </Stack>
     </Page>
@@ -1240,6 +1305,9 @@ function AuctionView() {
     }
   };
   const remove = async () => {
+    if (!window.confirm("Delete this auction? Its lots, photos, analyses, and comparables go with it.")) {
+      return;
+    }
     setBusy("delete");
     setError(null);
     try {
@@ -1265,8 +1333,8 @@ function AuctionView() {
             <Button disabled={disabled || busy !== null} onClick={() => void run("refresh")}>
               {busy === "refresh" ? "Queueing…" : "Refresh bids"}
             </Button>
-            <Button disabled={disabled || busy !== null} onClick={() => void remove()}>
-              Delete
+            <Button variant="danger" disabled={disabled || busy !== null} onClick={() => void remove()}>
+              {busy === "delete" ? "Deleting…" : "Delete"}
             </Button>
             {auction?.url ? <BidrlLink href={auction.url} /> : null}
           </div>
@@ -1351,7 +1419,8 @@ function LotView() {
               />
               <Metric
                 label="Gap"
-                value={lot.dealScore != null ? `${Math.round(lot.dealScore * 100)}%` : <Dash />}
+                value={lot.dealScore != null ? pct(lot.dealScore) : <Dash />}
+                tone={gapTone(lot.dealScore)}
               />
               <Metric label="Ends" value={lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />} />
             </Grid>

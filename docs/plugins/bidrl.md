@@ -249,6 +249,9 @@ and its vector together. Lots with no end time are left alone.
 If expansion fails, Ask embeds the typed words. If embedding fails, it matches the expanded
 words against titles. The catalog's Find box stays a direct text filter.
 
+Intent has its own tab (`/bidrl/intent`) with a few seeded intents beside the box, since the
+useful thing to type is a purpose and not a keyword. Ask sends on Enter.
+
 ---
 
 ## Feed
@@ -274,6 +277,10 @@ or long identical title — collapse to one representative with the extras behin
 
 Every card or row shows a thumb, the BidRL title beside what the photos suggest, the
 current bid, a local countdown from stored `ends_at`, category, and a link back to BidRL.
+On a card the gap rides the photograph as a pill — green past 50%, amber past 20%, quiet
+below that, because a thin gap does not survive a buyer's premium — and the bid is the only
+large figure, with the comparable beside it as "vs $X sold · eBay". A lot whose `ends_at`
+has passed carries an "Ended" pill opposite the gap.
 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
 paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"

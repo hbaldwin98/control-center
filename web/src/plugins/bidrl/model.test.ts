@@ -7,7 +7,10 @@ import {
   cycleSort,
   eventBoundary,
   filterLabel,
+  gapTone,
   groupByLocation,
+  hasEnded,
+  pct,
   groupSimilarLots,
   locationLabel,
   sortAuctions,
@@ -263,5 +266,37 @@ describe("groupByLocation", () => {
     expect(locationLabel({ affiliateName: "SITES Sacramento", city: "Sacramento" })).toBe(
       "SITES Sacramento",
     );
+  });
+});
+
+describe("gapTone", () => {
+  it("stays quiet until the gap is wide enough to be worth acting on", () => {
+    expect(gapTone(null)).toBe("neutral");
+    expect(gapTone(0.05)).toBe("neutral");
+    expect(gapTone(0.2)).toBe("warn");
+    expect(gapTone(0.5)).toBe("ok");
+    expect(gapTone(0.91)).toBe("ok");
+  });
+});
+
+describe("pct", () => {
+  it("rounds a score to a whole percent", () => {
+    expect(pct(0.426)).toBe("43%");
+    expect(pct(0)).toBe("0%");
+    expect(pct(null)).toBe("");
+  });
+});
+
+describe("hasEnded", () => {
+  const now = Date.parse("2026-01-02T00:00:00Z");
+
+  it("is true only once the close time has passed", () => {
+    expect(hasEnded("2026-01-01T00:00:00Z", now)).toBe(true);
+    expect(hasEnded("2026-01-03T00:00:00Z", now)).toBe(false);
+  });
+
+  it("treats a missing or unparsable time as still open", () => {
+    expect(hasEnded("", now)).toBe(false);
+    expect(hasEnded("soon", now)).toBe(false);
   });
 });

@@ -185,6 +185,39 @@ export function filterLabel(filter: string): string {
   }
 }
 
+/**
+ * How the deal gap reads at a glance. A gap is only interesting once it is wide enough to
+ * survive a buyer's premium, so a thin one stays neutral rather than lighting up green.
+ */
+export function gapTone(score: number | null | undefined): "neutral" | "ok" | "warn" {
+  if (score == null) return "neutral";
+  if (score >= 0.5) return "ok";
+  if (score >= 0.2) return "warn";
+  return "neutral";
+}
+
+/** Percent, as the feed writes it: "42%". */
+export function pct(score: number | null | undefined): string {
+  if (score == null) return "";
+  return `${Math.round(score * 100)}%`;
+}
+
+/** A lot whose close time has passed. No end time means still open, not ended. */
+export function hasEnded(endsAt: string, now: number): boolean {
+  if (!endsAt) return false;
+  const ms = Date.parse(endsAt);
+  if (!Number.isFinite(ms)) return false;
+  return ms <= now;
+}
+
+/** Seeds for the Intent box. They describe a purpose, which is the whole point of it. */
+export const INTENT_EXAMPLES = [
+  "Things that would help me camp",
+  "Set up a small woodworking shop",
+  "Outfit a first apartment kitchen",
+  "Gear for a road trip",
+] as const;
+
 export function comparableHint(lot: Pick<Lot, "priceKind" | "sourceLabel" | "sourceUrl">): string {
   const kind = lot.priceKind === "sold" ? "sold" : lot.priceKind === "asking" ? "asking" : "";
   const where = lot.sourceLabel || sourceHost(lot.sourceUrl);
