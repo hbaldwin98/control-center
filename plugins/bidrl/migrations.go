@@ -269,7 +269,7 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			CREATE INDEX bidrl_findings_lot ON bidrl_findings(lot_id);
 		`,
 	}, {
-		Version: 10,
+		Version: 11,
 		Name:    "automation",
 		Up: `
 			CREATE TABLE bidrl_automation (

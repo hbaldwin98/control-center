@@ -183,7 +183,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 10 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") || !strings.Contains(mig.migrations[8].Up, "bidrl_watchlists") || !strings.Contains(mig.migrations[9].Up, "bidrl_automation") {
+	if len(mig.migrations) != 10 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") || !strings.Contains(mig.migrations[7].Up, "bidrl_favorites") || !strings.Contains(mig.migrations[8].Up, "bidrl_watchlists") || !strings.Contains(mig.migrations[len(mig.migrations)-1].Up, "bidrl_automation") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -1124,5 +1124,27 @@ func TestAutomationConfigDefaultsToDoingNothing(t *testing.T) {
 	got = automationConfig{AffiliateIDs: []string{"turlock-19", "", "19", "nope"}}.normalized()
 	if len(got.AffiliateIDs) != 1 || got.AffiliateIDs[0] != "19" {
 		t.Fatalf("locations = %#v", got.AffiliateIDs)
+	}
+}
+
+func TestMigrationVersionsAreUniqueAndIncreasing(t *testing.T) {
+	// Two branches both adding "the next migration" is how a duplicate version gets
+	// in, and the host rejects that at startup rather than at review. Catching it
+	// here means a merge that collides fails a test instead of an install.
+	mig := &captureMigrator{}
+	if err := New().Migrate(mig); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]string{}
+	prev := 0
+	for _, m := range mig.migrations {
+		if other, dup := seen[m.Version]; dup {
+			t.Fatalf("version %d is claimed by both %q and %q", m.Version, other, m.Name)
+		}
+		if m.Version <= prev {
+			t.Fatalf("version %d (%q) does not increase past %d", m.Version, m.Name, prev)
+		}
+		seen[m.Version] = m.Name
+		prev = m.Version
 	}
 }
