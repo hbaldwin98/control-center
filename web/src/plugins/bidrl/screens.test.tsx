@@ -20,6 +20,9 @@ function lot(over: Partial<Lot> = {}): Lot {
     auctionId: "42",
     url: "https://www.bidrl.com/auction/42/lot/1001",
     lotCode: "A1",
+    affiliateId: "19",
+    affiliateName: "Turlock",
+    city: "Turlock",
     title: "Keurig coffee maker",
     description: "Single serve brewer, box opened",
     currentBidCents: 1500,
@@ -67,6 +70,13 @@ const routes = new Map<string, unknown>([
   ["/api/plugins/bidrl/lots/1001", { ...lot(), photoUrls: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/intent", { search: null, lots: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/sites/auctions", { auctions: [], latestEventId: 1 }],
+  ["/api/plugins/bidrl/locations", {
+    locations: [
+      { id: "19", affiliateName: "SITES Turlock", city: "Turlock", lotCount: 3 },
+      { id: "7", affiliateName: "SITES Modesto", city: "Modesto", lotCount: 1 },
+    ],
+    latestEventId: 1,
+  }],
 ]);
 
 let container: HTMLDivElement;
@@ -155,6 +165,21 @@ describe("bidrl screens", () => {
     await renderAt("/bidrl/lots?filter=deals&bucket=priced");
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(calls.some((url) => url.includes("filter=deals") && url.includes("bucket=priced"))).toBe(true);
+  });
+
+  it("shows a lot's auction location on the catalog, so it can be ruled out without opening it", async () => {
+    await renderAt("/bidrl/lots");
+    expect(container.textContent).toContain("Turlock");
+  });
+
+  it("reads several locations out of the query string and asks the API for exactly those", async () => {
+    await renderAt("/bidrl/lots?affiliate=19,7");
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((url) => url.includes("/lots?") && url.includes("affiliate=19%2C7"))).toBe(true);
+    const pressed = [...container.querySelectorAll('.bidrl-loc-filter [aria-pressed="true"]')].map(
+      (b) => b.textContent,
+    );
+    expect(pressed).toHaveLength(2);
   });
 
   it("offers the overview's counts as links into the catalog that proves them", async () => {

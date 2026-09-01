@@ -15,7 +15,10 @@ import {
   hasEnded,
   pct,
   groupSimilarLots,
+  affiliateParam,
   locationLabel,
+  locationLabelOrEmpty,
+  parseAffiliateParam,
   sortAuctions,
   sortLotGroups,
   sortLots,
@@ -197,6 +200,7 @@ describe("sortAuctions", () => {
         lastError: "",
         collectedAt: "",
         endsAt: "2026-09-03T00:00:00Z",
+        affiliateId: "",
         affiliateName: "",
         city: "",
       },
@@ -209,6 +213,7 @@ describe("sortAuctions", () => {
         lastError: "",
         collectedAt: "",
         endsAt: "2026-09-01T00:00:00Z",
+        affiliateId: "",
         affiliateName: "",
         city: "",
       },
@@ -224,6 +229,9 @@ function fakeLot(over: Partial<Lot> & Pick<Lot, "id">): Lot {
     auctionId: "42",
     url: "",
     lotCode: "",
+    affiliateId: "",
+    affiliateName: "",
+    city: "",
     title: "",
     description: "",
     currentBidCents: null,
@@ -348,5 +356,43 @@ describe("lotNeighbours", () => {
 
   it("reports nothing for a lot that is not in the list", () => {
     expect(lotNeighbours(lots, "zz")).toEqual({ prev: null, next: null, position: "" });
+  });
+});
+
+describe("locations", () => {
+  it("says nothing rather than inventing a location it does not know", () => {
+    // locationLabel falls back to "Other locations" so grouping has a bucket;
+    // a lot with no location must not inherit that and claim to be somewhere.
+    expect(locationLabel({})).toBe("Other locations");
+    expect(locationLabelOrEmpty({})).toBe("");
+    expect(locationLabelOrEmpty({ affiliateName: "SITES Turlock", city: "Turlock" })).toBe(
+      "SITES Turlock",
+    );
+  });
+
+  it("round-trips several locations through the query string", () => {
+    expect(parseAffiliateParam("19,7")).toEqual(["19", "7"]);
+    expect(parseAffiliateParam(" 19 , ,7,19 ")).toEqual(["19", "7"]);
+    expect(parseAffiliateParam(null)).toEqual([]);
+    expect(affiliateParam(["19", "7", "19", ""])).toBe("19,7");
+    expect(affiliateParam([])).toBe("");
+  });
+
+  it("sorts by location, with unknown locations last in either direction", () => {
+    const lots = [
+      fakeLot({ id: "a", affiliateName: "Turlock" }),
+      fakeLot({ id: "b" }),
+      fakeLot({ id: "c", affiliateName: "Modesto" }),
+    ];
+    expect(sortLots(lots, { column: "location", dir: "asc" }).map((l) => l.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
+    expect(sortLots(lots, { column: "location", dir: "desc" }).map((l) => l.id)).toEqual([
+      "a",
+      "c",
+      "b",
+    ]);
   });
 });

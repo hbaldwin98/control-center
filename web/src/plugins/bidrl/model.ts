@@ -9,6 +9,7 @@ export type Auction = {
   lastError: string;
   collectedAt: string;
   endsAt: string;
+  affiliateId: string;
   affiliateName: string;
   city: string;
 };
@@ -30,6 +31,9 @@ export type Lot = {
   reserveMet: boolean;
   category: string;
   bucket: string;
+  affiliateId: string;
+  affiliateName: string;
+  city: string;
   identification: string;
   basis: string;
   modelOrSku: string;
@@ -260,6 +264,18 @@ export const INTENT_EXAMPLES = [
   "Gear for a road trip",
 ] as const;
 
+export type Location = {
+  id: string;
+  affiliateName: string;
+  city: string;
+  lotCount: number;
+};
+
+export type LocationsPage = {
+  locations: Location[];
+  latestEventId: number;
+};
+
 export type LocationGroup<T> = {
   key: string;
   label: string;
@@ -273,6 +289,27 @@ export function locationLabel(item: { affiliateName?: string; city?: string }): 
     return `${name} · ${city}`;
   }
   return name || city || "Other locations";
+}
+
+/**
+ * The location as shown on a lot, or "" when we do not know it. Distinct from
+ * locationLabel, which falls back to "Other locations" for grouping — a lot with
+ * no known location should say nothing rather than claim to be somewhere.
+ */
+export function locationLabelOrEmpty(item: { affiliateName?: string; city?: string }): string {
+  const name = (item.affiliateName ?? "").trim();
+  const city = (item.city ?? "").trim();
+  if (!name && !city) return "";
+  return locationLabel(item);
+}
+
+/** Comma-joined ?affiliate= value, parsed and re-serialized for the query string. */
+export function parseAffiliateParam(raw: string | null | undefined): string[] {
+  return [...new Set((raw ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
+}
+
+export function affiliateParam(ids: string[]): string {
+  return [...new Set(ids.filter(Boolean))].join(",");
 }
 
 export function groupByLocation<T extends { affiliateName?: string; city?: string }>(
@@ -382,6 +419,7 @@ export type LotSortColumn =
   | "bid"
   | "ends"
   | "category"
+  | "location"
   | "price"
   | "gap"
   | "bucket"
@@ -397,6 +435,7 @@ export const LOT_SORT_DEFAULTS: Record<LotSortColumn, SortDir> = {
   bid: "asc",
   ends: "asc",
   category: "asc",
+  location: "asc",
   price: "desc",
   gap: "desc",
   bucket: "asc",
@@ -468,6 +507,8 @@ function lotSortValue(lot: Lot, column: LotSortColumn): SortValue {
       return textValue(lot.endsAt);
     case "category":
       return textValue(lot.category);
+    case "location":
+      return textValue(locationLabelOrEmpty(lot));
     case "price":
       return numberValue(lot.priceCents);
     case "gap":

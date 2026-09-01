@@ -494,6 +494,9 @@ func (p *Plugin) storeCollected(jc hostjobs.Context, h host.Host, auctionID, pag
 			title, pageURL, hostName, len(lots), now, endsAt, auctionID); err != nil {
 			return err
 		}
+		if err := stampAuctionLocation(jc, tx, auctionID); err != nil {
+			return err
+		}
 		for _, lot := range lots {
 			ext, reserve := 0, 0
 			if lot.BiddingExt {
@@ -551,4 +554,21 @@ func unique(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// stampAuctionLocation copies the auction's SITES location onto its own row.
+//
+// Location has to be stored, not joined at read time: discover clears
+// bidrl_affiliate_auctions on every run, so an auction that reads its location
+// from that cache loses it the moment it closes or drops off its landing page,
+// and ruling a lot out by drive time is exactly what you want to still work
+// after the auction is over. A cache miss leaves the stored value alone rather
+// than blanking it — the next discover backfills it.
+func stampAuctionLocation(jc hostjobs.Context, tx hoststorage.Tx, auctionID string) error {
+	_, err := tx.Exec(jc, `UPDATE bidrl_auctions SET
+			affiliate_id   = IFNULL((SELECT affiliate_id   FROM bidrl_affiliate_auctions WHERE id = ?), affiliate_id),
+			affiliate_name = IFNULL((SELECT affiliate_name FROM bidrl_affiliate_auctions WHERE id = ?), affiliate_name),
+			city           = IFNULL((SELECT city           FROM bidrl_affiliate_auctions WHERE id = ?), city)
+		WHERE id = ?`, auctionID, auctionID, auctionID, auctionID)
+	return err
 }

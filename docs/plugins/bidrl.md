@@ -180,7 +180,8 @@ right.
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover` — enqueue-only, concurrency 1, two-hour timeout |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings |
-| API | `GET /lots?q=&bucket=&category=&ending=soon`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
+| API | `GET /locations` — the SITES locations you have lots at, with lot counts |
+| API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
 | Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
 | UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
@@ -296,6 +297,22 @@ because they were always the same query — `GET /feed?filter=deals` and
 `filter=all` means every lot, including `pending`. The old feed value for "scanned but not
 necessarily priced" is now spelled `filter=scanned`.
 
+**Location is stored, not joined.** `bidrl_auctions` carries `affiliate_id`,
+`affiliate_name`, and `city`, stamped at collect time from the SITES discovery cache and
+backfilled by every later discover. It used to be a read-time join against
+`bidrl_affiliate_auctions`, which discover wipes and rebuilds on every run — so a collected
+auction lost its location the moment it closed or dropped off its landing page. Lots read
+the location from their own auction.
+
+`affiliate=` takes several ids at once, comma-joined or repeated, because the useful
+question is what is within a drive: a handful of locations, not one and not all of them. No
+parameter means every location. The catalog's location chips are seeded from `GET /locations`
+rather than from the lot list, so selecting one does not delete the rest from the filter.
+Every card and row shows its location, and it stays below 720px — ruling a lot out by the
+drive rather than the price is exactly what you do from a phone. The lot page shows it as a
+link into the catalog filtered to that location. Distance is not modelled: the plugin does
+not know where you live and does not geocode to guess.
+
 Find filters the visible lots by title, identification, model, and category without
 starting a BidRL search. The catalog's whole state — preset, text, bucket, category,
 ending — lives in the query string, so a filtered list can be linked to and pasted, and
@@ -313,14 +330,14 @@ and the rest. Duplicate or near-duplicate listings — same model, identificatio
 or long identical title — collapse to one representative with the extras behind "N similar".
 
 Every card or row shows a thumb, the BidRL title beside what the photos suggest, the
-current bid, a local countdown from stored `ends_at`, category, and a link back to BidRL.
+current bid, a local countdown from stored `ends_at`, the auction's location, category, and a link back to BidRL.
 On a card the gap rides the photograph as a pill — green past 50%, amber past 20%, quiet
 below that, because a thin gap does not survive a buyer's premium — and the bid is the only
 large figure, with the comparable beside it as "vs $X sold · eBay". A lot whose `ends_at`
 has passed carries an "Ended" pill opposite the gap.
 
-Below 720px the lot table drops lot code, category, comparable, and bucket rather than
-scrolling sideways past the bid — those live on the lot page — the card grid tightens to
+Below 720px the lot table drops lot code, category, comparable, and bucket — but keeps
+location — rather than scrolling sideways past the bid — those live on the lot page — the card grid tightens to
 150px columns, and each filter takes its own row.
 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then

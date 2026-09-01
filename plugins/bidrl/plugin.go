@@ -128,6 +128,7 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
 		{Pattern: "GET /lots", Handler: http.HandlerFunc(p.handleListLots)},
+		{Pattern: "GET /locations", Handler: http.HandlerFunc(p.handleListLocations)},
 		{Pattern: "GET /lots/{id}", Handler: http.HandlerFunc(p.handleGetLot)},
 		{Pattern: "POST /lots/{id}/reprice", Handler: http.HandlerFunc(p.handleReprice)},
 		{Pattern: "POST /lots/{id}/enrich", Handler: http.HandlerFunc(p.handleEnrich)},

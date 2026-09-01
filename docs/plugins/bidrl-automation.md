@@ -1,6 +1,6 @@
 # Plugin: `bidrl` — automation, findings, favorites, locations
 
-Status: proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
+Status: step 1 (locations) implemented; steps 2–4 proposed · 2026-09-01 · extends [`bidrl.md`](bidrl.md)
 
 Four changes to the BIDRL plugin, in dependency order:
 
@@ -69,10 +69,13 @@ Lots get location by joining their own auction — a stable local join, unlike t
 one. `GET /lots` and `GET /feed` add `affiliateId`, `affiliateName`, and `city` to each
 row; `feedWhere` (already shared by both handlers) grows an `affiliate` clause.
 
-Backfill inside the migration from whatever `bidrl_affiliate_auctions` still holds; anything
-already lost stays blank, and the next collect or discover fills it. Collection resolves
-location in this order: the discovery cache row for that auction id → the auction page's own
-affiliate markup → blank.
+The migration backfills from whatever `bidrl_affiliate_auctions` still holds; anything
+already lost stays blank until a discover fills it in. `stampAuctionLocation` copies the
+cache row onto the auction inside the collect transaction, and `replaceAffiliateAuctions`
+calls it again for every listed auction, so a discover backfills auctions collected from a
+pasted URL — which were never on a landing page when they were collected. A cache miss
+leaves the stored value alone rather than blanking it. ItemData carries no affiliate field,
+so there is no per-lot fallback and none is worth an extra request.
 
 ### API
 
@@ -82,13 +85,17 @@ means every location, which keeps existing links working.
 
 ### UI
 
-- Every card and every table row shows the location, next to the countdown. On the card it
-  is a quiet line under the title; in the table it is its own sortable column. Under 720px
-  the location **stays** — the whole point is ruling a lot out before opening it, which is
-  exactly what you do on a phone. Lot code and bucket drop first instead.
-- The catalog gains a location multi-select beside bucket and category, seeded from the
-  locations you actually have lots at. Its state lives in the query string like every other
-  filter, so a two-location list is a linkable URL.
+- Every card and every table row shows the location, beside the countdown. In the table it
+  is its own sortable column, and unknown locations sort last in either direction. Under
+  720px the location **stays** — the whole point is ruling a lot out before opening it,
+  which is exactly what you do on a phone. Lot code, category, comparable, and bucket drop
+  instead; they are on the lot page.
+- The catalog gains location toggle chips beside bucket and category — several at once is
+  the normal selection, so they are toggles rather than a select. They are seeded from
+  `GET /locations`, its own request: deriving the list from the filtered lots would delete
+  every unselected location from the filter the moment you picked one. State lives in the
+  query string like every other filter, so a two-location list is a linkable URL.
+- The lot page shows the location as a link into the catalog filtered to it.
 - Distance is deliberately **not** modelled. The plugin does not know where you live and
   should not start geocoding to guess; you know which names are a 30-minute drive. If that
   changes, a `homeCity` config and a static per-affiliate drive-time table is the additive
@@ -262,9 +269,9 @@ Tabs become **Overview · Findings · Auctions · Lots · Saved · Intent**, plu
 
 Each step is independently useful and independently shippable.
 
-1. **Locations** (§1) — migration 7, collect-time capture, `affiliate` filter, UI column
-   and multi-select. Fixes an existing bug and delivers the "rule it out without opening it"
-   ask on its own.
+1. **Locations** (§1) — *done.* Migration 7, collect-time capture, `affiliate` filter, UI
+   column and location chips. Fixes an existing bug and delivers the "rule it out without
+   opening it" ask on its own.
 2. **Favorites** (§4, partial) — table, star, Saved tab. No AI, no cron.
 3. **Watchlists + manual run** (§2) — the funnel, `watch-judge` route, findings table,
    Findings tab, `POST /watchlists/{id}/run`. Everything works, still user-triggered.

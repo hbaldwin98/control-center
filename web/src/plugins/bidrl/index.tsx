@@ -52,6 +52,7 @@ import {
   LOT_PRESETS,
   LOT_SORT_DEFAULTS,
   SITES_SORT_DEFAULTS,
+  affiliateParam,
   cents,
   cleanupMessage,
   comparableHint,
@@ -62,7 +63,10 @@ import {
   groupByLocation,
   groupSimilarLots,
   hasEnded,
+  locationLabel,
+  locationLabelOrEmpty,
   lotNeighbours,
+  parseAffiliateParam,
   pct,
   sortAuctions,
   sortLotGroups,
@@ -76,6 +80,7 @@ import {
   type FeedPage,
   type IntentPage,
   type LocationGroup,
+  type LocationsPage,
   type Lot,
   type LotSortColumn,
   type LotsPage,
@@ -141,6 +146,7 @@ function useLots(
   bucket: string,
   category: string,
   ending: string,
+  affiliate: string,
 ): UseSnapshotResult<LotsPage> {
   const load = useCallback(async (signal: AbortSignal) => {
     const params = new URLSearchParams();
@@ -149,10 +155,24 @@ function useLots(
     if (bucket && bucket !== "all") params.set("bucket", bucket);
     if (category && category !== "all") params.set("category", category);
     if (ending) params.set("ending", ending);
+    if (affiliate) params.set("affiliate", affiliate);
     const qs = params.toString();
     const data = await api.get<LotsPage>(`/lots${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [filter, q, bucket, category, ending]);
+  }, [filter, q, bucket, category, ending, affiliate]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+/**
+ * The locations you have lots at. Its own request, not derived from the lot list:
+ * deriving it would delete every unselected location from the filter the moment
+ * you picked one.
+ */
+function useLocations(): UseSnapshotResult<LocationsPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<LocationsPage>("/locations", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -655,6 +675,17 @@ function LotMeta({ lot }: { lot: Lot }) {
   );
 }
 
+/**
+ * Where the lot is. Shown on every card and row, and kept on narrow screens, because
+ * ruling something out on the drive rather than on the price is the whole reason to
+ * put it here — doing that from a phone is the common case, not the edge one.
+ */
+function LotLocation({ lot }: { lot: Lot }) {
+  const label = locationLabelOrEmpty(lot);
+  if (!label) return null;
+  return <span className="bidrl-lot-location" title={`Auction location: ${label}`}>{label}</span>;
+}
+
 function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: boolean }) {
   const ident = lot.identification && lot.identification !== lot.title ? lot.identification : "";
   const hint = ident || (showLotCode ? lot.lotCode : "");
@@ -704,6 +735,7 @@ function LotTableRows({ lots, extraClass, showWhy = false }: { lots: Lot[]; extr
           <td><LotTitle lot={lot} showLotCode={false} /></td>
           <td>{cents(lot.currentBidCents)}</td>
           <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
+          <td className="bidrl-col-location">{locationLabelOrEmpty(lot) || <Dash />}</td>
           <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
           <td><LotComparable lot={lot} /></td>
           <td className="cc-num">{lot.dealScore != null ? pct(lot.dealScore) : <Dash />}</td>
@@ -746,6 +778,7 @@ function LotCard({ lot }: { lot: Lot }) {
       </div>
       <div className="bidrl-lot-card__meta">
         {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+        <LotLocation lot={lot} />
         <LotMeta lot={lot} />
       </div>
       {lot.matchReason ? <p className="bidrl-intent-reason">{lot.matchReason}</p> : null}
@@ -820,6 +853,7 @@ function LotBrowser({
           <SortedHead column="name" sort={sort} onSort={onSort}>Name</SortedHead>
           <SortedHead column="bid" sort={sort} onSort={onSort}>Bid</SortedHead>
           <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+          <SortedHead column="location" sort={sort} onSort={onSort}>Location</SortedHead>
           <SortedHead column="category" sort={sort} onSort={onSort}>Category</SortedHead>
           <SortedHead column="price" sort={sort} onSort={onSort}>Price</SortedHead>
           <SortedHead column="gap" sort={sort} onSort={onSort} numeric>Gap</SortedHead>
@@ -899,6 +933,7 @@ function LotGroupRows({
         </td>
         <td>{cents(head.currentBidCents)}</td>
         <td>{head.endsAt ? <Countdown iso={head.endsAt} /> : <Dash />}</td>
+        <td className="bidrl-col-location">{locationLabelOrEmpty(head) || <Dash />}</td>
         <td>{head.category ? <Badge>{head.category}</Badge> : <Dash />}</td>
         <td><LotComparable lot={head} /></td>
         <td className="cc-num">{head.dealScore != null ? pct(head.dealScore) : <Dash />}</td>
@@ -1173,7 +1208,7 @@ function Auctions() {
 }
 
 /**
- * The one catalog. Its whole state — preset, text, bucket, category, ending — lives in
+ * The one catalog. Its whole state — preset, text, bucket, category, ending, locations — lives in
  * the query string, so a filtered list can be linked to, and going into a lot and back
  * returns the list you left rather than a reset one.
  */
@@ -1183,11 +1218,21 @@ function LotsCatalog() {
   const [bucket, setBucket] = useQueryState("bucket", "all");
   const [category, setCategory] = useQueryState("category", "all");
   const [ending, setEnding] = useQueryState("ending");
+  const [affiliate, setAffiliate] = useQueryState("affiliate");
   const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
-  const snap = useLots(filter, q, bucket, category, ending);
+  const snap = useLots(filter, q, bucket, category, ending, affiliate);
+  const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
-  const narrowed = Boolean(filter || q || ending) || bucket !== "all" || category !== "all";
+  const selected = parseAffiliateParam(affiliate);
+  const narrowed =
+    Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
+
+  const toggleLocation = (id: string) => {
+    setAffiliate(
+      affiliateParam(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]),
+    );
+  };
 
   // A query typed on another screen, or arrived at by link, has to show in the box.
   useEffect(() => setDraft(q), [q]);
@@ -1199,13 +1244,14 @@ function LotsCatalog() {
     setBucket("all");
     setCategory("all");
     setEnding("");
+    setAffiliate("");
   };
 
   return (
     <Page>
       <PageHeader
         title="Lots"
-        lede="Every collected lot. Start from a preset, then narrow by text, bucket, or category. Looking for something by purpose rather than by word? Ask on the Intent tab."
+        lede="Every collected lot. Start from a preset, then narrow by text, bucket, category, or the locations you can actually drive to. Looking for something by purpose rather than by word? Ask on the Intent tab."
       />
       <Stack>
         <BidrlTabs />
@@ -1272,6 +1318,28 @@ function LotsCatalog() {
               disabled={disabled}
             />
           </Toolbar>
+          {locations.status === "ready" && locations.data.locations.length > 0 ? (
+            <Field label="Locations">
+              <div className="bidrl-loc-filter">
+                {locations.data.locations.map((loc) => (
+                  <Button
+                    key={loc.id}
+                    size="sm"
+                    pressed={selected.includes(loc.id)}
+                    disabled={disabled}
+                    onClick={() => toggleLocation(loc.id)}
+                  >
+                    {locationLabel(loc)} · {loc.lotCount}
+                  </Button>
+                ))}
+                {selected.length > 0 ? (
+                  <Button size="sm" onClick={() => setAffiliate("")}>
+                    All locations
+                  </Button>
+                ) : null}
+              </div>
+            </Field>
+          ) : null}
           <Hint>
             {filterLabel(filter)}
             {snap.status === "ready" ? ` · ${snap.data.lots.length} shown` : ""}
@@ -1576,6 +1644,22 @@ function LotView() {
                 tone={gapTone(lot.dealScore)}
               />
               <Metric label="Ends" value={lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />} />
+              <Metric
+                label="Location"
+                value={
+                  locationLabelOrEmpty(lot) ? (
+                    lot.affiliateId ? (
+                      <Link to={`/bidrl/lots?affiliate=${encodeURIComponent(lot.affiliateId)}`}>
+                        {locationLabelOrEmpty(lot)}
+                      </Link>
+                    ) : (
+                      locationLabelOrEmpty(lot)
+                    )
+                  ) : (
+                    <Dash />
+                  )
+                }
+              />
             </Grid>
             {lot.photoUrls && lot.photoUrls.length > 0 ? (
               <LotPhotos key={lot.id} urls={lot.photoUrls} />

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -155,7 +156,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 20 {
+	if len(p.Routes()) != 21 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -165,7 +166,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 6 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") {
+	if len(mig.migrations) != 7 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") || !strings.Contains(mig.migrations[4].Up, "bidrl_intent_searches") || !strings.Contains(mig.migrations[5].Up, "bidrl_lot_embeddings") || !strings.Contains(mig.migrations[6].Up, "affiliate_id") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -849,5 +850,25 @@ func TestFeedWhere(t *testing.T) {
 	}
 	if where, _ := feedWhere("all"); where != "1=1" {
 		t.Fatalf(`feedWhere("all") = %q, want every lot`, where)
+	}
+}
+
+func TestAffiliateClauseAcceptsSeveralLocations(t *testing.T) {
+	// Filtering to a handful of locations is the point: "what is within a drive"
+	// is never one location and never all of them.
+	clause, args := affiliateClause(url.Values{"affiliate": {"19,7", "turlock-19", "", "3"}})
+	if clause != " AND au.affiliate_id IN (?,?,?)" {
+		t.Fatalf("clause = %q", clause)
+	}
+	if len(args) != 3 || args[0] != "19" || args[1] != "7" || args[2] != "3" {
+		t.Fatalf("args = %#v", args)
+	}
+	// No parameter means every location, so links written before the filter
+	// existed keep working.
+	if clause, args := affiliateClause(url.Values{}); clause != "" || args != nil {
+		t.Fatalf("empty = %q %#v", clause, args)
+	}
+	if clause, _ := affiliateClause(url.Values{"affiliate": {"", ","}}); clause != "" {
+		t.Fatalf("junk = %q", clause)
 	}
 }

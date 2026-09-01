@@ -204,5 +204,23 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 				updated_at  TEXT NOT NULL
 			) STRICT;
 		`,
+	}, {
+		Version: 7,
+		Name:    "auction_location",
+		Up: `
+			ALTER TABLE bidrl_auctions ADD COLUMN affiliate_id TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_auctions ADD COLUMN affiliate_name TEXT NOT NULL DEFAULT '';
+			ALTER TABLE bidrl_auctions ADD COLUMN city TEXT NOT NULL DEFAULT '';
+			CREATE INDEX bidrl_auctions_affiliate ON bidrl_auctions(affiliate_id);
+
+			-- Location used to be a read-time join against the SITES discovery cache,
+			-- which discover wipes and rebuilds on every run, so a collected auction lost
+			-- its location the moment it closed. Carry across whatever that cache still
+			-- holds; anything already gone fills in on the next discover.
+			UPDATE bidrl_auctions SET
+				affiliate_id   = IFNULL((SELECT s.affiliate_id   FROM bidrl_affiliate_auctions s WHERE s.id = bidrl_auctions.id), ''),
+				affiliate_name = IFNULL((SELECT s.affiliate_name FROM bidrl_affiliate_auctions s WHERE s.id = bidrl_auctions.id), ''),
+				city           = IFNULL((SELECT s.city           FROM bidrl_affiliate_auctions s WHERE s.id = bidrl_auctions.id), '');
+		`,
 	}})
 }

@@ -503,16 +503,18 @@ tr.bidrl-similar-row td:first-child {
     font-size: 15px;
   }
 
-  /* Ten columns will not fit a phone, and sideways scrolling to reach the bid defeats the
-     point of the table. Keep photo, name, bid, and close time; the rest is on the lot. */
+  /* Eleven columns will not fit a phone, and sideways scrolling to reach the bid defeats
+     the point of the table. Keep photo, name, bid, close time, and location — location
+     stays because ruling a lot out by the drive is exactly what you do from a phone.
+     Lot code (2), category (7), comparable (8), and bucket (10) live on the lot page. */
   .bidrl-lot-table th:nth-child(2),
   .bidrl-lot-table td:nth-child(2),
-  .bidrl-lot-table th:nth-child(6),
-  .bidrl-lot-table td:nth-child(6),
   .bidrl-lot-table th:nth-child(7),
   .bidrl-lot-table td:nth-child(7),
-  .bidrl-lot-table th:nth-child(9),
-  .bidrl-lot-table td:nth-child(9) {
+  .bidrl-lot-table th:nth-child(8),
+  .bidrl-lot-table td:nth-child(8),
+  .bidrl-lot-table th:nth-child(10),
+  .bidrl-lot-table td:nth-child(10) {
     display: none;
   }
 
@@ -556,4 +558,25 @@ tr.bidrl-similar-row td:first-child {
   .bidrl-chip {
     border-style: solid;
   }
+}
+
+.bidrl-lot-location {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14em;
+}
+
+.bidrl-col-location {
+  white-space: nowrap;
+}
+
+/* Location chips: several at once is the normal selection, so they are toggles
+   rather than a single-value select. */
+.bidrl-loc-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }

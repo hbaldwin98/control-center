@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -24,6 +25,7 @@ type auctionView struct {
 	LastError     string `json:"lastError"`
 	CollectedAt   string `json:"collectedAt"`
 	EndsAt        string `json:"endsAt"`
+	AffiliateID   string `json:"affiliateId"`
 	AffiliateName string `json:"affiliateName"`
 	City          string `json:"city"`
 }
@@ -45,6 +47,9 @@ type lotView struct {
 	ReserveMet      bool     `json:"reserveMet"`
 	Category        string   `json:"category"`
 	Bucket          string   `json:"bucket"`
+	AffiliateID     string   `json:"affiliateId"`
+	AffiliateName   string   `json:"affiliateName"`
+	City            string   `json:"city"`
 	Identification  string   `json:"identification"`
 	Basis           string   `json:"basis"`
 	ModelOrSKU      string   `json:"modelOrSku"`
@@ -95,11 +100,10 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
-	rows, err := h.Store().Query(r.Context(), `SELECT a.id, a.url, a.title, a.status, a.lot_count, a.last_error, a.collected_at, a.ends_at,
-		IFNULL(s.affiliate_name,''), IFNULL(s.city,'')
-		FROM bidrl_auctions a
-		LEFT JOIN bidrl_affiliate_auctions s ON s.id = a.id
-		ORDER BY a.created_at DESC`)
+	rows, err := h.Store().Query(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at,
+		affiliate_id, affiliate_name, city
+		FROM bidrl_auctions
+		ORDER BY created_at DESC`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
@@ -108,7 +112,7 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 	out := []auctionView{}
 	for rows.Next() {
 		var a auctionView
-		if err := rows.Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt, &a.AffiliateName, &a.City); err != nil {
+		if err := rows.Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt, &a.AffiliateID, &a.AffiliateName, &a.City); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
@@ -125,12 +129,11 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	var a auctionView
-	if err := h.Store().QueryRow(r.Context(), `SELECT a.id, a.url, a.title, a.status, a.lot_count, a.last_error, a.collected_at, a.ends_at,
-		IFNULL(s.affiliate_name,''), IFNULL(s.city,'')
-		FROM bidrl_auctions a
-		LEFT JOIN bidrl_affiliate_auctions s ON s.id = a.id
-		WHERE a.id = ?`, id).
-		Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt, &a.AffiliateName, &a.City); err != nil {
+	if err := h.Store().QueryRow(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at,
+		affiliate_id, affiliate_name, city
+		FROM bidrl_auctions
+		WHERE id = ?`, id).
+		Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt, &a.AffiliateID, &a.AffiliateName, &a.City); err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "auction not found")
 		return
 	}
@@ -434,6 +437,47 @@ func (p *Plugin) blobKeys(ctx context.Context, h host.Host, q string, args ...an
 	return keys, rows.Err()
 }
 
+type locationView struct {
+	ID       string `json:"id"`
+	Name     string `json:"affiliateName"`
+	City     string `json:"city"`
+	LotCount int    `json:"lotCount"`
+}
+
+// handleListLocations serves the locations you actually have lots at, so the
+// catalog's location filter offers those and not BidRL's whole SITES menu. It is
+// its own request because the catalog must not shrink its own filter options:
+// asking the filtered lot list which locations exist would drop every location
+// the moment you selected one.
+func (p *Plugin) handleListLocations(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	rows, err := h.Store().Query(r.Context(), `SELECT au.affiliate_id, au.affiliate_name, au.city, COUNT(l.id)
+		FROM bidrl_auctions au
+		LEFT JOIN bidrl_lots l ON l.auction_id = au.id
+		WHERE au.affiliate_id != ''
+		GROUP BY au.affiliate_id, au.affiliate_name, au.city
+		ORDER BY au.affiliate_name, au.city`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	defer rows.Close()
+	out := []locationView{}
+	for rows.Next() {
+		var loc locationView
+		if err := rows.Scan(&loc.ID, &loc.Name, &loc.City, &loc.LotCount); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+		out = append(out, loc)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"locations": out, "latestEventId": latestEventID(r.Context(), h)})
+}
+
 func (p *Plugin) handleScan(w http.ResponseWriter, r *http.Request) {
 	p.enqueueNamed(w, r, "scan", scanArgs{AuctionID: r.PathValue("id")}, "scan-"+r.PathValue("id"))
 }
@@ -476,6 +520,10 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 	}
 	if ending == "soon" {
 		where += ` AND l.ends_at != ''`
+	}
+	if clause, vals := affiliateClause(r.URL.Query()); clause != "" {
+		where += clause
+		args = append(args, vals...)
 	}
 	lots, err := p.queryLots(h, r, where, args...)
 	if err != nil {
@@ -655,6 +703,34 @@ func capLots(lots []lotView, n int) []lotView {
 	return lots
 }
 
+// affiliateClause narrows a lot query to a set of SITES locations. Filtering to
+// several at once is the point: the useful question is "what is within a drive",
+// which is a handful of locations, not one and not all of them.
+//
+// Accepts repeated ?affiliate= and comma-joined values alike. No parameter means
+// every location, so links written before this filter existed still work.
+func affiliateClause(q url.Values) (string, []any) {
+	seen := map[string]struct{}{}
+	var ids []any
+	for _, raw := range q["affiliate"] {
+		for _, part := range strings.Split(raw, ",") {
+			id := affiliateIDFromSlug(part)
+			if id == "" {
+				continue
+			}
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return "", nil
+	}
+	return " AND au.affiliate_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")", ids
+}
+
 // feedWhere turns a named feed preset into its SQL predicate. The catalog accepts the
 // same names, so a preset and the bucket/category filters are one screen rather than two
 // listings of the same table.
@@ -690,7 +766,12 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "unknown filter")
 		return
 	}
-	lots, err := p.queryLots(h, r, where)
+	var args []any
+	if clause, vals := affiliateClause(r.URL.Query()); clause != "" {
+		where += clause
+		args = append(args, vals...)
+	}
+	lots, err := p.queryLots(h, r, where, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
@@ -719,8 +800,10 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 		l.bid_count, l.high_bidder, l.ends_at, l.bidding_extended, l.reserve_met, l.category, l.bucket,
 		IFNULL(a.identification,''), IFNULL(a.basis,''), IFNULL(a.model_or_sku,''), IFNULL(a.title_agreement, 0),
 		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''), IFNULL(v.reused_from_lot_id,''),
+		IFNULL(au.affiliate_id,''), IFNULL(au.affiliate_name,''), IFNULL(au.city,''),
 		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)
 		FROM bidrl_lots l
+		LEFT JOIN bidrl_auctions au ON au.id = l.auction_id
 		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
 		LEFT JOIN bidrl_valuations v ON v.id = (SELECT MAX(id) FROM bidrl_valuations WHERE lot_id = l.id)
 		WHERE ` + where + `
@@ -738,7 +821,8 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 		if err := rows.Scan(&l.ID, &l.AuctionID, &l.URL, &l.LotCode, &l.Title, &l.Description, &l.CurrentBidCents, &l.MinBidCents, &l.IncrementCents,
 			&l.BidCount, &l.HighBidder, &l.EndsAt, &ext, &reserve, &l.Category, &l.Bucket,
 			&l.Identification, &l.Basis, &l.ModelOrSKU, &l.TitleAgreement,
-			&l.PriceCents, &l.PriceKind, &l.SourceURL, &l.CitedText, &l.SourceTitle, &l.RetrievedAt, &l.ReusedFromLotID, &thumb); err != nil {
+			&l.PriceCents, &l.PriceKind, &l.SourceURL, &l.CitedText, &l.SourceTitle, &l.RetrievedAt, &l.ReusedFromLotID,
+			&l.AffiliateID, &l.AffiliateName, &l.City, &thumb); err != nil {
 			return nil, err
 		}
 		l.BiddingExtended = ext != 0
