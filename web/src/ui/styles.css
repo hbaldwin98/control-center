@@ -331,6 +331,43 @@ kbd {
     flex-direction: column;
     gap: var(--space-3);
   }
+
+  /* A filter bar's 180px floor produces a ragged two-up at phone widths, where the second
+     control is always too narrow to read. One control per row instead. */
+  .cc-toolbar {
+    gap: var(--space-2);
+  }
+
+  .cc-toolbar .cc-field,
+  .cc-toolbar .cc-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Four sections do not fit across a phone; the strip scrolls rather than wrapping into
+     a second row that pushes the screen down. */
+  .cc-tabs {
+    gap: var(--space-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .cc-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cc-tabs a {
+    white-space: nowrap;
+  }
+
+  .cc-card {
+    padding: var(--space-3);
+  }
+
+  .cc-table-scroll {
+    margin: 0 calc(var(--space-3) * -1);
+    padding: 0 var(--space-3);
+  }
 }
 
 /* ---- surfaces ---- */
@@ -739,6 +776,8 @@ kbd {
 /* Wide tables scroll inside their card; the page itself never scrolls sideways. */
 .cc-table-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   margin: 0 calc(var(--space-4) * -1);
   padding: 0 var(--space-4);
 }

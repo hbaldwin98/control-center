@@ -228,6 +228,35 @@ routes:
 		t.Fatalf("auction %+v", auction)
 	}
 
+	// The lot screen pages through an auction from this, so it has to list every lot in
+	// the same order the auction screen does, and carry none of the heavy columns.
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42/index", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("auction index: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var index struct {
+		Title string `json:"title"`
+		Lots  []struct {
+			ID      string `json:"id"`
+			LotCode string `json:"lotCode"`
+			Title   string `json:"title"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &index); err != nil {
+		t.Fatal(err)
+	}
+	if index.Title != "Test Warehouse Auction" || len(index.Lots) != len(auction.Lots) {
+		t.Fatalf("auction index %+v", index)
+	}
+	for i, entry := range index.Lots {
+		if entry.ID != auction.Lots[i].ID {
+			t.Fatalf("auction index order: %+v vs %+v", index.Lots, auction.Lots)
+		}
+	}
+	if rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/nope/index", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing auction index: %d", rec.Code)
+	}
+
 	rec = serve(http.MethodPost, "/api/plugins/bidrl/auctions/42/scan", nil)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("scan: %d %s", rec.Code, rec.Body.Bytes())
@@ -239,6 +268,44 @@ routes:
 		t.Fatal(err)
 	}
 	waitJob(scan.JobID)
+
+	// The front page counts in SQL and returns two short lists, so it never ships the lot
+	// table to the browser just to count it.
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/overview", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var overview struct {
+		Stats struct {
+			Auctions  int `json:"auctions"`
+			Lots      int `json:"lots"`
+			Scanned   int `json:"scanned"`
+			Unscanned int `json:"unscanned"`
+			Priced    int `json:"priced"`
+		} `json:"stats"`
+		Deals []struct {
+			ID        string   `json:"id"`
+			DealScore *float64 `json:"dealScore"`
+		} `json:"deals"`
+		Closing []struct {
+			ID string `json:"id"`
+		} `json:"closing"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &overview); err != nil {
+		t.Fatal(err)
+	}
+	if overview.Stats.Auctions != 1 || overview.Stats.Lots != 3 {
+		t.Fatalf("overview stats %+v", overview.Stats)
+	}
+	if overview.Stats.Scanned+overview.Stats.Unscanned != overview.Stats.Lots {
+		t.Fatalf("overview scanned split %+v", overview.Stats)
+	}
+	if overview.Stats.Priced != 1 || len(overview.Deals) != 1 || overview.Deals[0].ID != "1001" {
+		t.Fatalf("overview deals %+v %+v", overview.Stats, overview.Deals)
+	}
+	if overview.Deals[0].DealScore == nil {
+		t.Fatal("overview deal carries no gap")
+	}
 
 	rec = serve(http.MethodGet, "/api/plugins/bidrl/feed?filter=deals", nil)
 	if rec.Code != http.StatusOK {

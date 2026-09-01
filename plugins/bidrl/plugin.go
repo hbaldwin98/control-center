@@ -27,6 +27,8 @@ const (
 	galleryPerPage  = 100
 	maxGalleryPages = 20
 	feedTimeout     = 30 * time.Second
+	// Rows the overview shows in each of its two short lists.
+	overviewRows = 6
 )
 
 // Plugin implements host.Plugin for BIDRL lot scoring.
@@ -115,10 +117,12 @@ func (p *Plugin) Subscriptions() []host.Subscription {
 
 func (p *Plugin) Routes() []host.Route {
 	return []host.Route{
+		{Pattern: "GET /overview", Handler: http.HandlerFunc(p.handleGetOverview)},
 		{Pattern: "GET /feed", Handler: http.HandlerFunc(p.handleGetFeed)},
 		{Pattern: "GET /auctions", Handler: http.HandlerFunc(p.handleListAuctions)},
 		{Pattern: "POST /auctions", Handler: http.HandlerFunc(p.handleAddAuction)},
 		{Pattern: "GET /auctions/{id}", Handler: http.HandlerFunc(p.handleGetAuction)},
+		{Pattern: "GET /auctions/{id}/index", Handler: http.HandlerFunc(p.handleGetAuctionIndex)},
 		{Pattern: "DELETE /auctions/{id}", Handler: http.HandlerFunc(p.handleDeleteAuction)},
 		{Pattern: "POST /cleanup", Handler: http.HandlerFunc(p.handleCleanupExpired)},
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},

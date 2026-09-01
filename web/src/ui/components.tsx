@@ -360,10 +360,19 @@ function isEmptyValue(data: unknown): boolean {
  * A table and its horizontal scroll container. Wide content scrolls inside the card
  * rather than pushing the whole page sideways.
  */
-export function Table({ head, children }: { head: ReactNode; children: ReactNode }) {
+export function Table({
+  head,
+  className,
+  children,
+}: {
+  head: ReactNode;
+  /** For a screen that needs to shed columns on a narrow viewport. */
+  className?: string | undefined;
+  children: ReactNode;
+}) {
   return (
     <div className="cc-table-scroll">
-      <table className="cc-table">
+      <table className={cx("cc-table", className)}>
         <thead>
           <tr>{head}</tr>
         </thead>

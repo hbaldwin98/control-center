@@ -289,32 +289,6 @@ tr.bidrl-similar-row td:first-child {
   padding-left: var(--space-6);
 }
 
-@media (max-width: 640px) {
-  .bidrl-location > summary {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .bidrl-gallery__stage {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    min-height: 0;
-  }
-
-  .bidrl-gallery__frame {
-    grid-column: 1 / -1;
-    min-height: min(60vh, 520px);
-  }
-
-  .bidrl-gallery__frame img {
-    max-height: min(60vh, 520px);
-  }
-
-  .bidrl-gallery__nav--next {
-    justify-self: end;
-  }
-}
 
 .bidrl-lot-card__img-link {
   display: block;
@@ -436,4 +410,150 @@ tr.bidrl-similar-row td:first-child {
 
 .bidrl-lightbox__nav--next {
   right: var(--space-3);
+}
+
+/* ---- overview ---- */
+
+/* A metric that is also the way in to the list it counts. The metric already draws the
+   panel, so the anchor adds nothing but the hit target and the hover. */
+.bidrl-stat {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.bidrl-stat .cc-metric {
+  height: 100%;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.bidrl-stat:hover {
+  text-decoration: none;
+}
+
+.bidrl-stat:hover .cc-metric {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+}
+
+.bidrl-stat:focus-visible {
+  outline: none;
+}
+
+.bidrl-stat:focus-visible .cc-metric {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- lot breadcrumbs ---- */
+
+.bidrl-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.bidrl-crumbs__spacer {
+  flex: 1;
+  min-width: var(--space-2);
+}
+
+.bidrl-crumbs__count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- narrow viewports ---- */
+
+/* The catalog's filters are one control per row on a phone: a half-width select next to a
+   half-width text box is unusable at 360px, and the toolbar's 180px floor guarantees an
+   awkward two-up otherwise. */
+@media (max-width: 720px) {
+  .bidrl-actions,
+  .bidrl-examples {
+    width: 100%;
+  }
+
+  .bidrl-actions > .cc-button,
+  .bidrl-actions > a {
+    flex: 1 1 auto;
+  }
+
+  .bidrl-seg {
+    width: 100%;
+  }
+
+  .bidrl-seg > .cc-button {
+    flex: 1;
+  }
+
+  .bidrl-lot-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+    gap: var(--space-2);
+  }
+
+  .bidrl-lot-card {
+    padding: var(--space-2);
+  }
+
+  .bidrl-lot-card__bid {
+    font-size: 15px;
+  }
+
+  /* Ten columns will not fit a phone, and sideways scrolling to reach the bid defeats the
+     point of the table. Keep photo, name, bid, and close time; the rest is on the lot. */
+  .bidrl-lot-table th:nth-child(2),
+  .bidrl-lot-table td:nth-child(2),
+  .bidrl-lot-table th:nth-child(6),
+  .bidrl-lot-table td:nth-child(6),
+  .bidrl-lot-table th:nth-child(7),
+  .bidrl-lot-table td:nth-child(7),
+  .bidrl-lot-table th:nth-child(9),
+  .bidrl-lot-table td:nth-child(9) {
+    display: none;
+  }
+
+  .bidrl-crumbs__spacer {
+    display: none;
+  }
+
+  .bidrl-location > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .bidrl-gallery__stage {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 0;
+  }
+
+  .bidrl-gallery__frame {
+    grid-column: 1 / -1;
+    min-height: min(50vh, 420px);
+  }
+
+  .bidrl-gallery__frame img {
+    max-height: min(50vh, 420px);
+  }
+
+  .bidrl-gallery__nav--next {
+    justify-self: end;
+  }
+
+  .bidrl-gallery__thumb img {
+    width: 56px;
+    height: 56px;
+  }
+}
+
+/* Touch pointers get no hover, so the affordance has to be there without one. */
+@media (hover: none) {
+  .bidrl-chip {
+    border-style: solid;
+  }
 }

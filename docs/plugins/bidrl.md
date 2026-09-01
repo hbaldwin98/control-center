@@ -166,7 +166,7 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 | `Events()` | `bidrl.deal_found`, `bidrl.lot.analyzed`, `bidrl.lot.enriched` |
 | `Store()` / `Blobs()` | lots, analyses, cached photos |
 | Budgets + host-capability kill switch | durable user-triggered work is still admitted, reserved, and cancellable |
-| UI | Feed, Auctions, Lots catalog, auction and lot views |
+| UI | Overview, Auctions, Lots catalog, Intent, auction and lot views |
 
 If this can be built without punching a hole through the `Host` facade, the boundary is
 right.
@@ -252,23 +252,51 @@ words against titles. The catalog's Find box stays a direct text filter.
 Intent has its own tab (`/bidrl/intent`) with a few seeded intents beside the box, since the
 useful thing to type is a purpose and not a keyword. Ask sends on Enter.
 
+Navigation inside the plugin routes rather than reloading: the screens use `Link` and
+`useRouteParams` from `@cc/ui`, so clicking a lot keeps the event stream and the snapshot
+cache alive instead of reloading the whole application.
+
 ---
 
-## Feed
+## Overview and catalog
 
-The treasure-hunting feed lives at `/bidrl`. Auctions and the lot catalog have their own
-tabs so collecting and browsing do not share one dumped page. Live BidRL keyword search
-is API-only (`POST/GET /search`); the feed does not queue it.
+`/bidrl` is an overview, not a fourth listing of the same table: counts, the widest gaps,
+what closes next, and a link into a filtered catalog for each. With nothing collected it
+says so and points at Auctions. Every figure on it is a link to the catalog URL that
+proves it.
 
-| Filter | Means |
+It is one request. `GET /overview` counts in SQL and returns only the two short lists,
+because computing a front page in the browser means shipping every lot row — descriptions,
+valuations, photo URLs — to count them, which is the wrong thing to put on a phone.
+
+`/bidrl/lots` is the one catalog. It carries both the named presets and the field filters,
+because they were always the same query — `GET /feed?filter=deals` and
+`GET /lots?bucket=priced` ran the same SQL. `feedWhere` is now shared by both handlers and
+`/lots` accepts `filter=` too. Live BidRL keyword search stays API-only
+(`POST/GET /search`); no screen queues it.
+
+| Preset | Means |
 |---|---|
+| All lots | everything collected, scanned or not |
 | Best deals | priced, large gap between bid and the comparable (eBay first) |
-| Likely mislabeled | high disagreement between title and photos |
-| Model number found | `exact_text` basis, highest confidence tier |
 | Worth opening | visually interesting, deliberately unpriced |
+| Model number found | `exact_text` basis, highest confidence tier |
+| Likely mislabeled | high disagreement between title and photos |
+| All scanned | every lot a scan has looked at |
 
-Find in feed filters the visible lots by title, identification, model, and category
-without starting a BidRL search.
+`filter=all` means every lot, including `pending`. The old feed value for "scanned but not
+necessarily priced" is now spelled `filter=scanned`.
+
+Find filters the visible lots by title, identification, model, and category without
+starting a BidRL search. The catalog's whole state — preset, text, bucket, category,
+ending — lives in the query string, so a filtered list can be linked to and pasted, and
+opening a lot and coming back returns the list rather than resetting it.
+
+Every button on these screens queues a job rather than doing the work, so every button says
+what it queued and links to the job — they used to post and say nothing, which reads as a
+dead button. `GET /auctions/{id}/index` lists an auction's lot ids in screen order and
+nothing else, so the lot page can offer previous/next and "3 of 40" without downloading
+every full lot row of a large auction.
 
 Lots on the feed, catalog, and auction page switch between a card grid and a table. The
 choice is remembered. Table columns sort on click: lot code, name, bid, expiration, price,
@@ -281,6 +309,10 @@ On a card the gap rides the photograph as a pill — green past 50%, amber past 
 below that, because a thin gap does not survive a buyer's premium — and the bid is the only
 large figure, with the comparable beside it as "vs $X sold · eBay". A lot whose `ends_at`
 has passed carries an "Ended" pill opposite the gap.
+
+Below 720px the lot table drops lot code, category, comparable, and bucket rather than
+scrolling sideways past the bid — those live on the lot page — the card grid tightens to
+150px columns, and each filter takes its own row.
 
 `/bidrl/auctions` shows collected auctions first, grouped by SITES location, then
 paste-a-URL collect, then open SITES auctions grouped the same way. "Remove ended"

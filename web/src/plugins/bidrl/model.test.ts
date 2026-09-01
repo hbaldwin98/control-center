@@ -6,8 +6,11 @@ import {
   comparableHint,
   cycleSort,
   eventBoundary,
+  LOT_PRESETS,
+  endsWithin,
   filterLabel,
   gapTone,
+  lotNeighbours,
   groupByLocation,
   hasEnded,
   pct,
@@ -298,5 +301,52 @@ describe("hasEnded", () => {
   it("treats a missing or unparsable time as still open", () => {
     expect(hasEnded("", now)).toBe(false);
     expect(hasEnded("soon", now)).toBe(false);
+  });
+});
+
+function lotAt(id: string, over: Partial<Lot> = {}): Lot {
+  return { ...({} as Lot), id, title: id, bucket: "pending", endsAt: "", ...over };
+}
+
+describe("filterLabel", () => {
+  it("describes every preset the catalog offers", () => {
+    for (const preset of LOT_PRESETS) {
+      expect(filterLabel(preset.value)).toBe(preset.hint);
+    }
+  });
+
+  it("falls back to the all-lots description for an unknown preset", () => {
+    expect(filterLabel("nonsense")).toBe(LOT_PRESETS[0].hint);
+  });
+});
+
+describe("endsWithin", () => {
+  const now = Date.parse("2026-01-02T00:00:00Z");
+  const day = 24 * 3600_000;
+
+  it("counts only close times ahead of now and inside the window", () => {
+    expect(endsWithin("2026-01-02T06:00:00Z", now, day)).toBe(true);
+    expect(endsWithin("2026-01-04T00:00:00Z", now, day)).toBe(false);
+    expect(endsWithin("2026-01-01T00:00:00Z", now, day)).toBe(false);
+    expect(endsWithin("", now, day)).toBe(false);
+  });
+});
+
+describe("lotNeighbours", () => {
+  const lots = [lotAt("a"), lotAt("b"), lotAt("c")];
+
+  it("reports what is either side and where the lot sits", () => {
+    expect(lotNeighbours(lots, "b")).toMatchObject({ position: "2 of 3" });
+    expect(lotNeighbours(lots, "b").prev?.id).toBe("a");
+    expect(lotNeighbours(lots, "b").next?.id).toBe("c");
+  });
+
+  it("has no neighbour past either end", () => {
+    expect(lotNeighbours(lots, "a").prev).toBeNull();
+    expect(lotNeighbours(lots, "c").next).toBeNull();
+  });
+
+  it("reports nothing for a lot that is not in the list", () => {
+    expect(lotNeighbours(lots, "zz")).toEqual({ prev: null, next: null, position: "" });
   });
 });

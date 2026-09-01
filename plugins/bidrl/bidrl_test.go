@@ -154,7 +154,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 18 {
+	if len(p.Routes()) != 20 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -767,5 +767,25 @@ func TestKeepLotEmbeddingDropsEndedAndOrphans(t *testing.T) {
 	}
 	if !keepLotEmbedding(true, now.Add(time.Hour).Format(time.RFC3339Nano), now) {
 		t.Fatal("open lots keep a vector")
+	}
+}
+
+func TestFeedWhere(t *testing.T) {
+	// The catalog and the feed share these, so a preset naming a column the catalog does
+	// not join would break one screen and not the other.
+	for _, name := range []string{"", "all", "deals", "worth_opening", "model", "mislabeled", "scanned"} {
+		where, ok := feedWhere(name)
+		if !ok {
+			t.Fatalf("feedWhere(%q) rejected a known preset", name)
+		}
+		if strings.TrimSpace(where) == "" {
+			t.Fatalf("feedWhere(%q) returned an empty predicate", name)
+		}
+	}
+	if _, ok := feedWhere("nonsense"); ok {
+		t.Fatal("feedWhere() accepted an unknown preset")
+	}
+	if where, _ := feedWhere("all"); where != "1=1" {
+		t.Fatalf(`feedWhere("all") = %q, want every lot`, where)
 	}
 }

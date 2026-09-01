@@ -20,6 +20,7 @@ import {
   Grid,
   Hint,
   Input,
+  Link,
   Loading,
   Metric,
   Page,
@@ -36,7 +37,11 @@ import {
   Textarea,
   Toolbar,
   pluginApi,
+  useNavigate,
+  usePath,
   useNow,
+  useQueryState,
+  useRouteParams,
   useSnapshot,
 } from "@cc/ui";
 import type { PluginModule, PluginSurfaceProps, UseSnapshotResult } from "@cc/ui";
@@ -44,6 +49,7 @@ import {
   AUCTION_SORT_DEFAULTS,
   INTENT_EXAMPLES,
   LOT_CATEGORIES,
+  LOT_PRESETS,
   LOT_SORT_DEFAULTS,
   SITES_SORT_DEFAULTS,
   cents,
@@ -56,6 +62,7 @@ import {
   groupByLocation,
   groupSimilarLots,
   hasEnded,
+  lotNeighbours,
   pct,
   sortAuctions,
   sortLotGroups,
@@ -63,6 +70,7 @@ import {
   type Auction,
   type AuctionPage,
   type AuctionSortColumn,
+  type AuctionIndex,
   type AuctionsPage,
   type CleanupResult,
   type FeedPage,
@@ -71,6 +79,7 @@ import {
   type Lot,
   type LotSortColumn,
   type LotsPage,
+  type OverviewPage,
   type SimilarGroup,
   type SitesAuction,
   type SitesPage,
@@ -81,10 +90,6 @@ import {
 import "./index.css";
 
 const api = pluginApi("bidrl");
-
-function pathParts(): string[] {
-  return window.location.pathname.split("/").filter(Boolean);
-}
 
 function useFeed(filter: string, q: string): UseSnapshotResult<FeedPage> {
   const load = useCallback(async (signal: AbortSignal) => {
@@ -130,9 +135,16 @@ function useSites(): UseSnapshotResult<SitesPage> {
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
-function useLots(q: string, bucket: string, category: string, ending: string): UseSnapshotResult<LotsPage> {
+function useLots(
+  filter: string,
+  q: string,
+  bucket: string,
+  category: string,
+  ending: string,
+): UseSnapshotResult<LotsPage> {
   const load = useCallback(async (signal: AbortSignal) => {
     const params = new URLSearchParams();
+    if (filter) params.set("filter", filter);
     if (q.trim()) params.set("q", q.trim());
     if (bucket && bucket !== "all") params.set("bucket", bucket);
     if (category && category !== "all") params.set("category", category);
@@ -140,7 +152,34 @@ function useLots(q: string, bucket: string, category: string, ending: string): U
     const qs = params.toString();
     const data = await api.get<LotsPage>(`/lots${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [q, bucket, category, ending]);
+  }, [filter, q, bucket, category, ending]);
+  return useSnapshot(load, { events: "bidrl.**" });
+}
+
+/**
+ * A lot's siblings, for paging through an auction without going back to a list. This is
+ * the index endpoint, not the auction page: three pieces of navigation are not worth
+ * downloading every full lot row of a large auction. An empty id resolves to nothing
+ * rather than fetching, so the lot screen can call this before its own record arrives.
+ */
+function useAuctionLots(auctionId: string): AuctionIndex {
+  const load = useCallback(async (signal: AbortSignal) => {
+    if (!auctionId) return { data: { title: "", lots: [] }, asOfEventId: eventBoundary(0) };
+    const data = await api.get<AuctionIndex & { latestEventId: number }>(
+      `/auctions/${encodeURIComponent(auctionId)}/index`,
+      signal,
+    );
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, [auctionId]);
+  const snap = useSnapshot<AuctionIndex>(load, { events: "bidrl.**" });
+  return snap.status === "ready" ? snap.data : { title: "", lots: [] };
+}
+
+function useOverview(): UseSnapshotResult<OverviewPage> {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const data = await api.get<OverviewPage>("/overview", signal);
+    return { data, asOfEventId: eventBoundary(data.latestEventId) };
+  }, []);
   return useSnapshot(load, { events: "bidrl.**" });
 }
 
@@ -186,6 +225,39 @@ function ViewToggle({ value, onChange }: { value: "grid" | "table"; onChange: (v
       </Button>
     </div>
   );
+}
+
+/**
+ * Every button here queues a job rather than doing the work, so every button owes the
+ * same answer: what was queued, under which job number, and where to watch it. Screens
+ * used to post and say nothing, which read as a dead button.
+ */
+function useAction() {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ReactNode | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (key: string, label: string, call: () => Promise<{ jobId?: number } | void>) => {
+    setBusy(key);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = (await call()) ?? {};
+      setNotice(
+        result.jobId != null ? (
+          <>
+            {label} queued as <Link to="/jobs">job {result.jobId}</Link>. This page updates as it lands.
+          </>
+        ) : (
+          `${label} done.`
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return { busy, notice, error, run, setNotice, setError };
 }
 
 function bucketTone(bucket: string): "neutral" | "ok" | "warn" | "danger" {
@@ -281,7 +353,7 @@ function CollectedTable({ auctions }: { auctions: Auction[] }) {
       {rows.map((a) => (
         <tr key={a.id}>
           <td>
-            <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title || a.id}</a>
+            <Link to={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title || a.id}</Link>
             {a.url ? <Hint><BidrlLink href={a.url} /></Hint> : null}
           </td>
           <td><Badge>{a.status}</Badge></td>
@@ -320,7 +392,7 @@ function SitesTable({
       {rows.map((a) => (
         <tr key={a.id}>
           <td>
-            {a.collected ? <a href={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title}</a> : a.title}
+            {a.collected ? <Link to={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title}</Link> : a.title}
             {a.url ? (
               <Hint><BidrlLink href={a.url} /></Hint>
             ) : null}
@@ -340,31 +412,35 @@ function SitesTable({
   );
 }
 
+/**
+ * The four sections, and which one a detail screen belongs to: a lot page is still the
+ * catalog, an auction page is still Auctions, so the tab strip never goes blank under a
+ * record you drilled into.
+ */
+const BIDRL_TABS = [
+  { to: "/bidrl", label: "Overview", owns: (path: string) => path === "/bidrl" },
+  {
+    to: "/bidrl/auctions",
+    label: "Auctions",
+    owns: (path: string) => path === "/bidrl/auctions" || path.startsWith("/bidrl/auction/"),
+  },
+  {
+    to: "/bidrl/lots",
+    label: "Lots",
+    owns: (path: string) => path === "/bidrl/lots" || path.startsWith("/bidrl/lot/"),
+  },
+  { to: "/bidrl/intent", label: "Intent", owns: (path: string) => path === "/bidrl/intent" },
+] as const;
+
 function BidrlTabs() {
-  const path = window.location.pathname.replace(/\/+$/, "") || "/";
-  const items = [
-    { href: "/bidrl", label: "Feed" },
-    { href: "/bidrl/auctions", label: "Auctions" },
-    { href: "/bidrl/lots", label: "Lots" },
-    { href: "/bidrl/intent", label: "Intent" },
-  ];
+  const path = usePath().replace(/\/+$/, "") || "/";
   return (
     <Tabs label="BIDRL sections">
-      {items.map((item) => {
-        const current =
-          item.href === "/bidrl"
-            ? path === "/bidrl"
-            : item.href === "/bidrl/auctions"
-              ? path === "/bidrl/auctions" || path.startsWith("/bidrl/auction/")
-              : item.href === "/bidrl/intent"
-                ? path === "/bidrl/intent"
-                : path === "/bidrl/lots" || path.startsWith("/bidrl/lot/");
-        return (
-          <a key={item.href} href={item.href} aria-current={current ? "page" : undefined}>
-            {item.label}
-          </a>
-        );
-      })}
+      {BIDRL_TABS.map((item) => (
+        <Link key={item.to} to={item.to} aria-current={item.owns(path) ? "page" : undefined}>
+          {item.label}
+        </Link>
+      ))}
     </Tabs>
   );
 }
@@ -381,13 +457,13 @@ function LotThumbLink({ lot, className }: { lot: Lot; className?: string | undef
   const thumb = <LotThumb lot={lot} className={className} />;
   if (!lot.thumbUrl) return thumb;
   return (
-    <a
-      href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
+    <Link
+      to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
       className={className ? `${className}-link` : undefined}
       aria-label={`Open ${lot.title || lot.id}`}
     >
       {thumb}
-    </a>
+    </Link>
   );
 }
 
@@ -584,7 +660,7 @@ function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: boolean
   const hint = ident || (showLotCode ? lot.lotCode : "");
   return (
     <>
-      <a href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</a>
+      <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</Link>
       {hint || lot.url ? (
         <Hint>
           {hint}
@@ -682,7 +758,7 @@ function SimilarList({ lots }: { lots: Lot[] }) {
     <div className="bidrl-similar">
       {lots.map((lot) => (
         <div key={lot.id} className="bidrl-similar__row">
-          <a href={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.lotCode || lot.title || lot.id}</a>
+          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.lotCode || lot.title || lot.id}</Link>
           <span>
             {cents(lot.currentBidCents)}
             {lot.endsAt ? (
@@ -736,6 +812,7 @@ function LotBrowser({
 
   return (
     <Table
+      className="bidrl-lot-table"
       head={
         <>
           <th></th>
@@ -838,7 +915,7 @@ function Notices({
   error,
   disabled,
 }: {
-  message: string | null;
+  message: ReactNode | null;
   error: string | null;
   disabled: boolean;
 }) {
@@ -848,7 +925,7 @@ function Notices({
       {error ? <Callout tone="danger">{error}</Callout> : null}
       {disabled ? (
         <Callout>
-          BIDRL is disabled. Enable it on the <a href="/plugins/bidrl/settings">plugin screen</a>.
+          BIDRL is disabled. Enable it on the <Link to="/plugins/bidrl/settings">plugin screen</Link>.
         </Callout>
       ) : null}
       <PluginAIHint pluginId="bidrl" />
@@ -856,13 +933,17 @@ function Notices({
   );
 }
 
-function Feed() {
-  const [filter, setFilter] = useState("deals");
-  const [draft, setDraft] = useState("");
-  const [q, setQ] = useState("");
-  const [view, setView] = useLotView();
-  const snap = useFeed(filter, q);
+/**
+ * The front door. It answers "is there anything to look at" without being a fourth
+ * listing of the same table: a few counts, the widest gaps, what closes next, and a link
+ * into the catalog for each. Everything here is a shortcut to a filtered catalog URL.
+ */
+function Overview() {
+  const snap = useOverview();
   const disabled = snap.error instanceof PluginDisabledError;
+  const stats = snap.status === "ready" ? snap.data.stats : null;
+  const deals = snap.status === "ready" ? snap.data.deals : [];
+  const closing = snap.status === "ready" ? snap.data.closing : [];
 
   return (
     <Page>
@@ -873,58 +954,86 @@ function Feed() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
-        <Card
-          title="Feed"
-          actions={<ViewToggle value={view} onChange={setView} />}
-        >
-          <Toolbar>
-            <Field label="Find">
-              <Input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") setQ(draft);
-                }}
-                placeholder="Title, identification, model…"
-                disabled={disabled}
-                aria-label="Find in feed"
+        {snap.status === "loading" ? <Loading label="Loading…" /> : null}
+        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
+        {stats != null && stats.lots === 0 ? (
+          <Card title="Start here">
+            <Stack>
+              <Hint>
+                Nothing is collected yet. Collect an auction, then scan it — scanning is what reads
+                the photographs and produces comparables.
+              </Hint>
+              <div className="bidrl-actions">
+                <Link to="/bidrl/auctions" className="cc-button cc-button--primary">
+                  Collect an auction
+                </Link>
+              </div>
+            </Stack>
+          </Card>
+        ) : null}
+        {stats != null && stats.lots > 0 ? (
+          <>
+            <Grid density="metric">
+              <StatLink to="/bidrl/auctions" label="Auctions" value={String(stats.auctions)} />
+              <StatLink to="/bidrl/lots" label="Lots" value={String(stats.lots)} hint={`${stats.live} still open`} />
+              <StatLink
+                to="/bidrl/lots?filter=deals"
+                label="Priced"
+                value={String(stats.priced)}
+                hint={stats.unscanned > 0 ? `${stats.unscanned} never scanned` : "all scanned"}
+                tone={stats.priced > 0 ? "ok" : "neutral"}
               />
-            </Field>
-            <Button disabled={disabled} onClick={() => setQ(draft)}>
-              Find
-            </Button>
-            {q ? (
-              <Button
-                disabled={disabled}
-                onClick={() => {
-                  setDraft("");
-                  setQ("");
-                }}
-              >
-                Clear
-              </Button>
-            ) : null}
-            <Field label="Show">
-              <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Feed filter">
-                <option value="deals">Best deals</option>
-                <option value="mislabeled">Likely mislabeled</option>
-                <option value="model">Model number found</option>
-                <option value="worth_opening">Worth opening</option>
-                <option value="all">All scanned</option>
-              </Select>
-            </Field>
-          </Toolbar>
-          {snap.status === "loading" ? <Loading label="Loading feed…" /> : null}
-          {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
-          {snap.status === "ready" ? (
-            <>
-              <Hint>{filterLabel(filter)}</Hint>
-              <LotBrowser lots={snap.data.lots} empty="Nothing in this filter yet. Collect an auction and run a scan." view={view} />
-            </>
-          ) : null}
-        </Card>
+              <StatLink
+                to="/bidrl/lots?ending=soon"
+                label="Ending in 24h"
+                value={String(stats.ending)}
+                tone={stats.ending > 0 ? "warn" : "neutral"}
+              />
+            </Grid>
+            <Card
+              title="Widest gaps"
+              actions={<Link to="/bidrl/lots?filter=deals">See all priced lots</Link>}
+            >
+              <LotBrowser
+                lots={deals}
+                empty="No lot has a comparable yet. Scan an auction, then reprice a lot whose photos show a model."
+                view="grid"
+                groupSimilar={false}
+              />
+            </Card>
+            <Card title="Closing next" actions={<Link to="/bidrl/lots?ending=soon">See everything ending</Link>}>
+              <LotBrowser
+                lots={closing}
+                empty="Nothing collected closes in the next week."
+                view="table"
+                groupSimilar={false}
+              />
+            </Card>
+          </>
+        ) : null}
       </Stack>
     </Page>
+  );
+}
+
+/** A metric that is also the way in to the list it counts. */
+function StatLink({
+  to,
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  to: string;
+  label: string;
+  value: string;
+  hint?: string | undefined;
+  tone?: "neutral" | "ok" | "warn" | "danger" | undefined;
+}) {
+  return (
+    <Link to={to} className="bidrl-stat">
+      <Metric label={label} value={value} hint={hint} tone={tone ?? "neutral"} />
+    </Link>
   );
 }
 
@@ -932,29 +1041,20 @@ function Auctions() {
   const auctions = useAuctions();
   const sites = useSites();
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, notice, error, run, setNotice, setError } = useAction();
+  const [cleaning, setCleaning] = useState(false);
   const disabled = auctions.error instanceof PluginDisabledError;
   const collected = auctions.status === "ready" ? auctions.data.auctions : [];
   const collectedGroups = useMemo(() => groupByLocation(collected), [collected]);
   const siteList = sites.status === "ready" ? sites.data.auctions : [];
   const siteGroups = useMemo(() => groupByLocation(siteList), [siteList]);
 
-  const add = async (auctionURL: string) => {
-    setBusy("add");
-    setError(null);
-    setMessage(null);
-    try {
+  const add = (auctionURL: string) =>
+    run("add", "Collect", async () => {
       const result = await api.post<{ jobId: number; auctionId: string }>("/auctions", { url: auctionURL });
-      setMessage(`Collect queued as job ${result.jobId}.`);
       setUrl("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
+      return result;
+    });
 
   const cleanup = async () => {
     if (
@@ -964,34 +1064,23 @@ function Auctions() {
     ) {
       return;
     }
-    setBusy("cleanup");
+    setCleaning(true);
     setError(null);
-    setMessage(null);
+    setNotice(null);
     try {
       const result = await api.post<CleanupResult>("/cleanup");
       auctions.reload();
       sites.reload();
-      setMessage(cleanupMessage(result));
+      setNotice(cleanupMessage(result));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(null);
+      setCleaning(false);
     }
   };
 
-  const refreshSites = async () => {
-    setBusy("sites");
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await api.post<{ jobId: number }>("/sites/refresh");
-      setMessage(`SITES auction list queued as job ${result.jobId}.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const refreshSites = () =>
+    run("sites", "SITES list refresh", () => api.post<{ jobId: number }>("/sites/refresh"));
 
   return (
     <Page>
@@ -1001,29 +1090,7 @@ function Auctions() {
       />
       <Stack>
         <BidrlTabs />
-        <Notices message={message} error={error} disabled={disabled} />
-        <Card
-          title="Collected auctions"
-          actions={
-            <Button size="sm" disabled={disabled || busy !== null} onClick={() => void cleanup()}>
-              {busy === "cleanup" ? "Removing…" : "Remove ended"}
-            </Button>
-          }
-        >
-          <Hint>
-            Ended auctions and lots stay until you remove them. The countdown is local from
-            the last collect or bid refresh — nothing is deleted on a schedule.
-          </Hint>
-          {auctions.status === "loading" ? <Loading label="Loading auctions…" /> : null}
-          {auctions.status === "error" && !disabled ? <Callout tone="danger">{auctions.error.message}</Callout> : null}
-          {auctions.status === "ready" && collected.length > 0 ? (
-            <LocationSections groups={collectedGroups} empty="No collected auctions yet.">
-              {(group) => <CollectedTable auctions={group} />}
-            </LocationSections>
-          ) : auctions.status === "ready" ? (
-            <EmptyState>No collected auctions yet. Add a URL or collect from SITES.</EmptyState>
-          ) : null}
-        </Card>
+        <Notices message={notice} error={error} disabled={disabled} />
         <Card title="Add auction">
           <Stack>
             <Hint>
@@ -1049,6 +1116,28 @@ function Auctions() {
               </Button>
             </Toolbar>
           </Stack>
+        </Card>
+        <Card
+          title={`Collected auctions${collected.length > 0 ? ` (${collected.length})` : ""}`}
+          actions={
+            <Button size="sm" disabled={disabled || busy !== null || cleaning} onClick={() => void cleanup()}>
+              {cleaning ? "Removing…" : "Remove ended"}
+            </Button>
+          }
+        >
+          <Hint>
+            Ended auctions and lots stay until you remove them. The countdown is local from
+            the last collect or bid refresh — nothing is deleted on a schedule.
+          </Hint>
+          {auctions.status === "loading" ? <Loading label="Loading auctions…" /> : null}
+          {auctions.status === "error" && !disabled ? <Callout tone="danger">{auctions.error.message}</Callout> : null}
+          {auctions.status === "ready" && collected.length > 0 ? (
+            <LocationSections groups={collectedGroups} empty="No collected auctions yet.">
+              {(group) => <CollectedTable auctions={group} />}
+            </LocationSections>
+          ) : auctions.status === "ready" ? (
+            <EmptyState>No collected auctions yet. Add a URL or collect from SITES.</EmptyState>
+          ) : null}
         </Card>
         <Card
           title="SITES by location"
@@ -1083,27 +1172,65 @@ function Auctions() {
   );
 }
 
+/**
+ * The one catalog. Its whole state — preset, text, bucket, category, ending — lives in
+ * the query string, so a filtered list can be linked to, and going into a lot and back
+ * returns the list you left rather than a reset one.
+ */
 function LotsCatalog() {
-  const [draft, setDraft] = useState("");
-  const [q, setQ] = useState("");
-  const [bucket, setBucket] = useState("all");
-  const [category, setCategory] = useState("all");
-  const [endingSoon, setEndingSoon] = useState(false);
+  const [filter, setFilter] = useQueryState("filter");
+  const [q, setQ] = useQueryState("q");
+  const [bucket, setBucket] = useQueryState("bucket", "all");
+  const [category, setCategory] = useQueryState("category", "all");
+  const [ending, setEnding] = useQueryState("ending");
+  const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
-  const snap = useLots(q, bucket, category, endingSoon ? "soon" : "");
+  const snap = useLots(filter, q, bucket, category, ending);
   const disabled = snap.error instanceof PluginDisabledError;
+  const narrowed = Boolean(filter || q || ending) || bucket !== "all" || category !== "all";
+
+  // A query typed on another screen, or arrived at by link, has to show in the box.
+  useEffect(() => setDraft(q), [q]);
+
+  const clearAll = () => {
+    setDraft("");
+    setQ("");
+    setFilter("");
+    setBucket("all");
+    setCategory("all");
+    setEnding("");
+  };
 
   return (
     <Page>
       <PageHeader
         title="Lots"
-        lede="Every collected lot. Filter by text, bucket, or category. Looking for something by purpose? Try the Intent tab."
+        lede="Every collected lot. Start from a preset, then narrow by text, bucket, or category. Looking for something by purpose rather than by word? Ask on the Intent tab."
       />
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
-        <Card title="Catalog" actions={<ViewToggle value={view} onChange={setView} />}>
+        <Card
+          title="Catalog"
+          actions={
+            <>
+              {narrowed ? (
+                <Button size="sm" onClick={clearAll}>
+                  Clear filters
+                </Button>
+              ) : null}
+              <ViewToggle value={view} onChange={setView} />
+            </>
+          }
+        >
           <Toolbar>
+            <Field label="Show">
+              <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Preset">
+                {LOT_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value}>{preset.label}</option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Find">
               <Input
                 value={draft}
@@ -1119,17 +1246,6 @@ function LotsCatalog() {
             <Button disabled={disabled} onClick={() => setQ(draft)}>
               Find
             </Button>
-            {q ? (
-              <Button
-                disabled={disabled}
-                onClick={() => {
-                  setDraft("");
-                  setQ("");
-                }}
-              >
-                Clear
-              </Button>
-            ) : null}
             <Field label="Bucket">
               <Select value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Bucket">
                 <option value="all">All buckets</option>
@@ -1151,15 +1267,27 @@ function LotsCatalog() {
             </Field>
             <Checkbox
               label="Ending soon"
-              checked={endingSoon}
-              onChange={(e) => setEndingSoon(e.target.checked)}
+              checked={ending === "soon"}
+              onChange={(e) => setEnding(e.target.checked ? "soon" : "")}
               disabled={disabled}
             />
           </Toolbar>
+          <Hint>
+            {filterLabel(filter)}
+            {snap.status === "ready" ? ` · ${snap.data.lots.length} shown` : ""}
+          </Hint>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
           {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
           {snap.status === "ready" ? (
-            <LotBrowser lots={snap.data.lots} empty="No lots match these filters." view={view} />
+            <LotBrowser
+              lots={snap.data.lots}
+              empty={
+                narrowed
+                  ? "No lot matches these filters. Clear them to see the whole catalog."
+                  : "No lots collected yet. Collect an auction on the Auctions tab."
+              }
+              view={view}
+            />
           ) : null}
         </Card>
       </Stack>
@@ -1288,36 +1416,27 @@ function IntentSearch() {
 }
 
 function AuctionView() {
-  const id = pathParts()[2] ?? "";
+  const id = useRouteParams().id ?? "";
   const snap = useAuction(id);
   const [view, setView] = useLotView();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (action: "scan" | "refresh") => {
-    setBusy(action);
-    setError(null);
-    try {
-      await api.post(`/auctions/${encodeURIComponent(id)}/${action}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const { busy, notice, error, run, setError } = useAction();
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
   const remove = async () => {
     if (!window.confirm("Delete this auction? Its lots, photos, analyses, and comparables go with it.")) {
       return;
     }
-    setBusy("delete");
+    setDeleting(true);
     setError(null);
     try {
       await api.del(`/auctions/${encodeURIComponent(id)}`);
-      window.location.href = "/bidrl/auctions";
+      navigate("/bidrl/auctions");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setBusy(null);
+      setDeleting(false);
     }
   };
+  const pending = busy !== null || deleting;
   const disabled = snap.error instanceof PluginDisabledError;
   const auction = snap.status === "ready" ? snap.data.auction : null;
   return (
@@ -1327,14 +1446,27 @@ function AuctionView() {
         lede={auction ? undefined : "Auction"}
         actions={
           <div className="bidrl-actions">
-            <Button variant="primary" disabled={disabled || busy !== null} onClick={() => void run("scan")}>
+            <Button
+              variant="primary"
+              disabled={disabled || pending}
+              onClick={() =>
+                void run("scan", "Scan", () => api.post(`/auctions/${encodeURIComponent(id)}/scan`))
+              }
+            >
               {busy === "scan" ? "Queueing…" : "Scan"}
             </Button>
-            <Button disabled={disabled || busy !== null} onClick={() => void run("refresh")}>
+            <Button
+              disabled={disabled || pending}
+              onClick={() =>
+                void run("refresh", "Bid refresh", () =>
+                  api.post(`/auctions/${encodeURIComponent(id)}/refresh`),
+                )
+              }
+            >
               {busy === "refresh" ? "Queueing…" : "Refresh bids"}
             </Button>
-            <Button variant="danger" disabled={disabled || busy !== null} onClick={() => void remove()}>
-              {busy === "delete" ? "Deleting…" : "Delete"}
+            <Button variant="danger" disabled={disabled || pending} onClick={() => void remove()}>
+              {deleting ? "Deleting…" : "Delete"}
             </Button>
             {auction?.url ? <BidrlLink href={auction.url} /> : null}
           </div>
@@ -1342,8 +1474,7 @@ function AuctionView() {
       />
       <Stack>
         <BidrlTabs />
-        {error ? <Callout tone="danger">{error}</Callout> : null}
-        <PluginAIHint pluginId="bidrl" />
+        <Notices message={notice} error={error} disabled={disabled} />
         {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
         {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
         {auction ? (
@@ -1364,23 +1495,15 @@ function AuctionView() {
 }
 
 function LotView() {
-  const id = pathParts()[2] ?? "";
+  const id = useRouteParams().id ?? "";
   const snap = useLot(id);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const act = async (action: "reprice" | "enrich") => {
-    setBusy(action);
-    setError(null);
-    try {
-      await api.post(`/lots/${encodeURIComponent(id)}/${action}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const { busy, notice, error, run } = useAction();
   const disabled = snap.error instanceof PluginDisabledError;
   const lot = snap.status === "ready" ? snap.data : null;
+  // Siblings come from the lot's own auction, so paging through a scan never leaves the
+  // page to go back to a list and pick the next row.
+  const siblings = useAuctionLots(lot?.auctionId ?? "");
+  const neighbours = useMemo(() => lotNeighbours(siblings.lots, id), [siblings.lots, id]);
   return (
     <Page>
       <PageHeader
@@ -1391,21 +1514,51 @@ function LotView() {
             <Button
               variant="primary"
               disabled={disabled || busy !== null || (lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode")}
-              onClick={() => void act("reprice")}
+              title={
+                lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode"
+                  ? "Repricing needs a model or barcode read from a photo. Enrich first."
+                  : undefined
+              }
+              onClick={() =>
+                void run("reprice", "Reprice", () => api.post(`/lots/${encodeURIComponent(id)}/reprice`))
+              }
             >
               {busy === "reprice" ? "Queueing…" : "Reprice"}
             </Button>
-            <Button disabled={disabled || busy !== null} onClick={() => void act("enrich")}>
+            <Button
+              disabled={disabled || busy !== null}
+              onClick={() =>
+                void run("enrich", "Enrich", () => api.post(`/lots/${encodeURIComponent(id)}/enrich`))
+              }
+            >
               {busy === "enrich" ? "Queueing…" : "Enrich"}
             </Button>
-            {lot ? <a href={`/bidrl/auction/${encodeURIComponent(lot.auctionId)}`}>Auction</a> : null}
             {lot?.url ? <BidrlLink href={lot.url} /> : null}
           </div>
         }
       />
       <Stack>
         <BidrlTabs />
-        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {lot ? (
+          <div className="bidrl-crumbs">
+            <Link to="/bidrl/lots">Lots</Link>
+            <span aria-hidden="true">/</span>
+            <Link to={`/bidrl/auction/${encodeURIComponent(lot.auctionId)}`}>
+              {siblings.title || "Auction"}
+            </Link>
+            <span className="bidrl-crumbs__spacer" />
+            {neighbours.prev ? (
+              <Link to={`/bidrl/lot/${encodeURIComponent(neighbours.prev.id)}`}>← Previous lot</Link>
+            ) : null}
+            {neighbours.position ? (
+              <span className="bidrl-crumbs__count">{neighbours.position}</span>
+            ) : null}
+            {neighbours.next ? (
+              <Link to={`/bidrl/lot/${encodeURIComponent(neighbours.next.id)}`}>Next lot →</Link>
+            ) : null}
+          </div>
+        ) : null}
+        <Notices message={notice} error={error} disabled={disabled} />
         {snap.status === "loading" ? <Loading label="Loading lot…" /> : null}
         {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
         {lot ? (
@@ -1466,9 +1619,9 @@ function LotView() {
                   {lot.reusedFromLotId ? (
                     <Hint>
                       Same comparable as{" "}
-                      <a href={`/bidrl/lot/${encodeURIComponent(lot.reusedFromLotId)}`}>
+                      <Link to={`/bidrl/lot/${encodeURIComponent(lot.reusedFromLotId)}`}>
                         lot {lot.reusedFromLotId}
-                      </a>
+                      </Link>
                     </Hint>
                   ) : null}
                   {lot.retrievedAt ? (
@@ -1537,7 +1690,7 @@ const bidrl: PluginModule = {
   id: "bidrl",
   nav: [{ path: "/bidrl", label: "BIDRL" }],
   routes: [
-    { path: "/bidrl", element: <Feed /> },
+    { path: "/bidrl", element: <Overview /> },
     { path: "/bidrl/auctions", element: <Auctions /> },
     { path: "/bidrl/lots", element: <LotsCatalog /> },
     { path: "/bidrl/intent", element: <IntentSearch /> },

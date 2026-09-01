@@ -142,6 +142,50 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"auction": a, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})
 }
 
+// handleGetAuctionIndex serves just enough of an auction's lots to page through them:
+// the lot screen wants a previous, a next, and a position, and downloading every full lot
+// row — descriptions, valuations, photo URLs — to compute three of them is a payload no
+// phone should pay for.
+func (p *Plugin) handleGetAuctionIndex(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	id := r.PathValue("id")
+	var title string
+	if err := h.Store().QueryRow(r.Context(), `SELECT title FROM bidrl_auctions WHERE id = ?`, id).Scan(&title); err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "auction not found")
+		return
+	}
+	// Ordered the way the auction screen lists them, so "next" means the next row there.
+	rows, err := h.Store().Query(r.Context(), `SELECT id, lot_code, title FROM bidrl_lots WHERE auction_id = ? ORDER BY id`, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	defer rows.Close()
+	type indexEntry struct {
+		ID      string `json:"id"`
+		LotCode string `json:"lotCode"`
+		Title   string `json:"title"`
+	}
+	lots := []indexEntry{}
+	for rows.Next() {
+		var e indexEntry
+		if err := rows.Scan(&e.ID, &e.LotCode, &e.Title); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+		lots = append(lots, e)
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"title": title, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+}
+
 func (p *Plugin) handleDeleteAuction(w http.ResponseWriter, r *http.Request) {
 	h, ok := p.host()
 	if !ok {
@@ -416,7 +460,11 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 	bucket := r.URL.Query().Get("bucket")
 	category := r.URL.Query().Get("category")
 	ending := r.URL.Query().Get("ending")
-	where := "1=1"
+	where, ok := feedWhere(r.URL.Query().Get("filter"))
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad_request", "unknown filter")
+		return
+	}
 	var args []any
 	if bucket != "" && bucket != "all" {
 		where += ` AND l.bucket = ?`
@@ -498,6 +546,137 @@ func (p *Plugin) handleGetLot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, lotPayload(lot, latestEventID(r.Context(), h)))
 }
 
+// handleGetOverview answers the front door in one request.
+//
+// The overview wants counts, the widest gaps, and what closes next. Computing that in the
+// browser means shipping every lot row — descriptions, valuations, photo URLs — to count
+// them, which is the wrong thing to put on a phone. Counting happens in SQL; only the two
+// short lists come back as rows.
+func (p *Plugin) handleGetOverview(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
+	}
+	now := h.Clock().Now()
+	var stats struct {
+		Auctions  int `json:"auctions"`
+		Lots      int `json:"lots"`
+		Scanned   int `json:"scanned"`
+		Unscanned int `json:"unscanned"`
+		Priced    int `json:"priced"`
+		Live      int `json:"live"`
+		Ending    int `json:"ending"`
+	}
+	if err := h.Store().QueryRow(r.Context(), `SELECT
+		(SELECT COUNT(*) FROM bidrl_auctions),
+		(SELECT COUNT(*) FROM bidrl_lots),
+		(SELECT COUNT(*) FROM bidrl_lots WHERE bucket != 'pending'),
+		(SELECT COUNT(*) FROM bidrl_lots l WHERE EXISTS (SELECT 1 FROM bidrl_valuations v WHERE v.lot_id = l.id AND v.price_cents IS NOT NULL))`).
+		Scan(&stats.Auctions, &stats.Lots, &stats.Scanned, &stats.Priced); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	stats.Unscanned = stats.Lots - stats.Scanned
+
+	// Close times are stored as text and may be blank or unparsable, so the two
+	// time-sensitive counts go through the same parser the rest of the plugin uses rather
+	// than trusting SQL string comparison.
+	endTimes, err := h.Store().Query(r.Context(), `SELECT ends_at FROM bidrl_lots WHERE ends_at != ''`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	blank := stats.Lots
+	for endTimes.Next() {
+		var endsAt string
+		if err := endTimes.Scan(&endsAt); err != nil {
+			endTimes.Close()
+			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+		blank--
+		if hasEnded(endsAt, now) {
+			continue
+		}
+		stats.Live++
+		if endingSoon(endsAt, now) {
+			stats.Ending++
+		}
+	}
+	endTimes.Close()
+	if err := endTimes.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	// A lot with no close time has not ended, so it is still live.
+	stats.Live += blank
+
+	priced, err := p.queryLots(h, r, `v.price_cents IS NOT NULL`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	deals := make([]lotView, 0, len(priced))
+	for _, lot := range priced {
+		if lot.DealScore != nil && !hasEnded(lot.EndsAt, now) {
+			deals = append(deals, lot)
+		}
+	}
+	sort.SliceStable(deals, func(i, j int) bool { return *deals[i].DealScore > *deals[j].DealScore })
+	deals = capLots(deals, overviewRows)
+
+	upcoming, err := p.queryLots(h, r, `l.ends_at != ''`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	closing := make([]lotView, 0, len(upcoming))
+	for _, lot := range upcoming {
+		if !hasEnded(lot.EndsAt, now) {
+			closing = append(closing, lot)
+		}
+	}
+	sort.SliceStable(closing, func(i, j int) bool { return closing[i].EndsAt < closing[j].EndsAt })
+	closing = capLots(closing, overviewRows)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stats":         stats,
+		"deals":         deals,
+		"closing":       closing,
+		"latestEventId": latestEventID(r.Context(), h),
+	})
+}
+
+func capLots(lots []lotView, n int) []lotView {
+	if len(lots) > n {
+		return lots[:n]
+	}
+	return lots
+}
+
+// feedWhere turns a named feed preset into its SQL predicate. The catalog accepts the
+// same names, so a preset and the bucket/category filters are one screen rather than two
+// listings of the same table.
+func feedWhere(filter string) (string, bool) {
+	switch filter {
+	case "deals":
+		return `l.bucket = 'priced'`, true
+	case "mislabeled":
+		return `a.title_agreement IS NOT NULL AND a.title_agreement < 0.5 AND l.bucket != 'discarded'`, true
+	case "model":
+		return `a.basis IN ('exact_text','barcode')`, true
+	case "worth_opening":
+		return `l.bucket = 'worth_opening'`, true
+	case "scanned":
+		return `l.bucket != 'pending'`, true
+	case "", "all":
+		return `1=1`, true
+	default:
+		return "", false
+	}
+}
+
 func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 	h, ok := p.host()
 	if !ok {
@@ -506,19 +685,8 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	filter := r.URL.Query().Get("filter")
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	where := "1=1"
-	switch filter {
-	case "deals":
-		where = `l.bucket = 'priced'`
-	case "mislabeled":
-		where = `a.title_agreement IS NOT NULL AND a.title_agreement < 0.5 AND l.bucket != 'discarded'`
-	case "model":
-		where = `a.basis IN ('exact_text','barcode')`
-	case "worth_opening":
-		where = `l.bucket = 'worth_opening'`
-	case "", "all":
-		where = `l.bucket != 'pending'`
-	default:
+	where, ok := feedWhere(filter)
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad_request", "unknown filter")
 		return
 	}
