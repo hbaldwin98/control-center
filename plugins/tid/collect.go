@@ -171,9 +171,13 @@ func electricAgreements(body []byte) ([]map[string]any, error) {
 		if !ok {
 			continue
 		}
-		for _, value := range values(object["serviceAggrements"]) {
+		agreementValue := object["serviceAgreements"]
+		if agreementValue == nil {
+			agreementValue = object["serviceAggrements"]
+		}
+		for _, value := range values(agreementValue) {
 			agreement, ok := value.(map[string]any)
-			if ok && strings.EqualFold(stringValue(agreement, "serviceType"), "E") && stringValue(agreement, "saId") != "" {
+			if ok && strings.EqualFold(strings.TrimSpace(stringValue(agreement, "serviceType")), "E") && stringValue(agreement, "saId") != "" {
 				result = append(result, agreement)
 			}
 		}

@@ -157,10 +157,24 @@ routes:
 			http.Error(w, "active services request", http.StatusBadRequest)
 			return
 		}
-		_, _ = io.WriteString(w, `{"data":{"premiseList":{"serviceAggrements":{"saId":"service-test","serviceType":"E","saRateSchedule":{"rateSchedule":"TEST"},"ServicePoints":{"meterId":"meter-test"}}}}}`)
+		_, _ = io.WriteString(w, `{"data":{"premiseList":{"serviceAgreements":{"saId":"service-test","serviceType":"E","saRateSchedule":{"rateSchedule":"TEST"},"ServicePoints":{"meterId":"meter-test"}}}}}`)
 	})
 	mux.HandleFunc("POST /ouaf/get-bill-data-extract", func(w http.ResponseWriter, r *http.Request) {
 		if !nextStep(w, 4) || !checkHeaders(w, r, true) {
+			return
+		}
+		var body struct {
+			Payload                  map[string]string `json:"payload"`
+			SelectedServiceAgreement map[string]any    `json:"selectedServiceAgreement"`
+			Username                 string            `json:"username"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Payload["accountId"] != "account-test" || body.Payload["action"] != "READ" || body.Payload["saId"] != "service-test" || body.Username != "internal-test" {
+			http.Error(w, "bill data request", http.StatusBadRequest)
+			return
+		}
+		if body.SelectedServiceAgreement["saId"] != "service-test" || body.SelectedServiceAgreement["ServicePoints"] == nil {
+			http.Error(w, "bill service agreement", http.StatusBadRequest)
 			return
 		}
 		fmt.Fprintf(w, `{"data":{"billHistoryList":[{"usagePeriodStartDateTime":"%sT00:00:00-07:00","usagePeriodEndDateTime":"%sT23:59:59-07:00"}]}}`, d1, d2)
@@ -175,7 +189,7 @@ routes:
 			Username                 string            `json:"username"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Payload["viewModeFlg"] != "D2BB" || body.Payload["personId"] != "" || body.Payload["saId"] != "service-test" || body.Username != "internal-test" {
+		if body.Payload["action"] != "READ" || body.Payload["username"] != "internal-test" || body.Payload["firstname"] != "Test" || body.Payload["lastname"] != "Person" || body.Payload["emailAddress"] != "person@example.test" || body.Payload["accountId"] != "account-test" || body.Payload["personId"] != "" || body.Payload["saId"] != "service-test" || body.Payload["viewModeFlg"] != "D2BB" || body.Payload["usagePeriodStartDateTime"] != d1+"T00:00:00-07:00" || body.Payload["usagePeriodEndDateTime"] != d2+"T23:59:59-07:00" || body.Username != "internal-test" {
 			http.Error(w, "usage request", http.StatusBadRequest)
 			return
 		}

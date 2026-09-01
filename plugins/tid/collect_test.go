@@ -15,6 +15,17 @@ func TestElectricAgreementsReturnsEveryElectricAgreement(t *testing.T) {
 	}
 }
 
+func TestElectricAgreementsAcceptsCorrectlySpelledObject(t *testing.T) {
+	body := []byte(`{"data":{"premiseList":{"serviceAgreements":{"saId":"electric-object","serviceType":"E","saRateSchedule":{"rateSchedule":"TEST"},"ServicePoints":{"meterId":"meter-test"}}}}}`)
+	agreements, err := electricAgreements(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agreements) != 1 || stringValue(agreements[0], "saId") != "electric-object" {
+		t.Fatalf("unexpected agreements: %#v", agreements)
+	}
+}
+
 func TestCurrentBillPeriodUsesOnlyFirstCompletePeriod(t *testing.T) {
 	body := []byte(`{"data":{"billHistoryList":[{"usagePeriodStartDateTime":"current-start","usagePeriodEndDateTime":"current-end"},{"usagePeriodStartDateTime":"prior-start","usagePeriodEndDateTime":"prior-end"}]}}`)
 	period, err := currentBillPeriod(body)
