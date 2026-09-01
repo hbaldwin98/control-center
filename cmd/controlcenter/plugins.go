@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/plugins/bidrl"
 	"github.com/hbaldwin98/control-center/plugins/hello"
@@ -21,4 +23,12 @@ func registerPlugins(r *pluginhost.Registry) error {
 		tid.New(),
 		bidrl.New(),
 	)
+}
+
+func fakePluginHosts() map[string]http.Handler {
+	site := bidrl.FakeSite()
+	return map[string]http.Handler{
+		"www.bidrl.com": site,
+		"bidrl.com":     site,
+	}
 }

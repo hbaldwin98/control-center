@@ -19,10 +19,12 @@ var (
 )
 
 type parsedLot struct {
-	URL      string
-	Title    string
-	LotCode  string
-	BidCents *int64
+	URL          string
+	Title        string
+	LotCode      string
+	AuctionID    string
+	AuctionTitle string
+	BidCents     *int64
 	// Images is set only when the source already carried full-size photographs,
 	// as the JSON item feed does; an HTML-scraped lot leaves it empty and the
 	// collector opens the lot page instead.
@@ -55,9 +57,10 @@ func parseAuctionHTML(pageURL string, raw string) parsedPage {
 			continue
 		}
 		out.Lots = append(out.Lots, parsedLot{
-			URL:     abs.String(),
-			Title:   nearbyLinkText(raw, m[1]),
-			LotCode: lotCode.FindString(abs.Path),
+			URL:       abs.String(),
+			Title:     nearbyLinkText(raw, m[1]),
+			LotCode:   lotCode.FindString(abs.Path),
+			AuctionID: auctionIDFromPath(abs.Path),
 		})
 	}
 	out.Images = pageImages(base, raw)

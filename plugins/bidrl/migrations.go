@@ -93,5 +93,52 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			) STRICT;
 			INSERT INTO bidrl_meta(id, last_event_id) VALUES (1, 0);
 		`,
+	}, {
+		Version: 2,
+		Name:    "search",
+		Up: `
+			CREATE TABLE bidrl_affiliate_auctions (
+				id              TEXT PRIMARY KEY,
+				url             TEXT NOT NULL,
+				title           TEXT NOT NULL,
+				affiliate_id    TEXT NOT NULL,
+				affiliate_name  TEXT NOT NULL,
+				city            TEXT NOT NULL DEFAULT '',
+				item_count      INTEGER NOT NULL DEFAULT 0,
+				ends_at         TEXT NOT NULL DEFAULT '',
+				seen_at         TEXT NOT NULL
+			) STRICT;
+			CREATE INDEX bidrl_affiliate_auctions_aff ON bidrl_affiliate_auctions(affiliate_id);
+
+			CREATE TABLE bidrl_searches (
+				id          TEXT PRIMARY KEY,
+				query       TEXT NOT NULL,
+				scope       TEXT NOT NULL,
+				status      TEXT NOT NULL,
+				hit_count   INTEGER NOT NULL DEFAULT 0,
+				last_error  TEXT NOT NULL DEFAULT '',
+				created_at  TEXT NOT NULL
+			) STRICT;
+
+			CREATE TABLE bidrl_search_hits (
+				search_id       TEXT NOT NULL,
+				ordinal         INTEGER NOT NULL,
+				lot_id          TEXT NOT NULL,
+				auction_id      TEXT NOT NULL,
+				url             TEXT NOT NULL,
+				title           TEXT NOT NULL,
+				auction_title   TEXT NOT NULL DEFAULT '',
+				lot_code        TEXT NOT NULL DEFAULT '',
+				affiliate_id    TEXT NOT NULL DEFAULT '',
+				affiliate_name  TEXT NOT NULL DEFAULT '',
+				preferred       INTEGER NOT NULL DEFAULT 0,
+				bid_cents       INTEGER,
+				match_score     REAL NOT NULL,
+				match_reason    TEXT NOT NULL DEFAULT '',
+				source          TEXT NOT NULL,
+				PRIMARY KEY (search_id, ordinal)
+			) STRICT;
+			CREATE INDEX bidrl_search_hits_search ON bidrl_search_hits(search_id);
+		`,
 	}})
 }

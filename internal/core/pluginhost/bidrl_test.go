@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,15 +21,6 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/plugins/bidrl"
 )
-
-var png1x1 = []byte{
-	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-	0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
-	0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-	0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
-	0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-}
 
 func TestBidrlCollectsAnalyzesAndPrices(t *testing.T) {
 	ctx := context.Background()
@@ -114,32 +104,11 @@ routes:
 		t.Fatal(err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /auction/42/bidgallery", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, `<!doctype html><html><body>
-			<h1>Test Warehouse Auction</h1>
-			<article class="lot"><a href="/auction/42/item/keurig-k-supreme-plus-1001">Keurig K-Supreme Plus Coffee Maker</a><span>$15.00</span></article>
-			<article class="lot"><a href="/auction/42/item/office-mesh-chair-1002">Office mesh task chair</a><span>$8.00</span></article>
-			<article class="lot"><a href="/auction/42/item/aeron-style-chair-1003">Aeron-style mesh chair</a><span>$40.00</span></article>
-		</body></html>`)
-	})
-	lotPage := func(title, bid string) http.HandlerFunc {
-		return func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.WriteString(w, `<html><h1>`+title+`</h1><p>Current bid `+bid+`</p><img src="https://www.bidrl.com/img/1.png"></html>`)
-		}
-	}
-	mux.HandleFunc("GET /auction/42/item/keurig-k-supreme-plus-1001", lotPage("Keurig K-Supreme Plus Coffee Maker", "$15.00"))
-	mux.HandleFunc("GET /auction/42/item/office-mesh-chair-1002", lotPage("Office mesh task chair", "$8.00"))
-	mux.HandleFunc("GET /auction/42/item/aeron-style-chair-1003", lotPage("Aeron-style mesh chair", "$40.00"))
-	mux.HandleFunc("GET /img/1.png", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(png1x1)
-	})
-
 	br, err := browser.New(bus, pol, browser.Options{
-		Engine: browser.NewFake(map[string]http.Handler{"www.bidrl.com": mux, "bidrl.com": mux}),
+		Engine: browser.NewFake(map[string]http.Handler{
+			"www.bidrl.com": bidrl.FakeSite(),
+			"bidrl.com":     bidrl.FakeSite(),
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +148,7 @@ routes:
 	}
 	waitJob := func(id int64) {
 		t.Helper()
-		deadline := time.Now().Add(8 * time.Second)
+		deadline := time.Now().Add(15 * time.Second)
 		var last *jobs.Job
 		for time.Now().Before(deadline) {
 			j, err := q.Get(ctx, id)
@@ -304,6 +273,71 @@ routes:
 	}
 	if len(all.Lots) != 3 {
 		t.Fatalf("all lots %+v", all.Lots)
+	}
+
+	searchBody, _ := json.Marshal(map[string]string{"query": "keurig", "scope": "prefer"})
+	rec = serve(http.MethodPost, "/api/plugins/bidrl/search", searchBody)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("search: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var searched struct {
+		JobID    int64  `json:"jobId"`
+		SearchID string `json:"searchId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &searched); err != nil || searched.JobID == 0 {
+		t.Fatalf("search body %s", rec.Body.Bytes())
+	}
+	waitJob(searched.JobID)
+
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/search", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get search: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var results struct {
+		Hits []struct {
+			LotID     string `json:"lotId"`
+			AuctionID string `json:"auctionId"`
+			Preferred bool   `json:"preferred"`
+			Collected bool   `json:"collected"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results.Hits) < 2 {
+		t.Fatalf("keurig hits %+v", results.Hits)
+	}
+	if results.Hits[0].LotID != "1001" || !results.Hits[0].Preferred || !results.Hits[0].Collected {
+		t.Fatalf("SITES keurig should rank first: %+v", results.Hits)
+	}
+	var sawOther bool
+	for _, h := range results.Hits {
+		if h.LotID == "9001" {
+			sawOther = true
+			if h.Preferred {
+				t.Fatalf("non-SITES lot marked preferred: %+v", h)
+			}
+		}
+	}
+	if !sawOther {
+		t.Fatalf("expected the non-SITES keurig in prefer-scope hits: %+v", results.Hits)
+	}
+
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/sites/auctions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sites: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var sites struct {
+		Auctions []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"auctions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sites); err != nil {
+		t.Fatal(err)
+	}
+	if len(sites.Auctions) != 1 || sites.Auctions[0].ID != "42" {
+		t.Fatalf("SITES auctions %+v", sites.Auctions)
 	}
 
 	rec = serve(http.MethodDelete, "/api/plugins/bidrl/auctions/42", nil)

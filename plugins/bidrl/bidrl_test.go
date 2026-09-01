@@ -113,7 +113,7 @@ func TestPluginContract(t *testing.T) {
 		t.Fatalf("manifest = %#v, want non-automated %q", m, pluginID)
 	}
 	jobs := p.Jobs()
-	if len(jobs) != 4 {
+	if len(jobs) != 6 {
 		t.Fatalf("jobs = %d", len(jobs))
 	}
 	for _, j := range jobs {
@@ -121,7 +121,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 9 {
+	if len(p.Routes()) != 13 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -131,7 +131,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 1 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
+	if len(mig.migrations) != 2 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -201,6 +201,9 @@ func TestParseItemsJSON(t *testing.T) {
 	if got.BidCents == nil || *got.BidCents != 4625 {
 		t.Fatalf("BidCents = %v, want 4625", got.BidCents)
 	}
+	if got.AuctionID != "191464" {
+		t.Fatalf("AuctionID = %q", got.AuctionID)
+	}
 	want := []string{
 		"https://d3ugkdpeq35ojy.cloudfront.net/auctionimages/191464/a.jpg",
 		"https://d3ugkdpeq35ojy.cloudfront.net/auctionimages/191464/b.jpg",
@@ -257,5 +260,119 @@ func TestIsGetItemsURL(t *testing.T) {
 		if isGetItemsURL(raw) {
 			t.Fatalf("isGetItemsURL(%q) = true, want false", raw)
 		}
+	}
+}
+
+func TestExpandQuery(t *testing.T) {
+	t.Parallel()
+	got := expandQuery("Keurig K-Supreme Plus")
+	if len(got) == 0 || got[0] != "Keurig K-Supreme Plus" {
+		t.Fatalf("expandQuery = %#v", got)
+	}
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "K-Supreme") {
+		t.Fatalf("expected a model-token variant in %#v", got)
+	}
+	if len(expandQuery("office chair")) != 1 {
+		t.Fatalf("generic two-word query should stay one variant, got %#v", expandQuery("office chair"))
+	}
+	if expandQuery("   ") != nil {
+		t.Fatal("empty query")
+	}
+}
+
+func TestMatchScorePrefersIdentification(t *testing.T) {
+	t.Parallel()
+	titleOnly, _ := matchScore("herman miller aeron", "Office mesh task chair", "", "")
+	photos, reason := matchScore("herman miller aeron", "Office mesh task chair", "Herman Miller Aeron", "")
+	if photos <= titleOnly {
+		t.Fatalf("identification should outrank a mismatched title: title=%v photos=%v %s", titleOnly, photos, reason)
+	}
+	if !strings.Contains(reason, "photos") {
+		t.Fatalf("reason = %q", reason)
+	}
+	model, mReason := matchScore("K-Supreme", "Keurig K-Supreme Plus Coffee Maker", "", "K-Supreme Plus")
+	if model < 3 {
+		t.Fatalf("model score = %v (%s)", model, mReason)
+	}
+}
+
+func TestAffiliateIDFromSlug(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"turlock-19":                 "19",
+		"now-bidding-sacramento-72":  "72",
+		"galt-the-deal-finder-app-7": "7",
+		"19":                         "19",
+		"https://evil":               "",
+	}
+	for in, want := range tests {
+		if got := affiliateIDFromSlug(in); got != want {
+			t.Fatalf("affiliateIDFromSlug(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseHomeAffiliates(t *testing.T) {
+	t.Parallel()
+	raw := `[{"company_name":"Turlock","landing_page_slug":"turlock-19","do_not_display_tab":"0"},
+		{"company_name":"Hidden","landing_page_slug":"hidden-1","do_not_display_tab":"1"},
+		{"company_name":"Nope","landing_page_slug":"https://evil.test","do_not_display_tab":"0"}]`
+	got := parseHomeAffiliates([]byte(raw))
+	if len(got) != 1 || got[0].Slug != "turlock-19" || got[0].Name != "Turlock" {
+		t.Fatalf("%#v", got)
+	}
+}
+
+func TestParseLandingPage(t *testing.T) {
+	t.Parallel()
+	raw := `{
+		"result":"success",
+		"affiliate":{"affiliate_id":"19","aff_company_name":"Turlock","aff_city":"Turlock","landing_page_slug":"turlock-19"},
+		"auctions":{
+			"3":{"id":"42","title":"Test Warehouse Auction","auction_id_slug":"test-warehouse-42","item_count":"3","city":"Turlock","auction_group_type":"1","ends":"2026-09-01T19:00:00Z"},
+			"4":{"id":"99","title":"Info only","auction_group_type":"8","item_count":"0"}
+		}
+	}`
+	got, ok := parseLandingPage("turlock-19", []byte(raw))
+	if !ok {
+		t.Fatal("parseLandingPage rejected a well-formed page")
+	}
+	if got.Affiliate.Name != "Turlock" {
+		t.Fatalf("affiliate = %#v", got.Affiliate)
+	}
+	if len(got.Auctions) != 1 || got.Auctions[0].ID != "42" {
+		t.Fatalf("auctions = %#v", got.Auctions)
+	}
+	if got.Auctions[0].URL != "https://www.bidrl.com/auction/test-warehouse-42/bidgallery" {
+		t.Fatalf("url = %q", got.Auctions[0].URL)
+	}
+}
+
+func TestAllitemsURL(t *testing.T) {
+	t.Parallel()
+	got := allitemsURL("Keurig K-Supreme", 1, 100)
+	if got != "https://www.bidrl.com/allitems/keyword_Keurig%20K-Supreme/perpage_100/page_1/" {
+		t.Fatalf("allitemsURL = %q", got)
+	}
+}
+
+func TestMergeHitsRanksSITESFirst(t *testing.T) {
+	t.Parallel()
+	preferred := map[string]landingAuction{"42": {ID: "42", Affiliate: "19", Name: "Turlock", Title: "Warehouse"}}
+	live := []parsedLot{
+		{URL: "https://www.bidrl.com/auction/99/item/keurig-mini-9001", Title: "Keurig Mini", AuctionID: "99"},
+		{URL: "https://www.bidrl.com/auction/42/item/keurig-k-supreme-plus-1001", Title: "Keurig K-Supreme Plus", AuctionID: "42"},
+	}
+	hits := mergeHits("keurig", pluginConfig{SearchScope: scopePrefer}, nil, live, preferred)
+	if len(hits) != 2 {
+		t.Fatalf("hits = %#v", hits)
+	}
+	if !hits[0].Preferred || hits[0].AuctionID != "42" {
+		t.Fatalf("SITES lot should rank first: %#v", hits)
+	}
+	only := mergeHits("keurig", pluginConfig{SearchScope: scopeOnly}, nil, live, preferred)
+	if len(only) != 1 || only[0].AuctionID != "42" {
+		t.Fatalf("only scope = %#v", only)
 	}
 }
