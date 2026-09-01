@@ -1,0 +1,152 @@
+.bidrl-locations {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.bidrl-location {
+  border-top: 1px solid var(--border);
+}
+
+.bidrl-location:first-child {
+  border-top: 0;
+}
+
+.bidrl-location > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  cursor: pointer;
+  color: var(--text);
+  list-style: none;
+}
+
+.bidrl-location > summary::-webkit-details-marker {
+  display: none;
+}
+
+.bidrl-location > summary:hover {
+  color: var(--accent);
+}
+
+.bidrl-location__name {
+  font-weight: 600;
+}
+
+.bidrl-location__meta {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bidrl-location__body {
+  padding: 0 0 var(--space-4);
+}
+
+.bidrl-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.bidrl-actions > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.bidrl-actions > a:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+.bidrl-lot-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+}
+
+.bidrl-lot-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+
+.bidrl-lot-card__img,
+.bidrl-lot-card__img-empty {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.bidrl-lot-card__img-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.bidrl-lot-card__title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.bidrl-lot-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bidrl-lot-card > .cc-button {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.bidrl-similar {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.bidrl-similar__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 13px;
+}
+
+.bidrl-similar__row a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+tr.bidrl-similar-row td:first-child {
+  padding-left: var(--space-6);
+}
+
+@media (max-width: 640px) {
+  .bidrl-location > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+}

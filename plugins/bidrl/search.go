@@ -63,16 +63,18 @@ func (p *Plugin) searchJob(jc hostjobs.Context) error {
 	if err := p.markSearch(jc, h, args.SearchID, q, cfg.SearchScope, "running", 0, "", now); err != nil {
 		return err
 	}
+	fail := func(err error) error {
+		return p.failSearch(jc, h, args.SearchID, q, cfg.SearchScope, now, err)
+	}
 
 	sess, err := h.Browser().Open(jc, hostbrowser.OpenOptions{AllowedHosts: allowedHosts})
 	if err != nil {
-		_ = p.markSearch(jc, h, args.SearchID, q, cfg.SearchScope, "failed", 0, err.Error(), now)
-		return err
+		return fail(err)
 	}
 	defer sess.Close(jc)
 	page, err := sess.NewPage(jc)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	defer page.Close(jc)
 
@@ -82,7 +84,7 @@ func (p *Plugin) searchJob(jc hostjobs.Context) error {
 	}
 	preferred, err := p.preferredAuctionIDs(jc, h)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 
 	variants := expandQuery(q)
@@ -91,7 +93,7 @@ func (p *Plugin) searchJob(jc hostjobs.Context) error {
 	_ = jc.Progress(0.35, "matching collected lots")
 	local, err := p.searchLocal(jc, h, q, preferred)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 
 	_ = jc.Progress(0.5, "searching open auctions")
@@ -102,8 +104,7 @@ func (p *Plugin) searchJob(jc hostjobs.Context) error {
 
 	hits := mergeHits(q, cfg, local, live, preferred)
 	if err := p.storeHits(jc, h, args.SearchID, hits); err != nil {
-		_ = p.markSearch(jc, h, args.SearchID, q, cfg.SearchScope, "failed", 0, err.Error(), now)
-		return err
+		return fail(err)
 	}
 	if err := h.Events().Publish(jc, "search.completed", args.SearchID, map[string]any{
 		"query": q, "scope": cfg.SearchScope, "hits": len(hits),
@@ -127,7 +128,7 @@ func (p *Plugin) searchLocal(jc hostjobs.Context, h host.Host, query string, pre
 	var out []searchHit
 	for rows.Next() {
 		var (
-			hit                                                searchHit
+			hit                                                  searchHit
 			ident, model, category, terms, notes, affID, affName string
 		)
 		if err := rows.Scan(&hit.LotID, &hit.AuctionID, &hit.URL, &hit.LotCode, &hit.Title, &hit.BidCents,
@@ -278,6 +279,14 @@ func mergeHits(query string, cfg pluginConfig, local []searchHit, live []parsedL
 		out = out[:maxSearchHits]
 	}
 	return out
+}
+
+func (p *Plugin) failSearch(ctx context.Context, h host.Host, id, query, scope, now string, err error) error {
+	_ = p.markSearch(ctx, h, id, query, scope, "failed", 0, err.Error(), now)
+	_ = h.Events().Publish(ctx, "search.completed", id, map[string]any{
+		"query": query, "scope": scope, "hits": 0, "error": err.Error(),
+	})
+	return err
 }
 
 func (p *Plugin) markSearch(ctx context.Context, h host.Host, id, query, scope, status string, hits int, lastErr, now string) error {

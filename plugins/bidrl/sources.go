@@ -2,29 +2,61 @@ package bidrl
 
 import (
 	"net/url"
+	"sort"
 	"strings"
 
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
 )
 
-// priceTiers are searched in order: eBay sold comps, then retail stickers, then
-// other resale marketplaces, then the open web.
+// priceTiers are the preference order after a single search: eBay sold comps,
+// then retail stickers, then other resale, then the open web.
 type priceTier struct {
-	class   string
-	label   string
-	query   string
-	domains []string
+	class string
+	label string
 }
 
 var priceTiers = []priceTier{
-	{class: "ebay", label: "eBay", query: "site:ebay.com sold", domains: []string{"ebay.com", "ebay.ca", "ebay.co.uk"}},
-	{class: "retail", label: "retail", query: "price", domains: []string{
-		"amazon.com", "amazon.ca", "walmart.com", "target.com", "homedepot.com", "lowes.com", "bestbuy.com", "costco.com",
-	}},
-	{class: "marketplace", label: "marketplace", query: "used sold", domains: []string{
-		"mercari.com", "offerup.com", "craigslist.org", "facebook.com", "poshmark.com", "shopgoodwill.com",
-	}},
-	{class: "web", label: "web", query: "used price USD", domains: nil},
+	{class: "ebay", label: "eBay"},
+	{class: "retail", label: "retail"},
+	{class: "marketplace", label: "marketplace"},
+	{class: "web", label: "web"},
+}
+
+func tierFromClass(class string) priceTier {
+	for _, t := range priceTiers {
+		if t.class == class {
+			return t
+		}
+	}
+	return priceTier{class: "web", label: "web"}
+}
+
+func classRank(class string) int {
+	for i, t := range priceTiers {
+		if t.class == class {
+			return i
+		}
+	}
+	return len(priceTiers)
+}
+
+func rankUsableHits(hits []hostsearch.Hit, model string) []hostsearch.Hit {
+	usable := usableHits(hits, model)
+	if len(usable) == 0 {
+		return nil
+	}
+	sort.SliceStable(usable, func(i, j int) bool {
+		return classRank(classifySource(usable[i].URL).Class) < classRank(classifySource(usable[j].URL).Class)
+	})
+	best := classRank(classifySource(usable[0].URL).Class)
+	var out []hostsearch.Hit
+	for _, hit := range usable {
+		if classRank(classifySource(hit.URL).Class) != best {
+			break
+		}
+		out = append(out, hit)
+	}
+	return out
 }
 
 type sourceInfo struct {

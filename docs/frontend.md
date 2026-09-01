@@ -190,6 +190,8 @@ the already-open shared stream before sending the REST request, installs the sna
 then applies buffered events strictly above `asOfEventId`. It never opens another stream.
 If reset occurs, the shell pauses delivery, reloads bootstrap and each mounted snapshot
 through its registered loader, and opens one stream after the new bootstrap boundary.
+`useSnapshot` also reloads when the loader function identity changes, so a memoized
+loader that closes over a filter or resource id actually fetches that new query.
 Job progress/log and notification lifecycle events are invalidations; clients refetch the
 affected resource rather than reconstructing it from partial event payloads.
 

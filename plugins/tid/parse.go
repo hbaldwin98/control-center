@@ -15,9 +15,11 @@ import (
 
 // Reading is one calendar day of usage in America/Los_Angeles.
 type Reading struct {
-	Day       string
-	KWh       float64
-	CostCents *int64
+	Day        string
+	KWh        float64
+	CostCents  *int64
+	OnPeakKWh  *float64
+	OffPeakKWh *float64
 }
 
 var (
@@ -213,12 +215,28 @@ func readingFromMap(m map[string]any) (Reading, bool) {
 	var kwh float64
 	var kwhOK bool
 	var cents *int64
+	for _, key := range []string{"costDate", "periodStartDate", "date", "day", "period", "timestamp"} {
+		if value, ok := m[key]; ok {
+			day = parseDay(fmt.Sprint(value))
+			if day != "" {
+				break
+			}
+		}
+	}
+	for _, key := range []string{"usage", "dailyUsage", "kwh", "consumption", "value"} {
+		if value, ok := m[key]; ok {
+			kwh, kwhOK = jsonNumber(value)
+			if kwhOK {
+				break
+			}
+		}
+	}
 	for k, v := range m {
 		lk := strings.ToLower(k)
 		switch {
 		case day == "" && (strings.Contains(lk, "date") || lk == "day" || lk == "period" || lk == "timestamp"):
 			day = parseDay(fmt.Sprint(v))
-		case !kwhOK && (lk == "usage" || lk == "dailyusage" || strings.Contains(lk, "kwh") || lk == "consumption" || lk == "value"):
+		case !kwhOK && lk != "onpeakkwh" && lk != "offpeakkwh" && (lk == "usage" || lk == "dailyusage" || strings.Contains(lk, "kwh") || lk == "consumption" || lk == "value"):
 			kwh, kwhOK = jsonNumber(v)
 		case cents == nil && strings.Contains(lk, "cent"):
 			if n, ok := jsonNumber(v); ok {
@@ -235,7 +253,14 @@ func readingFromMap(m map[string]any) (Reading, bool) {
 	if day == "" || !kwhOK {
 		return Reading{}, false
 	}
-	return Reading{Day: day, KWh: kwh, CostCents: cents}, true
+	reading := Reading{Day: day, KWh: kwh, CostCents: cents}
+	if value, ok := jsonNumber(m["onPeakKwh"]); ok {
+		reading.OnPeakKWh = &value
+	}
+	if value, ok := jsonNumber(m["offPeakKwh"]); ok {
+		reading.OffPeakKWh = &value
+	}
+	return reading, true
 }
 
 func jsonNumber(v any) (float64, bool) {
@@ -408,8 +433,10 @@ func cell(row []string, i int) string {
 
 func mergeDays(in []Reading) []Reading {
 	type acc struct {
-		kwh   float64
-		cents *int64
+		kwh     float64
+		cents   *int64
+		onPeak  *float64
+		offPeak *float64
 	}
 	order := make([]string, 0, len(in))
 	seen := map[string]*acc{}
@@ -432,11 +459,25 @@ func mergeDays(in []Reading) []Reading {
 				*a.cents += *r.CostCents
 			}
 		}
+		addFloat(&a.onPeak, r.OnPeakKWh)
+		addFloat(&a.offPeak, r.OffPeakKWh)
 	}
 	out := make([]Reading, 0, len(order))
 	for _, day := range order {
 		a := seen[day]
-		out = append(out, Reading{Day: day, KWh: a.kwh, CostCents: a.cents})
+		out = append(out, Reading{Day: day, KWh: a.kwh, CostCents: a.cents, OnPeakKWh: a.onPeak, OffPeakKWh: a.offPeak})
 	}
 	return out
+}
+
+func addFloat(total **float64, value *float64) {
+	if value == nil {
+		return
+	}
+	if *total == nil {
+		v := *value
+		*total = &v
+		return
+	}
+	**total += *value
 }

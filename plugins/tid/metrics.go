@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math"
 	"time"
 
 	"github.com/hbaldwin98/control-center/host"
@@ -22,7 +21,6 @@ func (p *Plugin) summary(ctx context.Context, h host.Host, cfg settings, now tim
 	lastMonthStart := time.Date(today.Year(), today.Month()-1, 1, 0, 0, 0, 0, loc).Format("2006-01-02")
 	lastYearStart := time.Date(today.Year()-1, today.Month(), 1, 0, 0, 0, 0, loc).Format("2006-01-02")
 	lastYearEnd := time.Date(today.Year()-1, today.Month()+1, 1, 0, 0, 0, 0, loc).Format("2006-01-02")
-	ago7 := today.AddDate(0, 0, -6).Format("2006-01-02")
 	ago30 := today.AddDate(0, 0, -29).Format("2006-01-02")
 	todayISO := today.Format("2006-01-02")
 
@@ -33,6 +31,10 @@ func (p *Plugin) summary(ctx context.Context, h host.Host, cfg settings, now tim
 		return out, err
 	}
 	out.LastMonthKWh, err = sumKWh(ctx, h, lastMonthStart, monthStart)
+	if err != nil {
+		return out, err
+	}
+	out.LastBillingPeriodFrom, out.LastBillingPeriodTo, out.LastBillingPeriodKWh, err = latestBillingPeriodTotal(ctx, h)
 	if err != nil {
 		return out, err
 	}
@@ -47,7 +49,6 @@ func (p *Plugin) summary(ctx context.Context, h host.Host, cfg settings, now tim
 	}
 	out.Days = days
 	out.Spark = sparkFrom(days, ago30, todayISO)
-	out.Avg7 = avgFrom(days, ago7)
 	out.PeakDay, out.PeakKWh = peakFrom(days)
 	out.EstCostCents = estimateCost(out.MonthKWh, days, monthStart, nextMonth, cfg.CentsPerKWh)
 
@@ -61,6 +62,25 @@ func (p *Plugin) summary(ctx context.Context, h host.Host, cfg settings, now tim
 	}
 	out.LatestEvent = latestEventID(out.Insight, out.LastSync)
 	return out, nil
+}
+
+func latestBillingPeriodTotal(ctx context.Context, h host.Host) (string, string, float64, error) {
+	var from, to string
+	var total sql.NullFloat64
+	err := h.Store().QueryRow(ctx, `
+		SELECT p.period_start, p.period_end, SUM(r.kwh)
+		  FROM tid_billing_periods p
+		  LEFT JOIN tid_period_readings r
+		    ON r.period_start = p.period_start AND r.period_end = p.period_end
+		 GROUP BY p.period_start, p.period_end
+		 ORDER BY p.period_start DESC LIMIT 1`).Scan(&from, &to, &total)
+	if isNoRows(err) {
+		return "", "", 0, nil
+	}
+	if err != nil {
+		return "", "", 0, err
+	}
+	return parseDay(from), parseDay(to), total.Float64, nil
 }
 
 func sumKWh(ctx context.Context, h host.Host, from, to string) (float64, error) {
@@ -78,7 +98,7 @@ func sumKWh(ctx context.Context, h host.Host, from, to string) (float64, error) 
 
 func listDays(ctx context.Context, h host.Host, from, to string) ([]dayView, error) {
 	rows, err := h.Store().Query(ctx, `
-		SELECT day, kwh, cost_cents FROM tid_readings
+		SELECT day, kwh, cost_cents, on_peak_kwh, off_peak_kwh FROM tid_readings
 		 WHERE day >= ? AND day <= ?
 		 ORDER BY day DESC`, from, to)
 	if err != nil {
@@ -88,12 +108,100 @@ func listDays(ctx context.Context, h host.Host, from, to string) ([]dayView, err
 	out := []dayView{}
 	for rows.Next() {
 		var d dayView
-		if err := rows.Scan(&d.Day, &d.KWh, &d.CostCents); err != nil {
+		if err := rows.Scan(&d.Day, &d.KWh, &d.CostCents, &d.OnPeakKWh, &d.OffPeakKWh); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+func (p *Plugin) history(ctx context.Context, h host.Host, limit int) (historyPage, error) {
+	if limit < 1 || limit > 24 {
+		limit = 24
+	}
+	rows, err := h.Store().Query(ctx, `
+		SELECT period_start, period_end, peak_demand_date, peak_demand_kw
+		  FROM tid_billing_periods ORDER BY period_start DESC LIMIT ?`, limit)
+	if err != nil {
+		return historyPage{}, err
+	}
+	type periodRow struct {
+		start, end string
+		peakDate   sql.NullString
+		peakKW     *float64
+	}
+	var stored []periodRow
+	for rows.Next() {
+		var period periodRow
+		if err := rows.Scan(&period.start, &period.end, &period.peakDate, &period.peakKW); err != nil {
+			rows.Close()
+			return historyPage{}, err
+		}
+		stored = append(stored, period)
+	}
+	if err := rows.Close(); err != nil {
+		return historyPage{}, err
+	}
+	out := historyPage{Periods: []billingPeriodView{}}
+	for _, storedPeriod := range stored {
+		period := billingPeriodView{
+			Start: parseDay(storedPeriod.start), End: parseDay(storedPeriod.end),
+			PeakDemandDate: storedPeriod.peakDate.String, PeakDemandKW: storedPeriod.peakKW,
+			Days: []dayView{},
+		}
+		dayRows, err := h.Store().Query(ctx, `
+			SELECT day, kwh, cost_cents, on_peak_kwh, off_peak_kwh
+			  FROM tid_period_readings
+			 WHERE period_start = ? AND period_end = ? ORDER BY day DESC`, storedPeriod.start, storedPeriod.end)
+		if err != nil {
+			return historyPage{}, err
+		}
+		var totalCost int64
+		var hasCost bool
+		var onPeak, offPeak float64
+		var hasOnPeak, hasOffPeak bool
+		for dayRows.Next() {
+			var day dayView
+			if err := dayRows.Scan(&day.Day, &day.KWh, &day.CostCents, &day.OnPeakKWh, &day.OffPeakKWh); err != nil {
+				dayRows.Close()
+				return historyPage{}, err
+			}
+			period.TotalKWh += day.KWh
+			if day.CostCents != nil {
+				totalCost += *day.CostCents
+				hasCost = true
+			}
+			if day.OnPeakKWh != nil {
+				onPeak += *day.OnPeakKWh
+				hasOnPeak = true
+			}
+			if day.OffPeakKWh != nil {
+				offPeak += *day.OffPeakKWh
+				hasOffPeak = true
+			}
+			period.Days = append(period.Days, day)
+		}
+		if err := dayRows.Close(); err != nil {
+			return historyPage{}, err
+		}
+		if hasCost {
+			period.TotalCostCents = &totalCost
+		}
+		if hasOnPeak {
+			period.OnPeakKWh = &onPeak
+		}
+		if hasOffPeak {
+			period.OffPeakKWh = &offPeak
+		}
+		out.Periods = append(out.Periods, period)
+	}
+	lastSync, err := latestSync(ctx, h)
+	if err != nil {
+		return historyPage{}, err
+	}
+	out.LatestEvent = latestEventID(nil, lastSync)
+	return out, nil
 }
 
 func sparkFrom(days []dayView, from, to string) []float64 {
@@ -114,21 +222,6 @@ func sparkFrom(days []dayView, from, to string) []float64 {
 		spark = append(spark, by[t.Format("2006-01-02")])
 	}
 	return spark
-}
-
-func avgFrom(days []dayView, from string) float64 {
-	var sum float64
-	var n int
-	for _, d := range days {
-		if d.Day >= from {
-			sum += d.KWh
-			n++
-		}
-	}
-	if n == 0 {
-		return 0
-	}
-	return math.Round(sum/float64(n)*10) / 10
 }
 
 func peakFrom(days []dayView) (string, float64) {

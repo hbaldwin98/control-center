@@ -65,6 +65,8 @@ func fakeAnalysis(prompt string) (string, json.RawMessage, []Citation, []Source)
 		"identification":  title,
 		"basis":           "category_only",
 		"model_or_sku":    "",
+		"category":        "other",
+		"search_terms":    []string{},
 		"title_agreement": 0.9,
 		"notes":           "fake analysis",
 	}
@@ -73,14 +75,20 @@ func fakeAnalysis(prompt string) (string, json.RawMessage, []Citation, []Source)
 		out["identification"] = "Keurig K-Supreme Plus"
 		out["basis"] = "exact_text"
 		out["model_or_sku"] = "K-Supreme Plus"
+		out["category"] = "appliances"
+		out["search_terms"] = []string{"keurig", "coffee maker"}
 		out["title_agreement"] = 0.85
 		out["notes"] = "Model number is legible on the machine."
 	case strings.Contains(strings.ToLower(title), "aeron"):
 		out["identification"] = "Herman Miller Aeron-like mesh chair"
 		out["basis"] = "distinctive_visual_match"
 		out["model_or_sku"] = ""
+		out["category"] = "furniture"
+		out["search_terms"] = []string{"herman miller", "aeron"}
 		out["title_agreement"] = 0.2
 		out["notes"] = "Looks like an Aeron; no model plate readable."
+	case strings.Contains(strings.ToLower(title), "chair"):
+		out["category"] = "furniture"
 	}
 	raw, _ := json.Marshal(out)
 	return string(raw), raw, nil, nil

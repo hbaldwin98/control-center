@@ -74,12 +74,12 @@ func (p *Plugin) repriceJob(jc hostjobs.Context) error {
 	if err != nil {
 		return err
 	}
-	basis, model, ident, err := p.latestAnalysis(jc, h, lot.ID)
+	basis, model, ident, notes, err := p.latestAnalysis(jc, h, lot.ID)
 	if err != nil {
 		return err
 	}
 	_ = jc.Logf("repricing lot %s (%s)", lot.ID, model)
-	return p.priceLot(jc, h, lot, basis, model, ident)
+	return p.priceLot(jc, h, lot, basis, model, ident, notes, "", true)
 }
 
 func (p *Plugin) refreshJob(jc hostjobs.Context) error {
@@ -259,13 +259,13 @@ func (p *Plugin) loadLot(jc hostjobs.Context, h host.Host, id string) (lotRow, e
 	return lot, nil
 }
 
-func (p *Plugin) latestAnalysis(jc hostjobs.Context, h host.Host, lotID string) (basis, model, ident string, err error) {
-	err = h.Store().QueryRow(jc, `SELECT basis, model_or_sku, identification FROM bidrl_analyses WHERE lot_id = ? ORDER BY id DESC LIMIT 1`, lotID).
-		Scan(&basis, &model, &ident)
+func (p *Plugin) latestAnalysis(jc hostjobs.Context, h host.Host, lotID string) (basis, model, ident, notes string, err error) {
+	err = h.Store().QueryRow(jc, `SELECT basis, model_or_sku, identification, IFNULL(notes,'') FROM bidrl_analyses WHERE lot_id = ? ORDER BY id DESC LIMIT 1`, lotID).
+		Scan(&basis, &model, &ident, &notes)
 	if err != nil {
-		return "", "", "", hostjobs.Permanent(fmt.Errorf("bidrl: lot %s has no analysis; scan first", lotID))
+		return "", "", "", "", hostjobs.Permanent(fmt.Errorf("bidrl: lot %s has no analysis; scan first", lotID))
 	}
-	return basis, model, ident, nil
+	return basis, model, ident, notes, nil
 }
 
 func (p *Plugin) onEvent(ctx context.Context, tx hoststorage.Tx, e hostevents.Event) error {

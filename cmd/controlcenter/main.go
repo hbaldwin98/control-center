@@ -238,7 +238,7 @@ func newSearchEngine(cfg config.Config) (search.Engine, error) {
 	switch strings.ToLower(cfg.Search.Engine) {
 	case "searxng":
 		slog.Info("search engine searxng", "url", cfg.Search.SearXNG.URL)
-		return search.SearXNG{BaseURL: cfg.Search.SearXNG.URL}, nil
+		return search.Pace(search.SearXNG{BaseURL: cfg.Search.SearXNG.URL}, 0), nil
 	default:
 		slog.Info("search engine fake")
 		return search.Fake{}, nil

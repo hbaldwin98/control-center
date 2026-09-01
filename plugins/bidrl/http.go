@@ -1,6 +1,7 @@
 package bidrl
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,14 +16,16 @@ import (
 )
 
 type auctionView struct {
-	ID          string `json:"id"`
-	URL         string `json:"url"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	LotCount    int    `json:"lotCount"`
-	LastError   string `json:"lastError"`
-	CollectedAt string `json:"collectedAt"`
-	EndsAt      string `json:"endsAt"`
+	ID            string `json:"id"`
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	Status        string `json:"status"`
+	LotCount      int    `json:"lotCount"`
+	LastError     string `json:"lastError"`
+	CollectedAt   string `json:"collectedAt"`
+	EndsAt        string `json:"endsAt"`
+	AffiliateName string `json:"affiliateName"`
+	City          string `json:"city"`
 }
 
 type lotView struct {
@@ -54,6 +57,7 @@ type lotView struct {
 	SourceTitle     string   `json:"sourceTitle"`
 	SourceClass     string   `json:"sourceClass"`
 	SourceLabel     string   `json:"sourceLabel"`
+	ReusedFromLotID string   `json:"reusedFromLotId"`
 	RetrievedAt     string   `json:"retrievedAt"`
 	DealScore       *float64 `json:"dealScore"`
 	ThumbURL        string   `json:"thumbUrl"`
@@ -89,7 +93,11 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
-	rows, err := h.Store().Query(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at FROM bidrl_auctions ORDER BY created_at DESC`)
+	rows, err := h.Store().Query(r.Context(), `SELECT a.id, a.url, a.title, a.status, a.lot_count, a.last_error, a.collected_at, a.ends_at,
+		IFNULL(s.affiliate_name,''), IFNULL(s.city,'')
+		FROM bidrl_auctions a
+		LEFT JOIN bidrl_affiliate_auctions s ON s.id = a.id
+		ORDER BY a.created_at DESC`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
@@ -98,7 +106,7 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 	out := []auctionView{}
 	for rows.Next() {
 		var a auctionView
-		if err := rows.Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt, &a.AffiliateName, &a.City); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
@@ -115,8 +123,12 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	var a auctionView
-	if err := h.Store().QueryRow(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at FROM bidrl_auctions WHERE id = ?`, id).
-		Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt); err != nil {
+	if err := h.Store().QueryRow(r.Context(), `SELECT a.id, a.url, a.title, a.status, a.lot_count, a.last_error, a.collected_at, a.ends_at,
+		IFNULL(s.affiliate_name,''), IFNULL(s.city,'')
+		FROM bidrl_auctions a
+		LEFT JOIN bidrl_affiliate_auctions s ON s.id = a.id
+		WHERE a.id = ?`, id).
+		Scan(&a.ID, &a.URL, &a.Title, &a.Status, &a.LotCount, &a.LastError, &a.CollectedAt, &a.EndsAt, &a.AffiliateName, &a.City); err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "auction not found")
 		return
 	}
@@ -135,57 +147,233 @@ func (p *Plugin) handleDeleteAuction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if err := p.deleteAuction(r, h, id); err != nil {
+	if err := p.deleteAuction(r.Context(), h, id); err != nil {
 		writeHostErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (p *Plugin) deleteAuction(r *http.Request, h host.Host, id string) error {
-	keys := []string{}
-	rows, err := h.Store().Query(r.Context(), `SELECT i.blob_key FROM bidrl_images i JOIN bidrl_lots l ON l.id = i.lot_id WHERE l.auction_id = ?`, id)
-	if err != nil {
-		return err
+type cleanupResult struct {
+	Auctions int `json:"auctions"`
+	Lots     int `json:"lots"`
+	Sites    int `json:"sites"`
+}
+
+func (p *Plugin) handleCleanupExpired(w http.ResponseWriter, r *http.Request) {
+	h, ok := p.host()
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
+		return
 	}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			_ = rows.Close()
-			return err
+	result, err := p.cleanupExpired(r.Context(), h)
+	if err != nil {
+		writeHostErr(w, err)
+		return
+	}
+	if err := h.Events().Publish(r.Context(), "expired.cleaned", "expired", map[string]any{
+		"auctions": result.Auctions, "lots": result.Lots, "sites": result.Sites,
+	}); err != nil {
+		writeHostErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (p *Plugin) cleanupExpired(ctx context.Context, h host.Host) (cleanupResult, error) {
+	now := h.Clock().Now()
+	var result cleanupResult
+
+	auctions, err := p.loadCleanupAuctions(ctx, h)
+	if err != nil {
+		return result, err
+	}
+	for _, a := range auctions {
+		lotEnds := make([]string, 0, len(a.Lots))
+		for _, lot := range a.Lots {
+			lotEnds = append(lotEnds, lot.EndsAt)
 		}
-		keys = append(keys, key)
+		if auctionEnded(a.EndsAt, lotEnds, now) {
+			if err := p.deleteAuction(ctx, h, a.ID); err != nil {
+				return result, err
+			}
+			result.Auctions++
+			continue
+		}
+		for _, lot := range a.Lots {
+			if !hasEnded(lot.EndsAt, now) {
+				continue
+			}
+			if err := p.deleteLot(ctx, h, a.ID, lot.ID); err != nil {
+				return result, err
+			}
+			result.Lots++
+		}
+	}
+
+	siteRows, err := h.Store().Query(ctx, `SELECT id, ends_at FROM bidrl_affiliate_auctions`)
+	if err != nil {
+		return result, err
+	}
+	var siteIDs []string
+	for siteRows.Next() {
+		var id, ends string
+		if err := siteRows.Scan(&id, &ends); err != nil {
+			_ = siteRows.Close()
+			return result, err
+		}
+		if hasEnded(ends, now) {
+			siteIDs = append(siteIDs, id)
+		}
+	}
+	_ = siteRows.Close()
+	if err := siteRows.Err(); err != nil {
+		return result, err
+	}
+	for _, id := range siteIDs {
+		if _, err := h.Store().Exec(ctx, `DELETE FROM bidrl_affiliate_auctions WHERE id = ?`, id); err != nil {
+			return result, err
+		}
+		result.Sites++
+	}
+	return result, nil
+}
+
+type cleanupAuction struct {
+	ID, EndsAt string
+	Lots       []cleanupLot
+}
+
+type cleanupLot struct {
+	ID, EndsAt string
+}
+
+func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanupAuction, error) {
+	rows, err := h.Store().Query(ctx, `SELECT id, ends_at FROM bidrl_auctions`)
+	if err != nil {
+		return nil, err
+	}
+	var auctions []cleanupAuction
+	for rows.Next() {
+		var a cleanupAuction
+		if err := rows.Scan(&a.ID, &a.EndsAt); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		auctions = append(auctions, a)
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range auctions {
+		lotRows, err := h.Store().Query(ctx, `SELECT id, ends_at FROM bidrl_lots WHERE auction_id = ?`, auctions[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		for lotRows.Next() {
+			var lot cleanupLot
+			if err := lotRows.Scan(&lot.ID, &lot.EndsAt); err != nil {
+				_ = lotRows.Close()
+				return nil, err
+			}
+			auctions[i].Lots = append(auctions[i].Lots, lot)
+		}
+		_ = lotRows.Close()
+		if err := lotRows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return auctions, nil
+}
+
+func (p *Plugin) deleteAuction(ctx context.Context, h host.Host, id string) error {
+	keys, err := p.blobKeys(ctx, h, `SELECT i.blob_key FROM bidrl_images i JOIN bidrl_lots l ON l.id = i.lot_id WHERE l.auction_id = ?`, id)
+	if err != nil {
 		return err
 	}
-	err = h.Store().Tx(r.Context(), func(tx hoststorage.Tx) error {
-		if _, err := tx.Exec(r.Context(), `DELETE FROM bidrl_images WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
+	err = h.Store().Tx(ctx, func(tx hoststorage.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_images WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `DELETE FROM bidrl_analyses WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_analyses WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `DELETE FROM bidrl_valuations WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_valuations WHERE lot_id IN (SELECT id FROM bidrl_lots WHERE auction_id = ?)`, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `DELETE FROM bidrl_rejections WHERE auction_id = ?`, id); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_rejections WHERE auction_id = ?`, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `DELETE FROM bidrl_lots WHERE auction_id = ?`, id); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_search_hits WHERE auction_id = ?`, id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(r.Context(), `DELETE FROM bidrl_auctions WHERE id = ?`, id)
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE auction_id = ?`, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM bidrl_auctions WHERE id = ?`, id)
 		return err
 	})
 	if err != nil {
 		return err
 	}
 	for _, key := range keys {
-		_ = h.Blobs().Delete(r.Context(), key)
+		_ = h.Blobs().Delete(ctx, key)
 	}
 	return nil
+}
+
+func (p *Plugin) deleteLot(ctx context.Context, h host.Host, auctionID, lotID string) error {
+	keys, err := p.blobKeys(ctx, h, `SELECT blob_key FROM bidrl_images WHERE lot_id = ?`, lotID)
+	if err != nil {
+		return err
+	}
+	err = h.Store().Tx(ctx, func(tx hoststorage.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_images WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_analyses WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_valuations WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_rejections WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_search_hits WHERE lot_id = ?`, lotID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bidrl_lots WHERE id = ?`, lotID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE bidrl_auctions SET lot_count = (SELECT COUNT(*) FROM bidrl_lots WHERE auction_id = ?) WHERE id = ?`, auctionID, auctionID)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		_ = h.Blobs().Delete(ctx, key)
+	}
+	return nil
+}
+
+func (p *Plugin) blobKeys(ctx context.Context, h host.Host, q string, args ...any) ([]string, error) {
+	rows, err := h.Store().Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }
 
 func (p *Plugin) handleScan(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +409,7 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		args = append(args, bucket)
 	}
 	if category != "" && category != "all" {
-		where += ` AND l.category = ?`
+		where += ` AND IFNULL(NULLIF(l.category, ''), a.category) = ?`
 		args = append(args, category)
 	}
 	if ending == "soon" {
@@ -232,26 +420,19 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	if q != "" {
+	lots = filterLotsByQuery(lots, q)
+	if ending == "soon" {
+		now := h.Clock().Now()
 		filtered := lots[:0]
 		for _, lot := range lots {
-			score, _ := matchScore(q, lot.Title, lot.Identification, lot.ModelOrSKU, lot.Category, lot.Description)
-			if score > 0 {
+			if endingSoon(lot.EndsAt, now) {
 				filtered = append(filtered, lot)
 			}
 		}
 		lots = filtered
-	}
-	if ending == "soon" {
 		sort.SliceStable(lots, func(i, j int) bool {
 			if lots[i].EndsAt == lots[j].EndsAt {
 				return lots[i].Title < lots[j].Title
-			}
-			if lots[i].EndsAt == "" {
-				return false
-			}
-			if lots[j].EndsAt == "" {
-				return true
 			}
 			return lots[i].EndsAt < lots[j].EndsAt
 		})
@@ -310,6 +491,7 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := r.URL.Query().Get("filter")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	where := "1=1"
 	switch filter {
 	case "deals":
@@ -331,14 +513,30 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"filter": filter, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+	lots = filterLotsByQuery(lots, q)
+	writeJSON(w, http.StatusOK, map[string]any{"filter": filter, "q": q, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+}
+
+func filterLotsByQuery(lots []lotView, q string) []lotView {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return lots
+	}
+	filtered := lots[:0]
+	for _, lot := range lots {
+		score, _ := matchScore(q, lot.Title, lot.Identification, lot.ModelOrSKU, lot.Category, lot.Description)
+		if score > 0 {
+			filtered = append(filtered, lot)
+		}
+	}
+	return filtered
 }
 
 func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...any) ([]lotView, error) {
 	q := `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, IFNULL(l.description,''), l.current_bid_cents, l.min_bid_cents, l.bid_increment_cents,
 		l.bid_count, l.high_bidder, l.ends_at, l.bidding_extended, l.reserve_met, l.category, l.bucket,
 		IFNULL(a.identification,''), IFNULL(a.basis,''), IFNULL(a.model_or_sku,''), IFNULL(a.title_agreement, 0),
-		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''),
+		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''), IFNULL(v.reused_from_lot_id,''),
 		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)
 		FROM bidrl_lots l
 		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
@@ -358,7 +556,7 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 		if err := rows.Scan(&l.ID, &l.AuctionID, &l.URL, &l.LotCode, &l.Title, &l.Description, &l.CurrentBidCents, &l.MinBidCents, &l.IncrementCents,
 			&l.BidCount, &l.HighBidder, &l.EndsAt, &ext, &reserve, &l.Category, &l.Bucket,
 			&l.Identification, &l.Basis, &l.ModelOrSKU, &l.TitleAgreement,
-			&l.PriceCents, &l.PriceKind, &l.SourceURL, &l.CitedText, &l.SourceTitle, &l.RetrievedAt, &thumb); err != nil {
+			&l.PriceCents, &l.PriceKind, &l.SourceURL, &l.CitedText, &l.SourceTitle, &l.RetrievedAt, &l.ReusedFromLotID, &thumb); err != nil {
 			return nil, err
 		}
 		l.BiddingExtended = ext != 0
@@ -429,7 +627,7 @@ func lotPayload(lot lotView, eventID int64) map[string]any {
 		"modelOrSku": lot.ModelOrSKU, "titleAgreement": lot.TitleAgreement, "mislabelScore": lot.MislabelScore,
 		"priceCents": lot.PriceCents, "priceKind": lot.PriceKind, "sourceUrl": lot.SourceURL, "citedText": lot.CitedText,
 		"sourceTitle": lot.SourceTitle, "sourceClass": lot.SourceClass, "sourceLabel": lot.SourceLabel,
-		"retrievedAt": lot.RetrievedAt, "dealScore": lot.DealScore,
+		"reusedFromLotId": lot.ReusedFromLotID, "retrievedAt": lot.RetrievedAt, "dealScore": lot.DealScore,
 		"thumbUrl": lot.ThumbURL, "photoUrls": lot.PhotoURLs, "latestEventId": eventID,
 	}
 }

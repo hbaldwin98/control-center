@@ -154,7 +154,7 @@ func TestPluginContract(t *testing.T) {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 	}
-	if len(p.Routes()) != 15 {
+	if len(p.Routes()) != 16 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -164,7 +164,7 @@ func TestPluginContract(t *testing.T) {
 	if err := p.Migrate(mig); err != nil {
 		t.Fatal(err)
 	}
-	if len(mig.migrations) != 3 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
+	if len(mig.migrations) != 4 || !strings.Contains(mig.migrations[0].Up, "bidrl_lots") {
 		t.Fatalf("migrations = %#v", mig.migrations)
 	}
 	var defaults map[string]any
@@ -477,6 +477,45 @@ func TestMatchScoreUsesCategoryAndAliases(t *testing.T) {
 	}
 }
 
+func TestEndingSoon(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	if endingSoon("", now) {
+		t.Fatal("empty ends_at is not ending soon")
+	}
+	if endingSoon(now.Add(-time.Minute).Format(time.RFC3339Nano), now) {
+		t.Fatal("already ended is not ending soon")
+	}
+	if !endingSoon(now.Add(2*time.Hour).Format(time.RFC3339Nano), now) {
+		t.Fatal("two hours out should be ending soon")
+	}
+	if endingSoon(now.Add(48*time.Hour).Format(time.RFC3339Nano), now) {
+		t.Fatal("two days out is not ending soon")
+	}
+}
+
+func TestAuctionEnded(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour).Format(time.RFC3339Nano)
+	future := now.Add(time.Hour).Format(time.RFC3339Nano)
+	if auctionEnded("", nil, now) {
+		t.Fatal("unknown auction with no lots is not ended")
+	}
+	if auctionEnded("", []string{"", ""}, now) {
+		t.Fatal("lots with no end time are not ended")
+	}
+	if !auctionEnded(past, []string{future}, now) {
+		t.Fatal("auction close in the past ends the auction")
+	}
+	if !auctionEnded("", []string{past, past}, now) {
+		t.Fatal("every dated lot closed should end the auction")
+	}
+	if auctionEnded("", []string{past, future}, now) {
+		t.Fatal("a live lot keeps the auction")
+	}
+}
+
 func TestEvidenceFromRequiresASearchHit(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -524,54 +563,32 @@ func TestClassifySourcePrefersEbay(t *testing.T) {
 func TestLookupComparablesPrefersRetailOverMarketplace(t *testing.T) {
 	t.Parallel()
 	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
-		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "ebay.com" {
-			return []hostsearch.Hit{{
-				URL: "https://www.ebay.com/itm/x", Title: "K-Supreme Plus",
-				Snippet: "K-Supreme Plus listing with no dollar amount.",
-			}}, nil
-		}
-		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "amazon.com" {
-			return []hostsearch.Hit{{
-				URL: "https://www.amazon.com/dp/k-supreme-plus", Title: "Keurig K-Supreme Plus",
-				Snippet: "K-Supreme Plus for $89.",
-			}}, nil
-		}
-		t.Fatalf("should not search marketplaces when retail has a price: %+v", req)
-		return nil, nil
+		return []hostsearch.Hit{
+			{URL: "https://www.ebay.com/itm/x", Title: "K-Supreme Plus", Snippet: "K-Supreme Plus listing with no dollar amount."},
+			{URL: "https://www.mercari.com/k-supreme-plus", Title: "Keurig K-Supreme Plus", Snippet: "K-Supreme Plus for $40 used."},
+			{URL: "https://www.amazon.com/dp/k-supreme-plus", Title: "Keurig K-Supreme Plus", Snippet: "K-Supreme Plus for $89."},
+		}, nil
 	}
 	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
-	if err != nil || tier.class != "retail" || len(hits) != 1 {
+	if err != nil || tier.class != "retail" || len(hits) != 1 || !strings.Contains(hits[0].URL, "amazon.com") {
 		t.Fatalf("tier=%s hits=%+v err=%v", tier.class, hits, err)
 	}
 }
 
 func TestLookupComparablesFallsThroughWhenEbayHasNoPrice(t *testing.T) {
 	t.Parallel()
-	var seen []string
 	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
-		if len(req.AllowedDomains) > 0 {
-			seen = append(seen, req.AllowedDomains[0])
-		}
-		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "ebay.com" {
-			return []hostsearch.Hit{{
-				URL: "https://www.ebay.com/itm/x", Title: "K-Supreme Plus",
-				Snippet: "K-Supreme Plus listing with no dollar amount.",
-			}}, nil
-		}
-		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "mercari.com" {
-			return []hostsearch.Hit{{
-				URL: "https://www.mercari.com/k-supreme-plus", Title: "Keurig K-Supreme Plus",
-				Snippet: "K-Supreme Plus for $40 used.",
-			}}, nil
-		}
-		return nil, nil
+		return []hostsearch.Hit{{
+			URL: "https://www.mercari.com/k-supreme-plus", Title: "Keurig K-Supreme Plus",
+			Snippet: "K-Supreme Plus for $40 used.",
+		}}, nil
 	}
 	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tier.class != "marketplace" || len(hits) != 1 || hits[0].URL != "https://www.mercari.com/k-supreme-plus" {
-		t.Fatalf("tier=%s hits=%+v seen=%v", tier.class, hits, seen)
+		t.Fatalf("tier=%s hits=%+v", tier.class, hits)
 	}
 }
 
@@ -580,17 +597,71 @@ func TestLookupComparablesStopsAtEbay(t *testing.T) {
 	calls := 0
 	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
 		calls++
-		if len(req.AllowedDomains) > 0 && req.AllowedDomains[0] == "ebay.com" {
-			return []hostsearch.Hit{{
-				URL: "https://www.ebay.com/itm/k-supreme-plus", Title: "Keurig K-Supreme Plus",
-				Snippet: "Sold listing for K-Supreme Plus at $129 used.",
-			}}, nil
-		}
-		t.Fatalf("should not search past eBay: %+v", req)
-		return nil, nil
+		return []hostsearch.Hit{
+			{URL: "https://www.amazon.com/dp/k", Title: "Keurig K-Supreme Plus", Snippet: "K-Supreme Plus for $199."},
+			{URL: "https://www.ebay.com/itm/k-supreme-plus", Title: "Keurig K-Supreme Plus", Snippet: "Sold listing for K-Supreme Plus at $129 used."},
+		}, nil
 	}
 	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
 	if err != nil || tier.class != "ebay" || len(hits) != 1 || calls != 1 {
 		t.Fatalf("tier=%s hits=%d calls=%d err=%v", tier.class, len(hits), calls, err)
+	}
+}
+
+func TestShouldReuseCompSameTypicalModel(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	ok := shouldReuseComp("K-Supreme Plus", "k-supreme plus", now.Add(-2*time.Hour), now,
+		[]string{"Keurig K-Supreme Plus"}, []string{"Keurig K-Supreme Plus Coffee Maker"})
+	if !ok {
+		t.Fatal("typical identical lots should share a comparable")
+	}
+}
+
+func TestShouldNotReuseImpairedOrStale(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	if shouldReuseComp("K-Supreme Plus", "K-Supreme Plus", now.Add(-2*time.Hour), now,
+		[]string{"working"}, []string{"Keurig for parts, not working"}) {
+		t.Fatal("impaired lot must not reuse a working-unit comparable")
+	}
+	if shouldReuseComp("K-Supreme Plus", "K-Supreme Plus", now.Add(-8*24*time.Hour), now,
+		[]string{"Keurig"}, []string{"Keurig"}) {
+		t.Fatal("stale comparable must be looked up again")
+	}
+	if shouldReuseComp("K-Supreme Plus", "DCD791", now, now, []string{"a"}, []string{"a"}) {
+		t.Fatal("different models must not share a comparable")
+	}
+}
+
+func TestConditionClassAndReuseOrigin(t *testing.T) {
+	t.Parallel()
+	if conditionClass("nice used keurig") != "typical" {
+		t.Fatal("typical")
+	}
+	if conditionClass("sold for parts only") != "impaired" {
+		t.Fatal("impaired")
+	}
+	if reuseOrigin("1001", "") != "1001" || reuseOrigin("1002", "1001") != "1001" {
+		t.Fatal("origin")
+	}
+}
+
+func TestLookupComparablesRetriesAfterEngineError(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
+		calls++
+		if calls == 1 {
+			return nil, hostsearch.ErrUnavailable
+		}
+		return []hostsearch.Hit{{
+			URL: "https://www.walmart.com/ip/k", Title: "Keurig K-Supreme Plus",
+			Snippet: "K-Supreme Plus $79",
+		}}, nil
+	}
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	if err != nil || tier.class != "retail" || len(hits) != 1 || calls != 2 {
+		t.Fatalf("tier=%s hits=%+v calls=%d err=%v", tier.class, hits, calls, err)
 	}
 }

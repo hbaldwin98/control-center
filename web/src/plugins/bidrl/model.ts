@@ -9,6 +9,8 @@ export type Auction = {
   lastError: string;
   collectedAt: string;
   endsAt: string;
+  affiliateName: string;
+  city: string;
 };
 
 export type Lot = {
@@ -40,6 +42,7 @@ export type Lot = {
   sourceTitle: string;
   sourceClass: string;
   sourceLabel: string;
+  reusedFromLotId: string;
   retrievedAt: string;
   dealScore: number | null;
   thumbUrl: string;
@@ -54,6 +57,7 @@ export type LotsPage = {
 
 export type FeedPage = {
   filter: string;
+  q: string;
   lots: Lot[];
   latestEventId: number;
 };
@@ -169,10 +173,134 @@ export function comparableHint(lot: Pick<Lot, "priceKind" | "sourceLabel" | "sou
   return where || kind;
 }
 
+export type LocationGroup<T> = {
+  key: string;
+  label: string;
+  items: T[];
+};
+
+export function locationLabel(item: { affiliateName?: string; city?: string }): string {
+  const name = (item.affiliateName ?? "").trim();
+  const city = (item.city ?? "").trim();
+  if (name && city && !name.toLowerCase().includes(city.toLowerCase())) {
+    return `${name} · ${city}`;
+  }
+  return name || city || "Other locations";
+}
+
+export function groupByLocation<T extends { affiliateName?: string; city?: string }>(
+  items: T[],
+): LocationGroup<T>[] {
+  const map = new Map<string, LocationGroup<T>>();
+  const order: string[] = [];
+  for (const item of items) {
+    const label = locationLabel(item);
+    const key = label.toLowerCase();
+    let group = map.get(key);
+    if (!group) {
+      group = { key, label, items: [] };
+      map.set(key, group);
+      order.push(key);
+    }
+    group.items.push(item);
+  }
+  return order.map((k) => map.get(k)!);
+}
+
 export function sourceHost(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
     return "";
   }
+}
+
+export type SimilarGroup = {
+  key: string;
+  label: string;
+  lots: Lot[];
+};
+
+export function normalizeLotText(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/lot\s*#?\s*\d+/gi, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function lotGroupKey(
+  lot: Pick<Lot, "id" | "modelOrSku" | "identification" | "title">,
+): string {
+  const model = normalizeLotText(lot.modelOrSku);
+  if (model.length >= 2) return `model:${model}`;
+  const ident = normalizeLotText(lot.identification);
+  if (ident.length >= 8) return `text:${ident}`;
+  const title = normalizeLotText(lot.title);
+  if (title.length >= 8) return `text:${title}`;
+  return `id:${lot.id}`;
+}
+
+export function groupSimilarLots(lots: Lot[]): SimilarGroup[] {
+  const map = new Map<string, Lot[]>();
+  const order: string[] = [];
+  for (const lot of lots) {
+    const key = lotGroupKey(lot);
+    const bucket = map.get(key);
+    if (!bucket) {
+      map.set(key, [lot]);
+      order.push(key);
+    } else {
+      bucket.push(lot);
+    }
+  }
+  return order.map((key) => {
+    const items = [...(map.get(key) ?? [])].sort(compareSimilarLots);
+    const head = items[0];
+    return {
+      key,
+      label: head ? similarGroupLabel(head) : key,
+      lots: items,
+    };
+  });
+}
+
+function similarGroupLabel(lot: Lot): string {
+  if (lot.identification && lot.identification !== lot.title) return lot.identification;
+  if (lot.modelOrSku) return lot.modelOrSku;
+  return lot.title || lot.id;
+}
+
+function compareSimilarLots(a: Lot, b: Lot): number {
+  const as = a.dealScore ?? -1;
+  const bs = b.dealScore ?? -1;
+  if (as !== bs) return bs - as;
+  const ab = a.currentBidCents ?? Number.POSITIVE_INFINITY;
+  const bb = b.currentBidCents ?? Number.POSITIVE_INFINITY;
+  if (ab !== bb) return ab - bb;
+  return (a.endsAt || "").localeCompare(b.endsAt || "");
+}
+
+export type CleanupResult = {
+  auctions: number;
+  lots: number;
+  sites: number;
+};
+
+export function cleanupMessage(result: CleanupResult): string {
+  const parts: string[] = [];
+  if (result.auctions > 0) {
+    parts.push(`${result.auctions} ended auction${result.auctions === 1 ? "" : "s"}`);
+  }
+  if (result.lots > 0) {
+    parts.push(`${result.lots} ended lot${result.lots === 1 ? "" : "s"}`);
+  }
+  if (result.sites > 0) {
+    parts.push(`${result.sites} ended SITES listing${result.sites === 1 ? "" : "s"}`);
+  }
+  if (parts.length === 0) {
+    return "Nothing had ended.";
+  }
+  return `Removed ${parts.join(" and ")}.`;
 }

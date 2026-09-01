@@ -98,7 +98,8 @@ func (p *Plugin) Routes() []host.Route {
 	return []host.Route{
 		{Pattern: "GET /summary", Handler: http.HandlerFunc(p.handleGetSummary)},
 		{Pattern: "POST /sync", Handler: http.HandlerFunc(p.handlePostSync)},
-		{Pattern: "POST /upload", Handler: http.HandlerFunc(p.handlePostUpload)},
+		{Pattern: "GET /history", Handler: http.HandlerFunc(p.handleGetHistory)},
+		{Pattern: "POST /history/sync", Handler: http.HandlerFunc(p.handlePostHistorySync)},
 	}
 }
 

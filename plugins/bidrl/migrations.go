@@ -159,5 +159,12 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			ALTER TABLE bidrl_analyses ADD COLUMN category TEXT NOT NULL DEFAULT '';
 			ALTER TABLE bidrl_analyses ADD COLUMN search_terms TEXT NOT NULL DEFAULT '[]';
 		`,
+	}, {
+		Version: 4,
+		Name:    "reuse_comps",
+		Up: `
+			ALTER TABLE bidrl_valuations ADD COLUMN reused_from_lot_id TEXT NOT NULL DEFAULT '';
+			CREATE INDEX bidrl_valuations_model ON bidrl_valuations(model_or_code);
+		`,
 	}})
 }

@@ -60,9 +60,10 @@ is set, the engine is asked for up to eight hits so filtering still has material
 
 ## What this is not
 
-It is not the provider's web-search add-on. BidRL looks up a model number here, eBay
-sold listings first, then a chat call (no `Grounding`) picks a dollar amount already
-written in those hits. The model still costs tokens; the search queries do not.
+It is not the provider's web-search add-on. BidRL looks up a model number once
+here (no `site:` operators — those CAPTCHA DuckDuckGo), ranks eBay then retail
+then other resale, then a chat call picks a dollar amount already written in
+those hits.
 
 It is not Playwright pointed at Google. Headless search-engine crawls fail closed and
 do not belong in a plugin.
@@ -74,8 +75,10 @@ do not belong in a plugin.
 `docker compose up --build` starts `searxng` on the internal network only (no host
 port) and sets Control Center to `CC_SEARCH_ENGINE=searxng` against
 `http://searxng:8080`. Settings live in `deploy/searxng/` (`settings.yml` plus
-`limiter.toml`). The instance keeps DuckDuckGo, Brave, Wikipedia, and Wikidata —
-not Google, Bing, or Tor onion engines, which CAPTCHA or fail to register from a
-datacenter IP. Recreate the sidecar after changing those files:
+`limiter.toml`). The instance keeps Brave and DuckDuckGo only — not Wikipedia, Google, Bing, or
+Tor onion engines. The host queries Brave first, then DuckDuckGo if Brave is
+empty, spaces lookups by 800ms, and retries a hung request once. HTTP/2 is off
+so keep-alive disconnects are less common. Recreate the sidecar after changing
+those files:
 
 `docker compose up -d --force-recreate searxng`

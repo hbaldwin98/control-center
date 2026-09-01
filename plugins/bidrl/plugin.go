@@ -109,6 +109,7 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /auctions", Handler: http.HandlerFunc(p.handleAddAuction)},
 		{Pattern: "GET /auctions/{id}", Handler: http.HandlerFunc(p.handleGetAuction)},
 		{Pattern: "DELETE /auctions/{id}", Handler: http.HandlerFunc(p.handleDeleteAuction)},
+		{Pattern: "POST /cleanup", Handler: http.HandlerFunc(p.handleCleanupExpired)},
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
 		{Pattern: "GET /lots", Handler: http.HandlerFunc(p.handleListLots)},
