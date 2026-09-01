@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
+	"github.com/hbaldwin98/control-center/plugins/bidrl"
 	"github.com/hbaldwin98/control-center/plugins/hello"
 	"github.com/hbaldwin98/control-center/plugins/pagewatch"
 	"github.com/hbaldwin98/control-center/plugins/tid"
@@ -18,5 +19,6 @@ func registerPlugins(r *pluginhost.Registry) error {
 		hello.New(),
 		pagewatch.New(),
 		tid.New(),
+		bidrl.New(),
 	)
 }

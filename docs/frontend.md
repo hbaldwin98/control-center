@@ -58,8 +58,9 @@ Registered in one place:
 import hello from "./plugins/hello";
 import pagewatch from "./plugins/pagewatch";
 import tid from "./plugins/tid";
+import bidrl from "./plugins/bidrl";
 
-export const plugins = [hello, pagewatch, tid];
+export const plugins = [hello, pagewatch, tid, bidrl];
 ```
 
 The build rejects duplicate frontend IDs and route or navigation collisions. Plugin route

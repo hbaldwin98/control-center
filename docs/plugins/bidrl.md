@@ -55,6 +55,21 @@ The plugin passes the BIDRL/CDN DNS names it intends to touch; the host enforces
 the allowlist, private-network rejection, and teardown on disable. CI rejects a plugin
 that imports an automation library.
 
+**Collection requires the playwright engine.** The item feed only exists because the
+page's JavaScript asks for it, and the `fake` engine runs none: it answers from
+in-process fixtures that know one test auction. Under `fake`, every real auction
+collects zero lots. The Docker image sets `CC_BROWSER_ENGINE=playwright`; a local run
+needs `browser.engine: playwright` in config or that variable in the environment.
+
+**Lots come from the gallery's own item feed, not its HTML.** The BIDRL bid gallery is
+an AngularJS app: the served markup carries no lot links at all. Collection opens
+`/bidgallery/perpage_100/page_N/` and reads the `/api/getitems` responses the app posts,
+which the browser session already captures. That feed carries the canonical lot URL,
+title, lot number, current bid, and full-size image URLs, so a lot needs no page visit of
+its own. Enumeration probes the gallery once first; when the markup does contain lot
+links — a print catalog, or a server-rendered page — it scrapes those instead, and the
+scrape also remains the fallback when no feed arrives.
+
 **Every v1 action is user-triggered.** Collection starts only from "add auction", a scan
 starts only from "scan", pricing starts only inside that requested scan or from "reprice",
 and bids refresh only from "refresh bids". There is no cron or event-triggered work, and
@@ -123,6 +138,23 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 
 If this can be built without punching a hole through the `Host` facade, the boundary is
 right.
+
+---
+
+## Plugin surface
+
+| Surface | Contract |
+|---|---|
+| Jobs | `collect`, `scan`, `reprice`, `refresh` — enqueue-only, concurrency 1, two-hour timeout |
+| API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
+| API | `GET /api/plugins/bidrl/lots/{id}`, `POST /lots/{id}/reprice`, `GET /feed?filter=` |
+| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed` |
+| UI | `/bidrl` feed, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+
+Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
+browser serves a canned three-lot warehouse auction at
+`https://www.bidrl.com/auction/42/bidgallery`. Configure `cheap-vision` (chat+vision) and
+`grounded-price` (chat+grounding) routes before scanning.
 
 ---
 

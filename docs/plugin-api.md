@@ -457,6 +457,7 @@ func registerPlugins(r pluginhost.Registry) error {
         hello.New(),
         pagewatch.New(),
         tid.New(),
+        bidrl.New(),
     )
 }
 ```

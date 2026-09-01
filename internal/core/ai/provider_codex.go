@@ -3,6 +3,7 @@ package ai
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,8 +72,9 @@ type responsesItem struct {
 }
 
 type responsesContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type responsesUsage struct {
@@ -110,9 +112,20 @@ func (p Codex) Chat(ctx context.Context, d Dispatch, req ChatRequest) (providerR
 		if m.Role == "assistant" {
 			content = "output_text"
 		}
+		parts := []responsesContent{{Type: content, Text: m.Text}}
+		for _, img := range m.Images {
+			mime := img.MIME
+			if mime == "" {
+				mime = "image/jpeg"
+			}
+			parts = append(parts, responsesContent{
+				Type:     "input_image",
+				ImageURL: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Blob),
+			})
+		}
 		body.Input = append(body.Input, responsesItem{
 			Type: "message", Role: wireRole(m.Role),
-			Content: []responsesContent{{Type: content, Text: m.Text}},
+			Content: parts,
 		})
 	}
 

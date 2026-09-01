@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/google/cel-go v0.26.1
 	github.com/hbaldwin98/control-center/host v0.0.0
+	github.com/hbaldwin98/control-center/plugins/bidrl v0.0.0
 	github.com/hbaldwin98/control-center/plugins/hello v0.0.0
 	github.com/hbaldwin98/control-center/plugins/pagewatch v0.0.0
 	github.com/hbaldwin98/control-center/plugins/tid v0.0.0
@@ -45,3 +46,5 @@ replace github.com/hbaldwin98/control-center/plugins/hello => ./plugins/hello
 replace github.com/hbaldwin98/control-center/plugins/pagewatch => ./plugins/pagewatch
 
 replace github.com/hbaldwin98/control-center/plugins/tid => ./plugins/tid
+
+replace github.com/hbaldwin98/control-center/plugins/bidrl => ./plugins/bidrl

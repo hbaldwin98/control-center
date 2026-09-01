@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,8 +20,8 @@ func (Fake) Chat(_ context.Context, d Dispatch, req ChatRequest) (providerResult
 		return providerResult{errClass: "credential"}, ErrMissingCredential
 	}
 	prompt := lastText(req.Messages)
-	inTok := approxTokens(prompt)
-	reply := "echo: " + strings.TrimSpace(prompt)
+	inTok := approxTokens(prompt) + int64(imageCount(req))*85
+	reply, parsed, citations, sources := fakeReply(req, prompt)
 	if req.MaxTokens > 0 {
 		runes := []rune(reply)
 		if limit := req.MaxTokens * 4; len(runes) > limit {
@@ -33,8 +34,88 @@ func (Fake) Chat(_ context.Context, d Dispatch, req ChatRequest) (providerResult
 		return providerResult{}, err
 	}
 	return providerResult{
-		text: reply, inputTokens: inTok, outputTokens: outTok, cost: cost, billed: true,
+		text: reply, parsed: parsed, citations: citations, sources: sources,
+		inputTokens: inTok, outputTokens: outTok, cost: cost, billed: true,
 	}, nil
+}
+
+// fakeReply produces structured output when the caller asked for a schema, and
+// inspectable citations when they asked for grounding. Echo remains the default so
+// existing cheap-chat tests keep seeing "echo: …".
+func fakeReply(req ChatRequest, prompt string) (string, json.RawMessage, []Citation, []Source) {
+	if req.Grounding != nil {
+		return fakeGrounded(prompt)
+	}
+	if len(req.Schema) > 0 && strings.Contains(string(req.Schema), "basis") {
+		return fakeAnalysis(prompt)
+	}
+	if len(req.Schema) > 0 {
+		raw := json.RawMessage(`{"ok":true}`)
+		return string(raw), raw, nil, nil
+	}
+	return "echo: " + strings.TrimSpace(prompt), nil, nil, nil
+}
+
+func fakeAnalysis(prompt string) (string, json.RawMessage, []Citation, []Source) {
+	title := fieldAfter(prompt, "Title:")
+	out := map[string]any{
+		"identification":  title,
+		"basis":           "category_only",
+		"model_or_sku":    "",
+		"title_agreement": 0.9,
+		"notes":           "fake analysis",
+	}
+	switch {
+	case strings.Contains(strings.ToLower(title), "keurig") || strings.Contains(strings.ToLower(prompt), "k-supreme"):
+		out["identification"] = "Keurig K-Supreme Plus"
+		out["basis"] = "exact_text"
+		out["model_or_sku"] = "K-Supreme Plus"
+		out["title_agreement"] = 0.85
+		out["notes"] = "Model number is legible on the machine."
+	case strings.Contains(strings.ToLower(title), "aeron"):
+		out["identification"] = "Herman Miller Aeron-like mesh chair"
+		out["basis"] = "distinctive_visual_match"
+		out["model_or_sku"] = ""
+		out["title_agreement"] = 0.2
+		out["notes"] = "Looks like an Aeron; no model plate readable."
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw), raw, nil, nil
+}
+
+func fakeGrounded(prompt string) (string, json.RawMessage, []Citation, []Source) {
+	model := fieldAfter(prompt, "Model:")
+	if model == "" {
+		model = fieldAfter(prompt, "model_or_sku")
+	}
+	if model == "" {
+		model = "K-Supreme Plus"
+	}
+	text := "Sold listing for " + model + " at $129 used."
+	src := Source{
+		URL:   "https://example-market.test/" + strings.ReplaceAll(strings.ToLower(model), " ", "-"),
+		Title: model + " sold listing",
+	}
+	parsed, _ := json.Marshal(map[string]any{
+		"price_cents":   12900,
+		"currency":      "USD",
+		"condition":     "used",
+		"kind":          "sold",
+		"model_or_code": model,
+	})
+	return text, parsed, []Citation{{Start: 0, End: len(text), Source: 0}}, []Source{src}
+}
+
+func fieldAfter(s, label string) string {
+	i := strings.Index(s, label)
+	if i < 0 {
+		return strings.TrimSpace(s)
+	}
+	rest := s[i+len(label):]
+	if j := strings.IndexAny(rest, "\n\r"); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimSpace(rest)
 }
 
 // Models gives the fake a catalog, so the discovery path is exercisable without a

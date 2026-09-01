@@ -46,8 +46,8 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
   mutation, and browser-session admission points.
-- Three plugins: `hello` (validating), `tid` (energy usage), and `pagewatch`
-  (operational confidence). `bidrl` remains sketched.
+- Four plugins: `hello` (validating), `tid` (energy usage), `pagewatch`
+  (operational confidence), and `bidrl` (the first real plugin).
 
 ### Not in v1
 
@@ -91,7 +91,7 @@ There is one structural rule, and it replaces any dependency matrix:
 ```
   L6  web            HTTP, SSE, auth, static shell
        │
-  L5  plugins        hello · tid · pagewatch    (own Go modules)
+  L5  plugins        hello · tid · pagewatch · bidrl    (own Go modules)
        │
   L4  pluginhost     registry · lifecycle · Host facade construction
        │

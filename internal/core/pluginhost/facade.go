@@ -485,9 +485,22 @@ func (a *aiAdapter) Embed(ctx context.Context, req hostai.EmbedRequest) (*hostai
 }
 
 func mapChatReq(req hostai.ChatRequest) ai.ChatRequest {
-	out := ai.ChatRequest{Model: req.Model, MaxTokens: req.MaxTokens}
+	out := ai.ChatRequest{Model: req.Model, MaxTokens: req.MaxTokens, Schema: req.Schema}
+	if req.Grounding != nil {
+		g := ai.GroundingOptions{
+			MaxQueries: req.Grounding.MaxQueries, Freshness: req.Grounding.Freshness,
+			AllowedDomains: append([]string{}, req.Grounding.AllowedDomains...),
+		}
+		out.Grounding = &g
+	}
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, ai.Message{Role: m.Role, Text: m.Text})
+		msg := ai.Message{Role: m.Role, Text: m.Text}
+		for _, img := range m.Images {
+			msg.Images = append(msg.Images, ai.Image{
+				Blob: img.Blob, MIME: img.MIME, Resolution: ai.Resolution(img.Resolution),
+			})
+		}
+		out.Messages = append(out.Messages, msg)
 	}
 	return out
 }
@@ -496,15 +509,22 @@ func mapChatResp(resp *ai.ChatResponse) *hostai.ChatResponse {
 	if resp == nil {
 		return nil
 	}
-	return &hostai.ChatResponse{
-		Text: resp.Text,
+	out := &hostai.ChatResponse{
+		Text: resp.Text, Parsed: resp.Parsed, Finish: resp.Finish,
 		Usage: hostai.Usage{
 			InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
 			CostMicroUSD: hostpolicy.MicroUSD(resp.Usage.CostMicroUSD),
 			Latency:      resp.Usage.Latency, Attempts: resp.Usage.Attempts,
 		},
-		Finish: resp.Finish,
 	}
+	for _, c := range resp.Citations {
+		out.Citations = append(out.Citations, hostai.Citation{Start: c.Start, End: c.End, Source: c.Source})
+	}
+	for _, s := range resp.Sources {
+		src := hostai.Source{URL: s.URL, Title: s.Title, PublishedAt: s.PublishedAt}
+		out.Sources = append(out.Sources, src)
+	}
+	return out
 }
 
 type streamAdapter struct{ inner ai.Stream }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -217,10 +218,40 @@ func newBrowserEngine(cfg config.Config) (browser.Engine, error) {
 	default:
 		slog.Info("browser engine fake")
 		return browser.NewFake(map[string]http.Handler{
-			"hello.test":  browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
-			"example.com": browser.HTMLHandler(`<!doctype html><html><body><main><h1>Example Domain</h1><p>This domain is for use in illustrative examples in documents.</p></main></body></html>`),
+			"hello.test":    browser.HTMLHandler(`<!doctype html><html><body><article class="lot">hello</article></body></html>`),
+			"example.com":   browser.HTMLHandler(`<!doctype html><html><body><main><h1>Example Domain</h1><p>This domain is for use in illustrative examples in documents.</p></main></body></html>`),
+			"www.bidrl.com": fakeBidrl(),
+			"bidrl.com":     fakeBidrl(),
 		}), nil
 	}
+}
+
+func fakeBidrl() http.Handler {
+	const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /auction/42/bidgallery", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><html><body>
+			<h1>Test Warehouse Auction</h1>
+			<article class="lot"><a href="/auction/42/item/keurig-k-supreme-plus-1001">Keurig K-Supreme Plus Coffee Maker</a><span>$15.00</span></article>
+			<article class="lot"><a href="/auction/42/item/office-mesh-chair-1002">Office mesh task chair</a><span>$8.00</span></article>
+			<article class="lot"><a href="/auction/42/item/aeron-style-chair-1003">Aeron-style mesh chair</a><span>$40.00</span></article>
+		</body></html>`)
+	})
+	lot := func(title, bid string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, `<html><h1>`+title+`</h1><p>Current bid `+bid+`</p><img src="https://www.bidrl.com/img/1.png"></html>`)
+		}
+	}
+	mux.HandleFunc("GET /auction/42/item/keurig-k-supreme-plus-1001", lot("Keurig K-Supreme Plus Coffee Maker", "$15.00"))
+	mux.HandleFunc("GET /auction/42/item/office-mesh-chair-1002", lot("Office mesh task chair", "$8.00"))
+	mux.HandleFunc("GET /auction/42/item/aeron-style-chair-1003", lot("Aeron-style mesh chair", "$40.00"))
+	mux.HandleFunc("GET /img/1.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = io.WriteString(w, png)
+	})
+	return mux
 }
 
 func parseLevel(s string) (slog.Level, error) {

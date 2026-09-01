@@ -17,7 +17,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 9 | `notifications` | ✅ | Channels use credential entries; rules and defaults deliver committed events. |
 | 10 | `tid` | ✅ | Daily Turlock Irrigation District usage, metrics, and insight flow through host capabilities. |
 | 11 | `pagewatch` | ✅ | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
-| 12 | `bidrl` | ⬜ | The first real plugin. |
+| 12 | `bidrl` | ✅ | The first real plugin. |
 | 13 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
 
 ---
@@ -204,6 +204,16 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Transactional signal path | ✅ | State and completion/alert events commit together; durable subscriber keeps 100 history rows. |
 | Operator UI | ✅ | Current result, target, timings, tokens, cost, history, snapshot download, and manual trigger. |
 | End-to-end acceptance test | ✅ | Real registry, policy, jobs, browser, AI accounting, blob, SQL, events, durable delivery, and HTTP. |
+
+## Milestone 12 — `bidrl` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| Separate `plugins/bidrl` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
+| User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
+| Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
+| Operator UI | ✅ | Treasure-hunting feed, auction view, lot detail with evidence. |
+| End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ---
 

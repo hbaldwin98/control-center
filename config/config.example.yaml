@@ -58,4 +58,5 @@ ai:
 browser:
   # fake: in-process, no sockets (default, tests, hello).
   # playwright: host-owned Chromium. Plugins never select an engine.
+  # Plugins that read real sites (bidrl, tid) need playwright: fake runs no JavaScript.
   engine: fake

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +22,9 @@ import (
 
 type providerResult struct {
 	text                      string
+	parsed                    json.RawMessage
+	citations                 []Citation
+	sources                   []Source
 	inputTokens, outputTokens int64
 	cost                      policy.MicroUSD
 	billed                    bool
@@ -173,6 +177,17 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	if !rt.has("chat") {
 		return nil, ErrCapability
 	}
+	if imageCount(req) > 0 && !rt.has("vision") {
+		return nil, fmt.Errorf("%w: route %q has no vision capability", ErrCapability, rt.name)
+	}
+	if req.Grounding != nil {
+		if !rt.has("grounding") {
+			return nil, fmt.Errorf("%w: route %q has no grounding capability", ErrCapability, rt.name)
+		}
+		if req.Grounding.MaxQueries <= 0 {
+			return nil, fmt.Errorf("%w: grounding maxQueries must be positive", ErrCapability)
+		}
+	}
 	max, err := rt.estimateChat(req.MaxTokens)
 	if err != nil {
 		return nil, err
@@ -211,6 +226,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 
 	var (
 		text        string
+		parsed      json.RawMessage
+		citations   []Citation
+		sources     []Source
 		inTok       int64
 		outTok      int64
 		cost        policy.MicroUSD
@@ -282,6 +300,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		}
 		if perr == nil && oc.errClass == "" {
 			text = out.text
+			parsed = out.parsed
+			citations = out.citations
+			sources = out.sources
 			errClass = ""
 			errDetail = ""
 			break
@@ -294,7 +315,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	status := "succeeded"
-	if text == "" && errClass != "" {
+	if errClass != "" {
 		status = "failed"
 		finish = "error"
 	}
@@ -384,13 +405,21 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		return nil, fmt.Errorf("ai: call %s %s: %s", callID, status, errClass)
 	}
 	return &ChatResponse{
-		Text:   text,
+		Text: text, Parsed: parsed, Citations: citations, Sources: sources,
 		Finish: finish,
 		Usage: Usage{
 			InputTokens: inTok, OutputTokens: outTok, CostMicroUSD: settled,
 			Attempts: len(attempts),
 		},
 	}, nil
+}
+
+func imageCount(req ChatRequest) int {
+	n := 0
+	for _, m := range req.Messages {
+		n += len(m.Images)
+	}
+	return n
 }
 
 type attemptOutcome struct {

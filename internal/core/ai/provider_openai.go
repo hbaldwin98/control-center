@@ -2,11 +2,13 @@ package ai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"math"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
@@ -30,16 +32,18 @@ func (p OpenAICompatible) client() *http.Client {
 }
 
 type chatCompletionsRequest struct {
-	Model     string              `json:"model"`
-	Messages  []chatWireMessage   `json:"messages"`
-	MaxTokens int                 `json:"max_completion_tokens,omitempty"`
-	Stream    bool                `json:"stream"`
-	Usage     *streamUsageOptions `json:"stream_options,omitempty"`
+	Model          string              `json:"model"`
+	Messages       []chatWireMessage   `json:"messages"`
+	MaxTokens      int                 `json:"max_completion_tokens,omitempty"`
+	Stream         bool                `json:"stream"`
+	Usage          *streamUsageOptions `json:"stream_options,omitempty"`
+	ResponseFormat json.RawMessage     `json:"response_format,omitempty"`
+	Plugins        []map[string]any    `json:"plugins,omitempty"`
 }
 
 type chatWireMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
 type streamUsageOptions struct {
@@ -63,7 +67,15 @@ func (p OpenAICompatible) Chat(ctx context.Context, d Dispatch, req ChatRequest)
 	}
 	body := chatCompletionsRequest{Model: d.Model, MaxTokens: req.MaxTokens}
 	for _, m := range req.Messages {
-		body.Messages = append(body.Messages, chatWireMessage{Role: wireRole(m.Role), Content: m.Text})
+		body.Messages = append(body.Messages, chatWireMessage{Role: wireRole(m.Role), Content: wireContent(m)})
+	}
+	if len(req.Schema) > 0 {
+		body.ResponseFormat = jsonSchemaFormat(req.Schema)
+	}
+	if req.Grounding != nil {
+		body.Plugins = []map[string]any{{
+			"id": "web", "max_results": req.Grounding.MaxQueries,
+		}}
 	}
 	status, raw, err := httpDo(ctx, p.client(), http.MethodPost, d.BaseURL+"/chat/completions",
 		map[string]string{"Authorization": "Bearer " + d.Token}, body)
@@ -90,7 +102,9 @@ func (p OpenAICompatible) Chat(ctx context.Context, d Dispatch, req ChatRequest)
 		return providerResult{errClass: "provider", billed: true}, providerError(d.ProviderID, status, raw)
 	}
 	in, out := parsed.Usage.PromptTokens, parsed.Usage.CompletionTokens
-	text := parsed.Choices[0].Message.Content
+	text := decodeWireContent(parsed.Choices[0].Message.Content)
+	structured := jsonIfObject(text)
+	cites, sources := annotationsFrom(raw)
 	// A provider that reports no usage still charged for the call. Fall back to a
 	// local estimate so the attempt is accounted for rather than recorded as free.
 	if in == 0 && out == 0 {
@@ -101,9 +115,136 @@ func (p OpenAICompatible) Chat(ctx context.Context, d Dispatch, req ChatRequest)
 		return providerResult{errClass: "accounting_invariant", billed: true}, err
 	}
 	return providerResult{
-		text: text, inputTokens: in, outputTokens: out, cost: cost, billed: true,
+		text: text, parsed: structured, citations: cites, sources: sources,
+		inputTokens: in, outputTokens: out, cost: cost, billed: true,
 		providerStatus: strconv.Itoa(status),
 	}, nil
+}
+
+func wireContent(m Message) json.RawMessage {
+	if len(m.Images) == 0 {
+		b, _ := json.Marshal(m.Text)
+		return b
+	}
+	parts := []any{map[string]any{"type": "text", "text": m.Text}}
+	for _, img := range m.Images {
+		mime := img.MIME
+		if mime == "" {
+			mime = "image/jpeg"
+		}
+		detail := "low"
+		if img.Resolution == ResolutionHigh || img.Resolution == ResolutionMedium {
+			detail = "high"
+		}
+		parts = append(parts, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url":    "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Blob),
+				"detail": detail,
+			},
+		})
+	}
+	b, _ := json.Marshal(parts)
+	return b
+}
+
+func jsonSchemaFormat(schema json.RawMessage) json.RawMessage {
+	raw, err := json.Marshal(map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name": "result", "strict": true, "schema": json.RawMessage(schema),
+		},
+	})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func decodeWireContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &parts); err == nil {
+		var b strings.Builder
+		for _, p := range parts {
+			b.WriteString(p.Text)
+		}
+		return b.String()
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func jsonIfObject(s string) json.RawMessage {
+	trim := strings.TrimSpace(s)
+	if len(trim) == 0 || (trim[0] != '{' && trim[0] != '[') {
+		return nil
+	}
+	if json.Valid([]byte(trim)) {
+		return json.RawMessage(trim)
+	}
+	return nil
+}
+
+func annotationsFrom(raw []byte) ([]Citation, []Source) {
+	var wrap struct {
+		Choices []struct {
+			Message struct {
+				Annotations []struct {
+					Type        string `json:"type"`
+					URL         string `json:"url"`
+					Title       string `json:"title"`
+					StartIndex  int    `json:"start_index"`
+					EndIndex    int    `json:"end_index"`
+					URLCitation struct {
+						URL        string `json:"url"`
+						Title      string `json:"title"`
+						StartIndex int    `json:"start_index"`
+						EndIndex   int    `json:"end_index"`
+					} `json:"url_citation"`
+				} `json:"annotations"`
+			} `json:"message"`
+		} `json:"choices"`
+		Citations []struct {
+			URL   string `json:"url"`
+			Title string `json:"title"`
+		} `json:"citations"`
+	}
+	if json.Unmarshal(raw, &wrap) != nil {
+		return nil, nil
+	}
+	var cites []Citation
+	var sources []Source
+	add := func(url, title string, start, end int) {
+		if url == "" {
+			return
+		}
+		sources = append(sources, Source{URL: url, Title: title})
+		cites = append(cites, Citation{Start: start, End: end, Source: len(sources) - 1})
+	}
+	for _, c := range wrap.Choices {
+		for _, a := range c.Message.Annotations {
+			url, title, start, end := a.URL, a.Title, a.StartIndex, a.EndIndex
+			if a.URLCitation.URL != "" {
+				url, title, start, end = a.URLCitation.URL, a.URLCitation.Title, a.URLCitation.StartIndex, a.URLCitation.EndIndex
+			}
+			add(url, title, start, end)
+		}
+	}
+	if len(sources) == 0 {
+		for _, c := range wrap.Citations {
+			add(c.URL, c.Title, 0, 0)
+		}
+	}
+	return cites, sources
 }
 
 type modelsResponse struct {

@@ -7,6 +7,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -86,8 +87,16 @@ type Chunk struct {
 
 type ChatRequest struct {
 	Model     string
+	Schema    json.RawMessage
 	Messages  []Message
 	MaxTokens int
+	Grounding *GroundingOptions
+}
+
+type GroundingOptions struct {
+	MaxQueries     int
+	Freshness      time.Duration
+	AllowedDomains []string
 }
 
 type EmbedRequest struct {
@@ -101,14 +110,43 @@ type EmbedResponse struct {
 }
 
 type Message struct {
-	Role string
-	Text string
+	Role   string
+	Text   string
+	Images []Image
 }
 
+type Image struct {
+	Blob       []byte
+	MIME       string
+	Resolution Resolution
+}
+
+type Resolution string
+
+const (
+	ResolutionLow    Resolution = "low"
+	ResolutionMedium Resolution = "medium"
+	ResolutionHigh   Resolution = "high"
+)
+
 type ChatResponse struct {
-	Text   string
-	Usage  Usage
-	Finish string
+	Text      string
+	Parsed    json.RawMessage
+	Citations []Citation
+	Sources   []Source
+	Usage     Usage
+	Finish    string
+}
+
+type Citation struct {
+	Start, End int
+	Source     int
+}
+
+type Source struct {
+	URL         string
+	Title       string
+	PublishedAt *time.Time
 }
 
 type Usage struct {

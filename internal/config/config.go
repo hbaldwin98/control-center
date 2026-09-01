@@ -141,6 +141,9 @@ func (c *Config) applyEnv() {
 		c.Data.DB = ""
 		c.Data.BlobDir = ""
 	}
+	if v := os.Getenv("CC_BROWSER_ENGINE"); v != "" {
+		c.Browser.Engine = v
+	}
 	if v := os.Getenv("CC_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
