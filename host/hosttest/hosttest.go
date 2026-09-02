@@ -36,6 +36,7 @@ import (
 	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
 	hostpolicy "github.com/hbaldwin98/control-center/host/policy"
+	hostpush "github.com/hbaldwin98/control-center/host/push"
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 )
@@ -51,6 +52,7 @@ type hostImpl struct {
 	ai     *AIFake
 	brow   *BrowserFake
 	search *SearchFake
+	push   *PushFake
 	jobs   *jobsImpl
 	events *eventsImpl
 	store  *db
@@ -65,6 +67,7 @@ func (h *hostImpl) AI() hostai.AI                { return h.ai }
 func (h *hostImpl) Browser() hostbrowser.Browser { return h.brow }
 func (h *hostImpl) Search() hostsearch.Search    { return h.search }
 func (h *hostImpl) Jobs() hostjobs.Jobs          { return h.jobs }
+func (h *hostImpl) Push() hostpush.Push          { return h.push }
 func (h *hostImpl) Events() host.Events          { return h.events }
 func (h *hostImpl) Store() hoststorage.DB        { return h.store }
 func (h *hostImpl) Blobs() hoststorage.Blobs     { return h.blobs }

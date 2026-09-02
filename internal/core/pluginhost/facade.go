@@ -19,6 +19,7 @@ import (
 	hostevents "github.com/hbaldwin98/control-center/host/events"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
 	hostpolicy "github.com/hbaldwin98/control-center/host/policy"
+	hostpush "github.com/hbaldwin98/control-center/host/push"
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 	"github.com/hbaldwin98/control-center/internal/core/ai"
@@ -27,6 +28,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/push"
 	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
@@ -37,6 +39,7 @@ type scopedHost struct {
 	browser  hostbrowser.Browser
 	search   hostsearch.Search
 	jobs     hostjobs.Jobs
+	push     hostpush.Push
 	events   host.Events
 	store    hoststorage.DB
 	blobs    hoststorage.Blobs
@@ -50,6 +53,7 @@ func (h *scopedHost) AI() hostai.AI                { return h.ai }
 func (h *scopedHost) Browser() hostbrowser.Browser { return h.browser }
 func (h *scopedHost) Search() hostsearch.Search    { return h.search }
 func (h *scopedHost) Jobs() hostjobs.Jobs          { return h.jobs }
+func (h *scopedHost) Push() hostpush.Push          { return h.push }
 func (h *scopedHost) Events() host.Events          { return h.events }
 func (h *scopedHost) Store() hoststorage.DB        { return h.store }
 func (h *scopedHost) Blobs() hoststorage.Blobs     { return h.blobs }
@@ -333,12 +337,19 @@ func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
 	} else {
 		searchHandle = disabledSearch{}
 	}
+	var pushHandle hostpush.Push
+	if r.opts.Push != nil {
+		pushHandle = &pushAdapter{inner: push.Scoped(r.opts.Push, id)}
+	} else {
+		pushHandle = disabledPush{}
+	}
 	return &scopedHost{
 		pluginID: id,
 		ai:       aiHandle,
 		browser:  browserHandle,
 		search:   searchHandle,
 		jobs:     &jobsAdapter{inner: jobs.Scoped(r.opts.Jobs, id), gate: r.opts.Policy, pluginID: id},
+		push:     pushHandle,
 		events:   &gatedEvents{inner: events.Scoped(r.opts.Events, id), db: r.opts.DB, gate: r.opts.Policy, pluginID: id},
 		store:    &gatedStore{db: r.opts.DB, inner: storage.Prefixed(r.opts.DB, id), gate: r.opts.Policy, pluginID: id},
 		blobs: &blobAdapter{inner: storage.WithMutationAdmission(r.opts.Blobs.Scoped(id), func(ctx context.Context, tx storage.Tx) error {
@@ -784,3 +795,65 @@ func mapHostEvent(e events.Event) hostevents.Event {
 		Payload: e.Payload, CreatedAt: e.CreatedAt,
 	}
 }
+
+// pushAdapter maps the core push capability onto the plugin SDK contract. The two
+// Watcher types are identical by shape and deliberately separate by package: the SDK
+// must not import core, and core must not import the SDK.
+type pushAdapter struct{ inner push.Push }
+
+func (a *pushAdapter) Publish(ctx context.Context, topic string, payload any) error {
+	if err := a.inner.Publish(ctx, topic, payload); err != nil {
+		return mapPushErr(err)
+	}
+	return nil
+}
+
+func (a *pushAdapter) Available(ctx context.Context, topic string) error {
+	if err := a.inner.Available(ctx, topic); err != nil {
+		return mapPushErr(err)
+	}
+	return nil
+}
+
+func (a *pushAdapter) Unavailable(ctx context.Context, topic string) error {
+	if err := a.inner.Unavailable(ctx, topic); err != nil {
+		return mapPushErr(err)
+	}
+	return nil
+}
+
+func (a *pushAdapter) Subscribers(topic string) int { return a.inner.Subscribers(topic) }
+
+func (a *pushAdapter) Watch(w hostpush.Watcher) func() {
+	if w == nil {
+		return a.inner.SetWatcher(nil)
+	}
+	return a.inner.SetWatcher(coreWatcher{inner: w})
+}
+
+type coreWatcher struct{ inner hostpush.Watcher }
+
+func (c coreWatcher) Join(ctx context.Context, topic string) error { return c.inner.Join(ctx, topic) }
+func (c coreWatcher) Leave(topic string)                           { c.inner.Leave(topic) }
+
+func mapPushErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, push.ErrInvalidTopic):
+		return errors.Join(hostpush.ErrInvalidTopic, err)
+	case errors.Is(err, push.ErrLimit):
+		return errors.Join(hostpush.ErrLimit, err)
+	case errors.Is(err, push.ErrPayload):
+		return errors.Join(hostpush.ErrPayload, err)
+	}
+	return err
+}
+
+type disabledPush struct{}
+
+func (disabledPush) Publish(context.Context, string, any) error { return hostpolicy.ErrPluginDisabled }
+func (disabledPush) Available(context.Context, string) error    { return hostpolicy.ErrPluginDisabled }
+func (disabledPush) Unavailable(context.Context, string) error  { return hostpolicy.ErrPluginDisabled }
+func (disabledPush) Subscribers(string) int                     { return 0 }
+func (disabledPush) Watch(hostpush.Watcher) func()              { return func() {} }

@@ -176,7 +176,7 @@ func TestPluginContract(t *testing.T) {
 	if !m.Automated {
 		t.Fatalf("a plugin with cron must declare Automated")
 	}
-	if len(p.Routes()) != 35 {
+	if len(p.Routes()) != 34 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -1328,10 +1328,7 @@ func TestParsePusherFrameIgnoresProtocolChatter(t *testing.T) {
 }
 
 func TestSubscribeFramesJoinOneChannelPerLot(t *testing.T) {
-	frames := subscribeFrames(map[string]liveLot{
-		"1001": {ID: "1001", AuctionID: "42"},
-		"1002": {ID: "1002", AuctionID: "99"},
-	})
+	frames := subscribeFrames(map[string]string{"1001": "42", "1002": "99"})
 	if len(frames) != 2 {
 		t.Fatalf("got %d frames, want 2", len(frames))
 	}
@@ -1479,5 +1476,37 @@ func TestCatalogAndFeedAgreeOnTheSameLot(t *testing.T) {
 	// Only the feed can name the bidder.
 	if got.HighBidder != "" || ev.Snap.HighBidder != "Melface92" {
 		t.Errorf("names: catalog %q, feed %q", got.HighBidder, ev.Snap.HighBidder)
+	}
+}
+
+func TestLotTopicRoundTripsAndRejectsForeignNames(t *testing.T) {
+	if got := lotTopic("1001"); got != "lot:1001" {
+		t.Fatalf("lotTopic = %q", got)
+	}
+	if id, ok := lotFromTopic("lot:1001"); !ok || id != "1001" {
+		t.Fatalf("lotFromTopic = %q, %v", id, ok)
+	}
+	// A topic this plugin does not define must never reach the feed, whatever the
+	// host is willing to carry as a name.
+	for _, topic := range []string{"", "lot:", "auction:42", "1001", "LOT:1001"} {
+		if id, ok := lotFromTopic(topic); ok {
+			t.Errorf("lotFromTopic(%q) = %q, want rejected", topic, id)
+		}
+	}
+}
+
+func TestBidMessageCarriesOnlyTheValuesThatMoved(t *testing.T) {
+	cents := int64(1800)
+	ev := pusherEvent{ItemID: "1001", Snap: pusherSnapshot{
+		BidCents: &cents, BidCount: 7, HighBidder: "sniper7", EndsAt: "2026-01-01T00:00:00Z",
+	}}
+	msg := bidMessage("1001", "42", ev)
+	if msg["lotId"] != "1001" || msg["auctionId"] != "42" || msg["currentBidCents"] != cents {
+		t.Fatalf("message = %+v", msg)
+	}
+	// Money is nullable, and a null is not the same as zero on a screen: an absent
+	// minimum must stay absent rather than arrive as 0.
+	if _, present := msg["minBidCents"]; present {
+		t.Fatalf("absent minimum was published as a value: %+v", msg)
 	}
 }

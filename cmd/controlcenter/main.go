@@ -23,6 +23,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/notifications"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/push"
 	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/internal/core/web"
@@ -148,6 +149,12 @@ func run() error {
 	}
 	searchsvc := search.New(pol, search.Options{Engine: searchEngine})
 
+	pushsvc, err := push.New(pol, push.Options{})
+	if err != nil {
+		return err
+	}
+	defer pushsvc.Close()
+
 	// Providers and routes are administrator-owned state in SQLite, edited from
 	// Settings against a live model catalog. The file only seeds an empty database.
 	seed, err := ai.LoadSeed(cfg.AI.Models)
@@ -176,7 +183,7 @@ func run() error {
 
 	ph, err := pluginhost.New(ctx, store, pluginhost.Options{
 		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: jq, AI: aisvc, Browser: br,
-		Search: searchsvc, Creds: creds, Refs: creds,
+		Search: searchsvc, Push: pushsvc, Creds: creds, Refs: creds,
 	})
 	if err != nil {
 		return err
@@ -196,6 +203,7 @@ func run() error {
 		Blobs:         blobs,
 		Policy:        pol,
 		Jobs:          jq,
+		Push:          pushsvc,
 		Credentials:   creds,
 		AI:            aisvc,
 		Notifications: notes,

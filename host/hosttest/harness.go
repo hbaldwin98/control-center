@@ -45,6 +45,10 @@ type Harness struct {
 	Browser *BrowserFake
 	Search  *SearchFake
 
+	// Push is live delivery. Subscribe on it to stand in for a client watching a
+	// topic; the plugin's watcher is called where the host would call it.
+	Push *PushFake
+
 	// Clock is the plugin's clock. It does not advance on its own.
 	Clock *Clock
 
@@ -113,6 +117,7 @@ func New(tb TB, plugin host.Plugin) *Harness {
 		gate: gate, clock: h.Clock,
 	}
 	h.Search = &SearchFake{hits: map[string][]hostsearch.Hit{}, gate: gate}
+	h.Push = &PushFake{subs: map[string]int{}, state: map[string]string{}, gate: gate}
 	h.Browser = &BrowserFake{
 		pages:    map[string]string{},
 		resource: map[string]hostbrowser.Resource{},
@@ -130,6 +135,7 @@ func New(tb TB, plugin host.Plugin) *Harness {
 		ai:     h.AI,
 		brow:   h.Browser,
 		search: h.Search,
+		push:   h.Push,
 		jobs: &jobsImpl{
 			id: m.ID, defs: map[string]hostjobs.Def{}, jobs: map[int64]*hostjobs.Job{},
 			clock: h.Clock, gate: gate, logs: map[int64][]hostjobs.LogLine{},

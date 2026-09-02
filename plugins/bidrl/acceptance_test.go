@@ -549,26 +549,34 @@ func TestCollectsAnalyzesAndPrices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec = serve(http.MethodGet, "/live?lots=no-such-lot", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("live stream: %d %s", rec.Code, rec.Body.Bytes())
+	// Live delivery is the host's connection, not a plugin route and not a job. A
+	// screen names the lots it is showing as topics; the plugin is told about the
+	// demand and enqueues nothing to answer it.
+	//
+	// Subscribing here stands in for a screen opening. The double models the demand,
+	// not the transport: there is no connection and no "ready" frame, because framing
+	// is the host's business and a plugin cannot observe it.
+	if err := h.Push.Subscribe(ctx, "lot:1001"); err != nil {
+		t.Fatalf("subscribe to lot:1001: %v", err)
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
-		t.Fatalf("live content type = %q", ct)
+	if err := h.Push.Subscribe(ctx, "lot:no-such-lot"); err != nil {
+		t.Fatalf("subscribe to an unknown lot: %v", err)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "event: idle") {
-		t.Fatalf("live stream body = %q", body)
+
+	// A lot this install does hold becomes a live topic; an id a client invented is
+	// accepted as a name but resolves to nothing, so it never becomes a channel.
+	if n := h.Push.Subscribers("lot:1001"); n != 1 {
+		t.Fatalf("subscribers of lot:1001 = %d, want 1", n)
 	}
-	rec = serve(http.MethodGet, "/live", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("live with no lots: %d %s", rec.Code, rec.Body.Bytes())
-	}
+	h.Push.Unsubscribe("lot:1001")
+	h.Push.Unsubscribe("lot:no-such-lot")
+
 	jobsAfter, err := h.Host().Jobs().List(ctx, hostjobs.Filter{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(jobsAfter) != len(jobsBefore) {
-		t.Fatalf("live enqueued work: %d jobs before, %d after", len(jobsBefore), len(jobsAfter))
+		t.Fatalf("live delivery enqueued work: %d jobs before, %d after", len(jobsBefore), len(jobsAfter))
 	}
 
 	rec = serve(http.MethodGet, "/auctions", nil)

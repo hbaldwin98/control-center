@@ -99,8 +99,10 @@ import {
   type SortDir,
   type SortState,
   type WatchlistsPage,
-  applyBidToLot,
-  applyBidToPage,
+  overlayBid,
+  overlayBids,
+  type BidObserved,
+  type BidOverlay,
 } from "./model";
 import "./index.css";
 
@@ -115,7 +117,7 @@ function useFeed(filter: string, q: string): UseSnapshotResult<FeedPage> {
     const data = await api.get<FeedPage>(`/feed${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [filter, q]);
-  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
+  return useSnapshot(load, { events: "bidrl.**" });
 }
 
 function useAuctions(): UseSnapshotResult<AuctionsPage> {
@@ -131,7 +133,7 @@ function useAuction(id: string): UseSnapshotResult<AuctionPage> {
     const data = await api.get<AuctionPage>(`/auctions/${encodeURIComponent(id)}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [id]);
-  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
+  return useSnapshot(load, { events: "bidrl.**" });
 }
 
 function useLot(id: string): UseSnapshotResult<Lot> {
@@ -139,7 +141,7 @@ function useLot(id: string): UseSnapshotResult<Lot> {
     const data = await api.get<Lot>(`/lots/${encodeURIComponent(id)}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [id]);
-  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToLot });
+  return useSnapshot(load, { events: "bidrl.**" });
 }
 
 function useSites(): UseSnapshotResult<SitesPage> {
@@ -170,7 +172,7 @@ function useLots(
     const data = await api.get<LotsPage>(`/lots${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [filter, q, bucket, category, ending, affiliate]);
-  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
+  return useSnapshot(load, { events: "bidrl.**" });
 }
 
 function useFavorites(
@@ -187,7 +189,7 @@ function useFavorites(
     const data = await api.get<FavoritesPage>(`/favorites${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [q, category, affiliate]);
-  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
+  return useSnapshot(load, { events: "bidrl.**" });
 }
 
 // BidRL pushes bids over its own realtime feed rather than making the gallery poll.
@@ -205,41 +207,122 @@ function useFavorites(
  */
 type LiveStatus = "off" | "live";
 
-function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveStatus {
+/** What a screen gets from the live feed: whether it is connected, and the bids that
+ *  have arrived since it was. */
+type LiveBids = { status: LiveStatus; bids: BidOverlay };
+
+const noBids: BidOverlay = {};
+
+/**
+ * Watches the lots on screen through the host's push endpoint.
+ *
+ * The transport belongs to control-center, not to this plugin: one authenticated
+ * connection carries whatever topics were asked for, and the host refcounts them, so
+ * ten screens watching the same lot cost BidRL one upstream channel. All this hook
+ * does is name the topics -- one per lot -- and fold the messages that come back.
+ */
+function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveBids {
   const key = useMemo(
     () => Array.from(new Set((lots ?? []).map((lot) => lot.id).filter(Boolean))).sort().join(","),
     [lots],
   );
   const [status, setStatus] = useState<LiveStatus>("off");
+  const [bids, setBids] = useState<BidOverlay>(noBids);
   useEffect(() => {
     if (!enabled || !key || typeof EventSource === "undefined") {
       setStatus("off");
+      setBids(noBids);
       return;
     }
+    // A new watch set is a new set of prices: anything folded for the old one would be
+    // describing rows this screen is no longer showing.
+    setBids(noBids);
+    const topics = key.split(",").map((id) => `lot:${id}`).join(",");
     const source = new EventSource(
-      `/api/plugins/bidrl/live?lots=${encodeURIComponent(key)}`,
+      `/api/push/bidrl?topics=${encodeURIComponent(topics)}`,
       { withCredentials: true },
     );
-    // The stream says only whether it is live; the bids themselves arrive as events.
-    const live = () => setStatus("live");
-    const off = () => setStatus("off");
-    source.addEventListener("watching", live);
-    source.addEventListener("heartbeat", live);
+    // Topics not yet known to be fed. Every topic starts dark: an open connection
+    // only means the host accepted it, and the plugin behind it may still be dialling
+    // or already broken. The host announces the ones it is feeding when the connection
+    // opens, so a reconnect resyncs rather than sitting dark until the next change.
+    //
+    // The badge is live only while the connection is up and nothing is dark, because
+    // "some of these prices are live" is not something one badge can honestly say.
+    let connected = false;
+    const dark = new Set(topics.split(","));
+    const settle = () => setStatus(connected && dark.size === 0 ? "live" : "off");
+    const off = () => {
+      connected = false;
+      settle();
+    };
+    // "ready" is the host's own frame. EventSource fires a native "open" of its own,
+    // which arrives first and means only that the response started, so the badge waits
+    // for the frame that says the topics are registered.
+    source.addEventListener("ready", () => {
+      connected = true;
+      settle();
+    });
+    // A payload is itself proof the topic is being fed, whatever was said before.
+    source.addEventListener("message", (event) => {
+      const topic = topicOf(event);
+      if (topic) dark.delete(topic);
+      settle();
+    });
+    source.addEventListener("message", (event) => {
+      const bid = bidFromFrame(event);
+      if (bid) setBids((current) => ({ ...current, [bid.lotId]: bid }));
+    });
+    // The plugin could not feed a lot, or its feed came back. Either way the screen
+    // keeps working off its snapshot, which is why this only moves a badge.
+    source.addEventListener("unavailable", (event) => {
+      const topic = topicOf(event);
+      if (topic) dark.add(topic);
+      settle();
+    });
+    source.addEventListener("available", (event) => {
+      const topic = topicOf(event);
+      if (topic) dark.delete(topic);
+      settle();
+    });
     source.addEventListener("closed", off);
-    source.addEventListener("idle", off);
-    source.addEventListener("unavailable", off);
-    // A live feed is an enhancement: if it cannot connect, the screen keeps working off
-    // its snapshot, so a failure closes quietly instead of retrying in a loop.
+    // Do NOT close here. EventSource reconnects on its own, and closing on the first
+    // error turns any transient drop into a permanent one -- the stream delivers a
+    // message or two and is then gone for good. readyState 2 means the browser has
+    // given up; anything else means it is still retrying, and the badge should come
+    // back by itself when it succeeds.
     source.onerror = () => {
       off();
-      source.close();
+      if (source.readyState === 2) source.close();
     };
     return () => {
       off();
       source.close();
     };
   }, [key, enabled]);
-  return status;
+  return { status, bids };
+}
+
+/** Reads the topic a control frame is about. */
+function topicOf(event: MessageEvent): string {
+  try {
+    return (JSON.parse(event.data) as { topic?: string }).topic ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Reads one bid out of a push frame. The host frames every message the same way --
+ *  a topic and the plugin's own payload -- so this is the only place that shape is
+ *  known. */
+function bidFromFrame(event: MessageEvent): BidObserved | null {
+  try {
+    const frame = JSON.parse(event.data) as { topic?: string; data?: BidObserved };
+    const bid = frame.data;
+    return bid && typeof bid.lotId === "string" && bid.currentBidCents !== undefined ? bid : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Says whether the prices on screen are arriving as they happen. Absent when they are
@@ -1972,7 +2055,7 @@ function SavedLots() {
       <PageHeader
         title="Saved"
         lede="Lots you starred, newest first. Nothing here is removed by “Remove ended” — a saved lot keeps its photos, comparable, and location after the auction closes."
-        actions={<LiveDot status={live} />}
+        actions={<LiveDot status={live.status} />}
       />
       <Stack>
         <BidrlTabs />
@@ -2058,7 +2141,7 @@ function SavedLots() {
           ) : null}
           {snap.status === "ready" ? (
             <LotBrowser
-              lots={snap.data.lots}
+              lots={overlayBids(snap.data.lots, live.bids)}
               empty={
                 narrowed
                   ? "No saved lot matches these filters."
@@ -2122,7 +2205,7 @@ function LotsCatalog() {
       <PageHeader
         title="Lots"
         lede="Every collected lot. Start from a preset, then narrow by text, bucket, category, or the locations you can actually drive to. Looking for something by purpose rather than by word? Ask on the Intent tab."
-        actions={<LiveDot status={live} />}
+        actions={<LiveDot status={live.status} />}
       />
       <Stack>
         <BidrlTabs />
@@ -2219,7 +2302,7 @@ function LotsCatalog() {
           {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
           {snap.status === "ready" ? (
             <LotBrowser
-              lots={snap.data.lots}
+              lots={overlayBids(snap.data.lots, live.bids)}
               empty={
                 narrowed
                   ? "No lot matches these filters. Clear them to see the whole catalog."
@@ -2389,7 +2472,7 @@ function AuctionView() {
         lede={auction ? undefined : "Auction"}
         actions={
           <div className="bidrl-actions">
-            <LiveDot status={live} />
+            <LiveDot status={live.status} />
             <Button
               variant="primary"
               disabled={disabled || pending}
@@ -2430,7 +2513,11 @@ function AuctionView() {
         ) : null}
         {snap.status === "ready" ? (
           <Card title="Lots" actions={<ViewToggle value={view} onChange={setView} />}>
-            <LotBrowser lots={snap.data.lots} empty="This auction has no lots yet." view={view} />
+            <LotBrowser
+              lots={overlayBids(snap.data.lots, live.bids)}
+              empty="This auction has no lots yet."
+              view={view}
+            />
           </Card>
         ) : null}
       </Stack>
@@ -2443,10 +2530,11 @@ function LotView() {
   const snap = useLot(id);
   const { busy, notice, error, run } = useAction();
   const disabled = snap.error instanceof PluginDisabledError;
-  const lot = snap.status === "ready" ? snap.data : null;
+  const stored = snap.status === "ready" ? snap.data : null;
   // The screen someone actually watches a price on: keep it on the feed while it is up.
-  const watched = useMemo(() => (lot ? [lot] : undefined), [lot]);
+  const watched = useMemo(() => (stored ? [stored] : undefined), [stored]);
   const live = useLiveBids(watched, !disabled);
+  const lot = stored ? overlayBid(stored, live.bids) : null;
   // Siblings come from the lot's own auction, so paging through a scan never leaves the
   // page to go back to a list and pick the next row.
   const siblings = useAuctionLots(lot?.auctionId ?? "");
@@ -2458,7 +2546,7 @@ function LotView() {
         lede={lot?.lotCode ? `Lot ${lot.lotCode}` : undefined}
         actions={
           <div className="bidrl-actions">
-            <LiveDot status={live} />
+            <LiveDot status={live.status} />
             <Button
               variant="primary"
               disabled={disabled || busy !== null || (lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode")}

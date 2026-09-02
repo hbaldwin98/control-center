@@ -15,6 +15,7 @@ import (
 	hostevents "github.com/hbaldwin98/control-center/host/events"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
 	hostpolicy "github.com/hbaldwin98/control-center/host/policy"
+	hostpush "github.com/hbaldwin98/control-center/host/push"
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 )
 
@@ -358,6 +359,24 @@ func Conformance(t *testing.T, newDriver func(t *testing.T, probe *Probe) Driver
 		}
 		if cfg.Label != "from-manifest" {
 			t.Fatalf("label = %q, want the manifest default", cfg.Label)
+		}
+	})
+
+	t.Run("PushToAnUnwatchedTopicIsNotAnError", func(t *testing.T) {
+		probe, _ := start(t)
+		h := probe.Host()
+		// Live delivery is best-effort by contract: a plugin publishes whether or not
+		// anyone is listening, and the host drops what nobody wants. A host that
+		// errored here would push every plugin into checking Subscribers first and
+		// racing on the answer.
+		if err := h.Push().Publish(ctx, "nobody-watching", map[string]int{"n": 1}); err != nil {
+			t.Fatalf("Publish() to an unwatched topic = %v, want nil", err)
+		}
+		if n := h.Push().Subscribers("nobody-watching"); n != 0 {
+			t.Fatalf("Subscribers() of an unwatched topic = %d, want 0", n)
+		}
+		if err := h.Push().Publish(ctx, "", nil); !errors.Is(err, hostpush.ErrInvalidTopic) {
+			t.Fatalf("Publish() to an empty topic = %v, want ErrInvalidTopic", err)
 		}
 	})
 

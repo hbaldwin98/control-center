@@ -18,6 +18,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/push"
 	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
@@ -106,10 +107,18 @@ func newCoreDriver(t *testing.T, probe *hosttest.Probe) hosttest.Driver {
 	}
 	t.Cleanup(br.Close)
 
+	pushsvc, err := push.New(pol, push.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pushsvc.Close)
+
+	// Every capability is wired, so the suite exercises the real adapter for each
+	// rather than the disabled stub a nil option leaves behind.
 	reg, err := pluginhost.New(ctx, store, pluginhost.Options{
 		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: q, AI: aisvc,
 		Browser: br, Search: search.New(pol, search.Options{Engine: search.Fake{}}),
-		Creds: creds, Refs: creds,
+		Push: pushsvc, Creds: creds, Refs: creds,
 	})
 	if err != nil {
 		t.Fatal(err)

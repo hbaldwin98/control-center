@@ -1,4 +1,4 @@
-import { parseInstant, type Event } from "@cc/ui";
+import { parseInstant } from "@cc/ui";
 
 export type Auction = {
   id: string;
@@ -283,10 +283,6 @@ export function eventBoundary(id: number | string | undefined): string {
   } catch {
     return "0";
   }
-}
-
-export function applyFeedEvent(page: FeedPage, _event: Event): FeedPage {
-  return page;
 }
 
 export function cents(n: number | null | undefined): string {
@@ -774,12 +770,7 @@ export type BidObserved = {
   reserveMet?: boolean;
 };
 
-function bidOf(event: Event): BidObserved | null {
-  if (event.type !== "bidrl.bid.observed") return null;
-  const payload = event.payload as BidObserved | undefined;
-  return payload && typeof payload.lotId === "string" ? payload : null;
-}
-
+/** Folds one live bid into a lot. */
 function withBid(lot: Lot, bid: BidObserved): Lot {
   return {
     ...lot,
@@ -794,22 +785,26 @@ function withBid(lot: Lot, bid: BidObserved): Lot {
   };
 }
 
-/** Folds a bid into a page of lots. A bid for a lot this page is not showing changes
- *  nothing, which is still an answer -- it must not cause a refetch. */
-export function applyBidToPage<T extends { lots: Lot[] }>(page: T, event: Event): T | undefined {
-  const bid = bidOf(event);
-  if (!bid) return undefined;
-  let hit = false;
-  const lots = page.lots.map((lot) => {
-    if (lot.id !== bid.lotId) return lot;
-    hit = true;
-    return withBid(lot, bid);
-  });
-  return hit ? { ...page, lots } : page;
+/** Live bids keyed by lot, newest wins. */
+export type BidOverlay = Readonly<Record<string, BidObserved>>;
+
+/**
+ * Lays live bids over a page of lots.
+ *
+ * The overlay is not a second source of truth: every bid here was written to the
+ * database before it was published, so a refetch produces the same numbers. It exists
+ * so a screen can show one price moving without refetching the list it is already
+ * showing to learn it.
+ */
+export function overlayBids(lots: readonly Lot[], bids: BidOverlay): Lot[] {
+  return lots.map((lot) => {
+    const bid = bids[lot.id];
+    return bid ? withBid(lot, bid) : lot;
+  }) as Lot[];
 }
 
-export function applyBidToLot(lot: Lot, event: Event): Lot | undefined {
-  const bid = bidOf(event);
-  if (!bid) return undefined;
-  return bid.lotId === lot.id ? withBid(lot, bid) : lot;
+/** Lays live bids over a single lot. */
+export function overlayBid(lot: Lot, bids: BidOverlay): Lot {
+  const bid = bids[lot.id];
+  return bid ? withBid(lot, bid) : lot;
 }
