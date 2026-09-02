@@ -21,12 +21,6 @@ const (
 	blobKey       = "latest.txt"
 )
 
-type tickArgs struct {
-	// Hold waits until the job context is cancelled. Tests use it to disable
-	// a running tick; cron never sets it.
-	Hold bool `json:"hold"`
-}
-
 type ticked struct {
 	At      string `json:"at"`
 	Note    string `json:"note"`
@@ -38,16 +32,6 @@ func (p *Plugin) tick(jc hostjobs.Context) error {
 	h, ok := p.host()
 	if !ok {
 		return fmt.Errorf("hello: host is not initialized")
-	}
-
-	var args tickArgs
-	if err := jc.Args(&args); err != nil {
-		return err
-	}
-	if args.Hold {
-		_ = jc.Logf("holding until cancelled")
-		<-jc.Done()
-		return jc.Err()
 	}
 
 	if err := jc.Err(); err != nil {

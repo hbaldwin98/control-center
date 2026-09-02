@@ -59,11 +59,13 @@ func (p *Plugin) handlePostTick(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
-	var args tickArgs
-	if !decodeOptionalJSON(w, r, &args) {
+	// The tick takes no arguments; a body is accepted and ignored so the UI can post
+	// an empty object.
+	var ignored struct{}
+	if !decodeOptionalJSON(w, r, &ignored) {
 		return
 	}
-	id, err := h.Jobs().Enqueue(r.Context(), "tick", args)
+	id, err := h.Jobs().Enqueue(r.Context(), "tick", nil)
 	if err != nil {
 		writeHostErr(w, err)
 		return
@@ -89,11 +91,6 @@ func (p *Plugin) handlePostChat(w http.ResponseWriter, r *http.Request) {
 		"text":         resp.Text,
 		"costMicroUsd": resp.Usage.CostMicroUSD,
 	})
-}
-
-func (p *Plugin) handleWait(w http.ResponseWriter, r *http.Request) {
-	<-r.Context().Done()
-	writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 }
 
 func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

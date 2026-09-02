@@ -25,11 +25,9 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
-	"github.com/hbaldwin98/control-center/plugins/hello"
-	"github.com/hbaldwin98/control-center/plugins/pagewatch"
 )
 
-type helloFix struct {
+type matrixFix struct {
 	t     *testing.T
 	ctx   context.Context
 	store *storage.Store
@@ -39,14 +37,14 @@ type helloFix struct {
 	q     *jobs.Queue
 	ai    *ai.Service
 	reg   *Registry
-	plug  *hello.Plugin
+	plug  *matrixPlugin
 	hold  *ai.HoldFake
 
 	mu  sync.Mutex
 	now time.Time
 }
 
-func newHelloFix(t *testing.T, hold bool) *helloFix {
+func newMatrixFix(t *testing.T, hold bool) *matrixFix {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -69,7 +67,7 @@ func newHelloFix(t *testing.T, hold bool) *helloFix {
 	bus.Start(ctx)
 	t.Cleanup(bus.Stop)
 
-	f := &helloFix{t: t, ctx: ctx, store: store, blobs: blobs, bus: bus, now: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)}
+	f := &matrixFix{t: t, ctx: ctx, store: store, blobs: blobs, bus: bus, now: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)}
 	pol, err := policy.New(store, store, bus, f.clock)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +133,7 @@ routes:
 
 	br, err := browser.New(bus, pol, browser.Options{
 		Engine: browser.NewFake(map[string]http.Handler{
-			"hello.test":  browser.HTMLHandler(`<!doctype html><article class="lot">hello</article>`),
+			"matrix.test": browser.HTMLHandler(`<!doctype html><article class="lot">hello</article>`),
 			"example.com": browser.HTMLHandler(`<!doctype html><main><h1>Example Domain</h1><p>This domain is for examples.</p></main>`),
 		}),
 	})
@@ -144,7 +142,7 @@ routes:
 	}
 	t.Cleanup(br.Close)
 
-	plug := hello.New()
+	plug := newMatrixPlugin()
 	f.plug = plug
 	reg, err := New(ctx, store, Options{
 		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: q, AI: svc, Browser: br,
@@ -153,7 +151,7 @@ routes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterAll(plug, pagewatch.New()); err != nil {
+	if err := reg.RegisterAll(plug); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.Start(ctx); err != nil {
@@ -164,33 +162,33 @@ routes:
 	return f
 }
 
-func (f *helloFix) clock() time.Time {
+func (f *matrixFix) clock() time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.now
 }
 
-func (f *helloFix) advance(d time.Duration) {
+func (f *matrixFix) advance(d time.Duration) {
 	f.mu.Lock()
 	f.now = f.now.Add(d)
 	f.mu.Unlock()
 }
 
-func (f *helloFix) enable() {
+func (f *matrixFix) enable() {
 	f.t.Helper()
-	if err := f.pol.SetBudget(f.ctx, "hello", policy.Budget{Daily: 50_000_000, OnExceed: policy.ExceedReject}); err != nil {
+	if err := f.pol.SetBudget(f.ctx, "matrix", policy.Budget{Daily: 50_000_000, OnExceed: policy.ExceedReject}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.reg.Enable(f.ctx, "hello", "test", "go"); err != nil {
+	if err := f.reg.Enable(f.ctx, "matrix", "test", "go"); err != nil {
 		f.t.Fatal(err)
 	}
 }
 
-func (f *helloFix) waitIdle(d time.Duration) {
+func (f *matrixFix) waitIdle(d time.Duration) {
 	f.t.Helper()
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
-		list, err := f.q.List(f.ctx, jobs.Filter{PluginID: "hello", Name: "tick"})
+		list, err := f.q.List(f.ctx, jobs.Filter{PluginID: "matrix", Name: "tick"})
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -209,7 +207,7 @@ func (f *helloFix) waitIdle(d time.Duration) {
 	f.t.Fatal("jobs did not go idle")
 }
 
-func (f *helloFix) waitJob(id int64, want jobs.State, d time.Duration) *jobs.Job {
+func (f *matrixFix) waitJob(id int64, want jobs.State, d time.Duration) *jobs.Job {
 	f.t.Helper()
 	deadline := time.Now().Add(d)
 	var last *jobs.Job
@@ -230,7 +228,7 @@ func (f *helloFix) waitJob(id int64, want jobs.State, d time.Duration) *jobs.Job
 	return last
 }
 
-func (f *helloFix) serve(method, path string, body []byte) *httptest.ResponseRecorder {
+func (f *matrixFix) serve(method, path string, body []byte) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	if body != nil {
@@ -240,33 +238,33 @@ func (f *helloFix) serve(method, path string, body []byte) *httptest.ResponseRec
 	return rec
 }
 
-func (f *helloFix) facade() host.Host {
-	return f.reg.facadeFor(f.plug.Manifest(), &pluginConfig{value: json.RawMessage(`{"note":"hello"}`)})
+func (f *matrixFix) facade() host.Host {
+	return f.reg.facadeFor(f.plug.Manifest(), &pluginConfig{value: json.RawMessage(`{"note":"matrix"}`)})
 }
 
-func (f *helloFix) tickCount() int {
+func (f *matrixFix) tickCount() int {
 	f.t.Helper()
 	var n int
-	if err := f.store.QueryRow(f.ctx, `SELECT count(*) FROM hello_ticks`).Scan(&n); err != nil {
+	if err := f.store.QueryRow(f.ctx, `SELECT count(*) FROM matrix_ticks`).Scan(&n); err != nil {
 		f.t.Fatal(err)
 	}
 	return n
 }
 
-func TestHelloDisabledUntilEnabled(t *testing.T) {
-	f := newHelloFix(t, false)
-	rec := f.serve(http.MethodGet, "/api/plugins/hello/ticks", nil)
+func TestMatrixDisabledUntilEnabled(t *testing.T) {
+	f := newMatrixFix(t, false)
+	rec := f.serve(http.MethodGet, "/api/plugins/matrix/ticks", nil)
 	if rec.Code != http.StatusServiceUnavailable || !bytes.Contains(rec.Body.Bytes(), []byte("plugin_disabled")) {
 		t.Fatalf("disabled GET: %d %s", rec.Code, rec.Body.Bytes())
 	}
 }
 
-func TestHelloKillSwitchAcceptance(t *testing.T) {
-	f := newHelloFix(t, false)
+func TestMatrixKillSwitchAcceptance(t *testing.T) {
+	f := newMatrixFix(t, false)
 	f.enable()
 	f.waitIdle(3 * time.Second)
 
-	rec := f.serve(http.MethodPost, "/api/plugins/hello/tick", []byte(`{"hold":true}`))
+	rec := f.serve(http.MethodPost, "/api/plugins/matrix/tick", []byte(`{"hold":true}`))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("enqueue hold: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -276,9 +274,15 @@ func TestHelloKillSwitchAcceptance(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &posted); err != nil || posted.JobID == 0 {
 		t.Fatalf("body %s", rec.Body.Bytes())
 	}
+	// Wait for the handler to say it is holding, rather than polling for the row to
+	// read "running". The job announces its own state, so the kill switch is thrown at
+	// a moment when the work is provably in flight.
+	if !f.plug.waitHolding(3 * time.Second) {
+		t.Fatal("tick job never reached its hold")
+	}
 	running := f.waitJob(posted.JobID, jobs.StateRunning, 2*time.Second)
 
-	if err := f.reg.Disable(f.ctx, "hello", "test", "kill"); err != nil {
+	if err := f.reg.Disable(f.ctx, "matrix", "test", "kill"); err != nil {
 		t.Fatal(err)
 	}
 	j := f.waitJob(running.ID, jobs.StateCancelled, 2*time.Second)
@@ -294,7 +298,7 @@ func TestHelloKillSwitchAcceptance(t *testing.T) {
 		t.Fatalf("cron enqueued while disabled: %d -> %d", before, afterDisable)
 	}
 
-	if err := f.reg.Enable(f.ctx, "hello", "test", "back"); err != nil {
+	if err := f.reg.Enable(f.ctx, "matrix", "test", "back"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(150 * time.Millisecond)
@@ -303,16 +307,16 @@ func TestHelloKillSwitchAcceptance(t *testing.T) {
 	}
 }
 
-func TestHelloRejectsWorkAfterDisable(t *testing.T) {
-	f := newHelloFix(t, true)
+func TestMatrixRejectsWorkAfterDisable(t *testing.T) {
+	f := newMatrixFix(t, true)
 	f.enable()
 	f.waitIdle(3 * time.Second)
 	started := f.tickCount()
-	if err := f.reg.Disable(f.ctx, "hello", "test", "off"); err != nil {
+	if err := f.reg.Disable(f.ctx, "matrix", "test", "off"); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := ai.Scoped(f.ai, "hello").Chat(f.ctx, ai.ChatRequest{
+	_, err := ai.Scoped(f.ai, "matrix").Chat(f.ctx, ai.ChatRequest{
 		Model: "cheap-chat", Messages: []ai.Message{{Role: "user", Text: "x"}},
 	})
 	if !errors.Is(err, policy.ErrPluginDisabled) {
@@ -321,18 +325,18 @@ func TestHelloRejectsWorkAfterDisable(t *testing.T) {
 	if f.hold.Calls() != 0 {
 		t.Fatalf("provider called %d times after disable", f.hold.Calls())
 	}
-	page, err := f.ai.Calls(f.ctx, ai.CallQuery{PluginID: "hello"})
+	page, err := f.ai.Calls(f.ctx, ai.CallQuery{PluginID: "matrix"})
 	if err != nil || len(page.Calls) != 0 {
 		t.Fatalf("usage rows %+v %v", page, err)
 	}
 
-	rec := f.serve(http.MethodGet, "/api/plugins/hello/ticks", nil)
+	rec := f.serve(http.MethodGet, "/api/plugins/matrix/ticks", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("HTTP after disable: %d", rec.Code)
 	}
 
 	h := f.facade()
-	rows, err := h.Store().Query(f.ctx, `SELECT count(*) FROM hello_ticks`)
+	rows, err := h.Store().Query(f.ctx, `SELECT count(*) FROM matrix_ticks`)
 	if err != nil {
 		t.Fatalf("ticks still readable: %v", err)
 	}
@@ -341,17 +345,17 @@ func TestHelloRejectsWorkAfterDisable(t *testing.T) {
 	if err := h.Events().Publish(f.ctx, "ticked", "x", nil); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
 		t.Fatalf("publish: %v", err)
 	}
-	if _, err := h.Store().Exec(f.ctx, `INSERT INTO hello_ticks(at, note) VALUES ('x','x')`); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
+	if _, err := h.Store().Exec(f.ctx, `INSERT INTO matrix_ticks(at, note) VALUES ('x','x')`); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
 		t.Fatalf("sql: %v", err)
 	}
 	if _, err := h.Blobs().Put(f.ctx, "x.txt", bytes.NewReader([]byte("x")), "text/plain"); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
 		t.Fatalf("blob: %v", err)
 	}
-	if _, err := h.Browser().Open(f.ctx, hostbrowser.OpenOptions{AllowedHosts: []string{"hello.test"}}); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
+	if _, err := h.Browser().Open(f.ctx, hostbrowser.OpenOptions{AllowedHosts: []string{"matrix.test"}}); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
 		t.Fatalf("browser: %v", err)
 	}
 
-	if _, err := f.bus.Publish(f.ctx, events.Input{Type: "hello.ticked", Source: "hello", Subject: "s", Payload: map[string]string{"note": "nope"}}); err != nil {
+	if _, err := f.bus.Publish(f.ctx, events.Input{Type: "matrix.ticked", Source: "matrix", Subject: "s", Payload: map[string]string{"note": "nope"}}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(150 * time.Millisecond)
@@ -360,14 +364,14 @@ func TestHelloRejectsWorkAfterDisable(t *testing.T) {
 	}
 }
 
-func TestHelloAdmittedChatSettlesAfterDisable(t *testing.T) {
-	f := newHelloFix(t, true)
+func TestMatrixAdmittedChatSettlesAfterDisable(t *testing.T) {
+	f := newMatrixFix(t, true)
 	f.enable()
 	f.waitIdle(3 * time.Second)
 
 	done := make(chan error, 1)
 	go func() {
-		rec := f.serve(http.MethodPost, "/api/plugins/hello/chat", nil)
+		rec := f.serve(http.MethodPost, "/api/plugins/matrix/chat", nil)
 		if rec.Code != http.StatusOK {
 			done <- errors.New(rec.Body.String())
 			return
@@ -379,7 +383,7 @@ func TestHelloAdmittedChatSettlesAfterDisable(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("provider did not start")
 	}
-	if err := f.reg.Disable(f.ctx, "hello", "test", "mid-call"); err != nil {
+	if err := f.reg.Disable(f.ctx, "matrix", "test", "mid-call"); err != nil {
 		t.Fatal(err)
 	}
 	f.hold.Release()
@@ -391,7 +395,7 @@ func TestHelloAdmittedChatSettlesAfterDisable(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("chat did not finish")
 	}
-	page, err := f.ai.Calls(f.ctx, ai.CallQuery{PluginID: "hello"})
+	page, err := f.ai.Calls(f.ctx, ai.CallQuery{PluginID: "matrix"})
 	if err != nil || len(page.Calls) == 0 {
 		t.Fatalf("usage %+v %v", page, err)
 	}
@@ -400,18 +404,18 @@ func TestHelloAdmittedChatSettlesAfterDisable(t *testing.T) {
 	}
 }
 
-func TestHelloCancelsAdmittedHTTPContext(t *testing.T) {
-	f := newHelloFix(t, false)
+func TestMatrixCancelsAdmittedHTTPContext(t *testing.T) {
+	f := newMatrixFix(t, false)
 	f.enable()
 	f.waitIdle(3 * time.Second)
 
 	done := make(chan int, 1)
 	go func() {
-		rec := f.serve(http.MethodGet, "/api/plugins/hello/wait", nil)
+		rec := f.serve(http.MethodGet, "/api/plugins/matrix/wait", nil)
 		done <- rec.Code
 	}()
 	time.Sleep(50 * time.Millisecond)
-	if err := f.reg.Disable(f.ctx, "hello", "test", "stop"); err != nil {
+	if err := f.reg.Disable(f.ctx, "matrix", "test", "stop"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -424,12 +428,12 @@ func TestHelloCancelsAdmittedHTTPContext(t *testing.T) {
 	}
 }
 
-func TestHelloHappyPathTick(t *testing.T) {
-	f := newHelloFix(t, false)
+func TestMatrixHappyPathTick(t *testing.T) {
+	f := newMatrixFix(t, false)
 	f.enable()
 	f.waitIdle(3 * time.Second)
 
-	rec := f.serve(http.MethodPost, "/api/plugins/hello/tick", []byte(`{}`))
+	rec := f.serve(http.MethodPost, "/api/plugins/matrix/tick", []byte(`{}`))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tick: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -450,26 +454,26 @@ func TestHelloHappyPathTick(t *testing.T) {
 		t.Fatal("durable handler did not record a tick")
 	}
 
-	rec = f.serve(http.MethodGet, "/api/plugins/hello/ticks", nil)
+	rec = f.serve(http.MethodGet, "/api/plugins/matrix/ticks", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.Bytes())
 	}
 
-	rc, _, err := f.blobs.Scoped("hello").Get(f.ctx, "latest.txt")
+	rc, _, err := f.blobs.Scoped("matrix").Get(f.ctx, "latest.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = io.Copy(io.Discard, rc)
 	_ = rc.Close()
 
-	if err := f.reg.UpdateConfig(f.ctx, "hello", json.RawMessage(`{"note":"hi"}`), "test"); err != nil {
+	if err := f.reg.UpdateConfig(f.ctx, "matrix", json.RawMessage(`{"note":"hi"}`), "test"); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func mustList(t *testing.T, f *helloFix) []jobs.Job {
+func mustList(t *testing.T, f *matrixFix) []jobs.Job {
 	t.Helper()
-	list, err := f.q.List(f.ctx, jobs.Filter{PluginID: "hello", Name: "tick"})
+	list, err := f.q.List(f.ctx, jobs.Filter{PluginID: "matrix", Name: "tick"})
 	if err != nil {
 		t.Fatal(err)
 	}

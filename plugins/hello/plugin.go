@@ -79,7 +79,6 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "GET /ticks", Handler: http.HandlerFunc(p.handleGetTicks)},
 		{Pattern: "POST /tick", Handler: http.HandlerFunc(p.handlePostTick)},
 		{Pattern: "POST /chat", Handler: http.HandlerFunc(p.handlePostChat)},
-		{Pattern: "GET /wait", Handler: http.HandlerFunc(p.handleWait)},
 	}
 }
 
