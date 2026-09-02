@@ -36,8 +36,11 @@ type Plugin struct {
 	mu sync.Mutex
 	h  host.Host
 
-	// live is the one browser session the bid feed shares across viewers.
-	live liveSession
+	// live keeps BidRL's feed joined to the lots the host says someone is watching.
+	live liveFeed
+
+	// unwatch stops live delivery when this runtime generation ends.
+	unwatch func()
 }
 
 // New returns a BIDRL plugin. Declarations do not depend on Init.
@@ -167,7 +170,6 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /cleanup", Handler: http.HandlerFunc(p.handleCleanupExpired)},
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
-		{Pattern: "GET /live", Handler: http.HandlerFunc(p.handleLive)},
 		{Pattern: "GET /lots", Handler: http.HandlerFunc(p.handleListLots)},
 		{Pattern: "GET /locations", Handler: http.HandlerFunc(p.handleListLocations)},
 		{Pattern: "GET /lots/{id}", Handler: http.HandlerFunc(p.handleGetLot)},
@@ -198,6 +200,10 @@ func (p *Plugin) Routes() []host.Route {
 func (p *Plugin) Init(_ context.Context, h host.Host) error {
 	p.mu.Lock()
 	p.h = h
+	p.live.p = p
+	// The host holds the connections and refcounts the viewers; all this registers is
+	// what a lot topic means to BidRL.
+	p.unwatch = h.Push().Watch(&p.live)
 	p.mu.Unlock()
 	h.Log().Info("bidrl ready")
 	return nil
@@ -205,8 +211,15 @@ func (p *Plugin) Init(_ context.Context, h host.Host) error {
 
 func (p *Plugin) Shutdown(context.Context) error {
 	p.mu.Lock()
+	unwatch := p.unwatch
+	p.unwatch = nil
 	p.h = nil
 	p.mu.Unlock()
+	if unwatch != nil {
+		unwatch()
+	}
+	// The feed outlives a request by design, so it has to be ended explicitly.
+	p.live.close()
 	return nil
 }
 

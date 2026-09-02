@@ -25,8 +25,8 @@ import {
   sortLotGroups,
   sortLots,
   watchlistRules,
-  applyBidToLot,
-  applyBidToPage,
+  overlayBid,
+  overlayBids,
   type Lot,
 } from "./model";
 
@@ -490,55 +490,45 @@ describe("automationSummary", () => {
   });
 });
 
-describe("applyBidToPage", () => {
-  const event = (payload: unknown, type = "bidrl.bid.observed") => ({
-    id: "9", type, source: "plugin", subject: "1001", payload, createdAt: "",
-  });
-
-  it("folds a broadcast bid into the lot it names", () => {
-    const page = { lots: [fakeLot({ id: "1001", currentBidCents: 1500, bidCount: 4, highBidder: "a" }), fakeLot({ id: "1002", currentBidCents: 800 })] };
-    const next = applyBidToPage(page, event({ lotId: "1001", currentBidCents: 1700, bidCount: 6, highBidder: "sniper7" }));
-    expect(next).toBeDefined();
-    expect(next?.lots[0]?.currentBidCents).toBe(1700);
-    expect(next?.lots[0]?.bidCount).toBe(6);
-    expect(next?.lots[0]?.highBidder).toBe("sniper7");
+describe("overlayBids", () => {
+  it("lays a live bid over the lot it names", () => {
+    const lots = [
+      fakeLot({ id: "1001", currentBidCents: 1500, bidCount: 4, highBidder: "a" }),
+      fakeLot({ id: "1002", currentBidCents: 800 }),
+    ];
+    const next = overlayBids(lots, {
+      "1001": { lotId: "1001", currentBidCents: 1700, bidCount: 6, highBidder: "sniper7" },
+    });
+    expect(next[0]?.currentBidCents).toBe(1700);
+    expect(next[0]?.bidCount).toBe(6);
+    expect(next[0]?.highBidder).toBe("sniper7");
     // Untouched lots keep their identity, so React does not rerender the whole list.
-    expect(next?.lots[1]).toBe(page.lots[1]);
+    expect(next[1]).toBe(lots[1]);
   });
 
-  // Every other bidrl event means something this page cannot compute -- a collection,
-  // a scan, a catalog refresh across a hundred lots -- so it asks for a refetch.
-  it("asks for a refetch on any other event", () => {
-    const page = { lots: [fakeLot({ id: "1001" })] };
-    expect(applyBidToPage(page, event({ auctionId: "42" }, "bidrl.bids.refreshed"))).toBeUndefined();
-    expect(applyBidToPage(page, event({ auctionId: "42" }, "bidrl.auction.collected"))).toBeUndefined();
-    expect(applyBidToPage(page, event(undefined))).toBeUndefined();
+  it("keeps fields the bid leaves out", () => {
+    const lots = [
+      fakeLot({ id: "1001", currentBidCents: 1500, bidCount: 4, highBidder: "a", endsAt: "2026-09-02T00:00:00Z" }),
+    ];
+    const next = overlayBids(lots, { "1001": { lotId: "1001", currentBidCents: 1600 } });
+    expect(next[0]?.bidCount).toBe(4);
+    expect(next[0]?.highBidder).toBe("a");
+    expect(next[0]?.endsAt).toBe("2026-09-02T00:00:00Z");
   });
 
-  // A bid for a lot this screen is not showing is still an answer: nothing changed, and
-  // refetching the list to learn that would defeat the point.
-  it("keeps the page as it is for a lot it does not show", () => {
-    const page = { lots: [fakeLot({ id: "1001" })] };
-    expect(applyBidToPage(page, event({ lotId: "4004", currentBidCents: 100 }))).toBe(page);
-  });
-
-  it("keeps fields the event leaves out", () => {
-    const page = { lots: [fakeLot({ id: "1001", currentBidCents: 1500, bidCount: 4, highBidder: "a", endsAt: "2026-09-02T00:00:00Z" })] };
-    const next = applyBidToPage(page, event({ lotId: "1001", currentBidCents: 1600 }));
-    expect(next?.lots[0]?.bidCount).toBe(4);
-    expect(next?.lots[0]?.highBidder).toBe("a");
-    expect(next?.lots[0]?.endsAt).toBe("2026-09-02T00:00:00Z");
+  // A bid for a lot this screen is not showing changes nothing, and must not disturb
+  // the rows it is showing.
+  it("ignores a bid for a lot it does not show", () => {
+    const lots = [fakeLot({ id: "1001", currentBidCents: 1500 })];
+    const next = overlayBids(lots, { "4004": { lotId: "4004", currentBidCents: 100 } });
+    expect(next[0]).toBe(lots[0]);
   });
 });
 
-describe("applyBidToLot", () => {
-  const event = (payload: unknown) => ({
-    id: "9", type: "bidrl.bid.observed", source: "plugin", subject: "1001", payload, createdAt: "",
-  });
-
+describe("overlayBid", () => {
   it("folds a bid for this lot and ignores one for another", () => {
     const lot = fakeLot({ id: "1001", currentBidCents: 1500 });
-    expect(applyBidToLot(lot, event({ lotId: "1001", currentBidCents: 1900 }))?.currentBidCents).toBe(1900);
-    expect(applyBidToLot(lot, event({ lotId: "2002", currentBidCents: 1900 }))).toBe(lot);
+    expect(overlayBid(lot, { "1001": { lotId: "1001", currentBidCents: 1900 } }).currentBidCents).toBe(1900);
+    expect(overlayBid(lot, { "2002": { lotId: "2002", currentBidCents: 1900 } })).toBe(lot);
   });
 });

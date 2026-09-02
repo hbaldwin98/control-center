@@ -17,7 +17,7 @@ plugins/bidrl/
   itemdata.go      parse POST /api/ItemData
   pusher.go        parse GET /aucbeat/pusher/{auction}-{item}.json and live feed frames
   catalog.go       POST /api/getitems: one request per auction for every lot's bid
-  live.go          GET /live: hold the site's Pusher feed while a view is open
+  live.go          lot:<id> push topics: hold the site's Pusher feed while lots are watched
   pace.go          400ms origin spacing, 429/403 backoff
   analyze.go       one vision call per lot, category + search_terms
   price.go         grounded pricing with stored citations
@@ -127,41 +127,46 @@ request, into an event, into another request.
 
 **Live bids come off the site's own feed.** BidRL's bid gallery does not poll: it opens
 one Pusher Channels websocket and subscribes to a channel per lot, and every card
-updates as bids are broadcast. The `live` job joins that same feed through the host's
+updates as bids are broadcast. `live.go` joins that same feed through the host's
 `Browser().Subscribe`, whose `bid` event carries exactly the `{"item":{...}}` payload
 `pusher.go` already parses, and writes each broadcast onto its lot.
 
-**It is a route, not a job.** Holding a websocket for as long as someone is looking at
-a page is request-shaped work: it starts when a view opens, ends when the view closes,
-and leaves nothing anyone would resume. So Lots, Saved, the auction view, and the lot
-screen open an
-`EventSource` on `GET /live?lots=…`, and the handler holds the BidRL feed for exactly
-the lifetime of that request — navigate away and the socket closes with it. No window,
-no renewal, and no job row per view. Jobs stay for what is genuinely background:
-collection, scanning, pricing, the sweep.
+**It is a push topic, not a route and not a job.** The transport belongs to
+control-center: a screen opens one authenticated connection to
+`GET /api/push/bidrl?topics=lot:1001,lot:1002` and the host owns its framing, its
+buffer, its limits, and its teardown. See [`push.md`](../modules/push.md). This plugin
+writes no transport code at all — it declares what a topic *means*.
 
-The watched set is **whatever is on screen**, not an auction, since saved lots and
-search results span auctions and one socket carries all of them. Ids are resolved
-against `bidrl_lots` before they become channels, so an id a client made up never
-becomes a subscription or an UPDATE. Viewers share one browser session (refcounted,
-closed when the last one leaves) because sessions are capped per plugin and a tab that
-opened its own would starve collection of the one it needs.
+A topic is one lot, `lot:<id>`. The host calls `Join` when a lot gains its first viewer
+and `Leave` when it loses its last, and between those two calls that lot's channel stays
+joined on BidRL's feed. The refcount is the point: ten screens showing the same lot is
+one upstream channel, not ten, and a lot nobody has on screen costs nothing. A
+per-request stream could not do that, because each request would have opened its own
+socket and could not see the others.
 
-The stream carries `watching`, `heartbeat`, and `closed` liveness only — enough for the
-screen to show a **Live** badge, which is the one thing rendered from it. A badge that
-lied would be worse than none, so it appears only once the feed reports it is watching
-and disappears the moment it is not.
+Ids are resolved against `bidrl_lots` before they become channels, so a topic name a
+client made up never becomes a subscription or an UPDATE, and a closed lot resolves to
+nothing. The watched set is **whatever is on screen**, not an auction, since saved lots
+and search results span auctions and one socket carries all of them.
 
-The bids themselves are written to `bidrl_lots` and announced as `bid.observed` events
-carrying the values that changed: one lot, one new price. A screen folds that into the
-row it already has instead of re-fetching a list to learn one number, which is what
-keeps a closing auction from turning every bid into a request. Everything else a screen
-listens for — a collection, a scan, a catalog refresh that moved a hundred lots — stays
-an invalidation and refetches, because there is nothing useful to fold. There is still
-one path for data: the fold and the refetch both end at the same rows.
+The host's subscription is deliberately read-only — the handshake is declared at connect
+time and nothing may be written afterwards — so a change in the watched set is a redial
+with a new handshake rather than a frame on the open socket. Demand changes are settled
+for 250ms first, so opening a list view redials once for the screen instead of once per
+row, and the redial is cheap precisely because the hub already collapsed every viewer of
+a lot into one `Join`.
 
-Writes land as ordinary `bids.refreshed` events, which is what already revalidates the
-screens — no new event type, and the frontend renders nothing from the feed directly.
+A screen renders two things from the connection. The **Live** badge appears once the
+host reports the connection is open and disappears the moment it is not, because a badge
+that lied would be worse than none. And each message — one lot, the values that
+changed — is folded into the row already on screen, instead of refetching a list to
+learn one number. That is what keeps a closing auction from turning every bid into a
+request.
+
+Bids are written to `bidrl_lots` first and published second, so the database stays the
+one source of a price and a refetch produces the same numbers the fold did. Everything
+else a screen listens for — a collection, a scan, a catalog refresh that moved a hundred
+lots — stays an ordinary event and refetches, because there is nothing useful to fold.
 It is a latency improvement and never the record: a feed can miss the window before it
 connected and end whenever the server decides to, so `refresh` remains the
 reconciliation path and the two write the same columns.
@@ -270,8 +275,8 @@ right.
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
 | Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — the only scheduled ones, both inert while `automation.enabled` is false |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
-| API | `GET /live?lots=…` — SSE; holds the BidRL feed for the lots a view is showing, for the life of the request |
-| Events | `bid.observed` — one lot's new price, foldable by a screen; `bids.refreshed` — many lots moved, refetch |
+| Live | `GET /api/push/bidrl?topics=lot:<id>,…` — host-owned; one `lot:<id>` topic per lot on screen, joined to the BidRL feed while anyone is watching |
+| Events | `bids.refreshed` — many lots moved, refetch. One lot's new price is a push message, not an event: it has no history worth replaying. |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
 | API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
 | API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |

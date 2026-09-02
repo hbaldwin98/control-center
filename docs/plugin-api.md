@@ -154,6 +154,7 @@ type Host interface {
     Browser() browser.Browser // headless sessions; the host owns the engine
     Search() search.Search    // web lookup; the host owns SearXNG / the fake engine
     Jobs() jobs.Jobs         // enqueue, cancel, inspect
+    Push() push.Push         // live delivery to open screens; the host owns the transport
     Events() Events          // publish; Source is forced to your plugin ID
     Store() storage.DB       // SQL, restricted to your table prefix
     Blobs() storage.Blobs    // binary storage, namespaced to you
@@ -194,6 +195,7 @@ but invoke no plugin code.
 | Playwright, chromedp, or a raw CDP handle | The kill switch cannot close a browser the plugin launched. SSRF checks live in the host. | `h.Browser().Open` with an allowlist. See [`browser.md`](modules/browser.md). For a login form, `Fill` / `Click` / `FillCredential` — the host types the password; you never see it. For an SPA that POSTs usage to its API with a bearer token in localStorage, parse `Responses`. For an allowlisted form POST that must share the session cookie jar, `Post`. |
 | `gorilla/websocket` or any raw websocket client | Same reason as the browser: the kill switch cannot close a socket the plugin dialed, and the allowlist and private-address checks live in the host. | `sess.Subscribe` with a `wss://` URL on the allowlist. See [`browser.md`](modules/browser.md#realtime-feeds). Read-only: the handshake frames and heartbeat replies are declared before the socket opens, and the host writes nothing else. A feed is a latency improvement, never the record — keep polling to reconcile. |
 | A search-engine client or Google scrape | The kill switch cannot stop a plugin-owned crawler, and result URLs need the same public-HTTPS filter as the browser. | `h.Search().Query`. See [`search.md`](modules/search.md). The host talks to a private SearXNG sidecar (or the fake engine). |
+| An SSE or websocket endpoint of your own, and the framing, heartbeats, buffers, and teardown under it | Every plugin would rewrite the same connection handling, and each would get the backpressure wrong in its own way. The kill switch has to be able to drop a connection the plugin is feeding. | `h.Push()`. Name topics, publish payloads, and implement `Watch` to be told when a topic gains its first subscriber and loses its last. The host mounts `GET /api/push/<plugin>` and refcounts viewers, so ten screens on one topic are one lot of upstream work. See [`push.md`](modules/push.md). |
 | Anything belonging to another plugin | Plugins compose through events, not imports. | Subscribe to their events. |
 
 Ordinary `net/http` for APIs is still the plugin's own. The host-managed browser is the

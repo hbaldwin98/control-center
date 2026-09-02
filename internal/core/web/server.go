@@ -19,6 +19,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/notifications"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/push"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
 
@@ -49,6 +50,10 @@ type Deps struct {
 
 	// Jobs is the durable queue. The Jobs screen lists, inspects, and cancels.
 	Jobs *jobs.Queue
+
+	// Push is live delivery. The transport is host-owned; what travels is the
+	// publishing plugin's business.
+	Push *push.Service
 
 	// Credentials is secret-free administration. Runtime Token is never exposed here.
 	Credentials *credentials.Store
@@ -144,6 +149,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/bootstrap", s.authenticated(s.handleShellBootstrap))
 	s.mux.HandleFunc("GET /api/stream", s.authenticated(s.handleStream))
+	s.mux.HandleFunc("GET /api/push/{plugin}", s.authenticated(s.handlePush))
 
 	s.mux.HandleFunc("GET /api/events", s.authenticated(s.handleEventsQuery))
 	s.mux.HandleFunc("GET /api/events/subscribers", s.authenticated(s.handleSubscribers))

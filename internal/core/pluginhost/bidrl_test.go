@@ -20,6 +20,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
+	"github.com/hbaldwin98/control-center/internal/core/push"
 	"github.com/hbaldwin98/control-center/internal/core/search"
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 	"github.com/hbaldwin98/control-center/plugins/bidrl"
@@ -159,9 +160,15 @@ routes:
 
 	searchsvc := search.New(pol, search.Options{Engine: search.Fake{}})
 
+	pushsvc, err := push.New(pol, push.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pushsvc.Close)
+
 	reg, err := New(ctx, store, Options{
 		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: q, AI: aisvc, Browser: br,
-		Search: searchsvc, Creds: creds, Refs: creds, ShutdownTimeout: time.Second,
+		Search: searchsvc, Push: pushsvc, Creds: creds, Refs: creds, ShutdownTimeout: time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -699,26 +706,34 @@ routes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/live?lots=no-such-lot", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("live stream: %d %s", rec.Code, rec.Body.Bytes())
+	// Live delivery is the host's connection, not a plugin route and not a job. A
+	// screen names the lots it is showing as topics; the plugin is told about the
+	// demand and enqueues nothing to answer it.
+	conn, err := pushsvc.Open(ctx, "bidrl", []string{"lot:1001", "lot:no-such-lot"})
+	if err != nil {
+		t.Fatalf("push open: %v", err)
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
-		t.Fatalf("live content type = %q", ct)
+	select {
+	case msg := <-conn.Messages():
+		if msg.Event != "open" {
+			t.Fatalf("first push frame = %+v", msg)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("push connection never opened")
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "event: idle") {
-		t.Fatalf("live stream body = %q", body)
+	// A lot this install does hold becomes a live topic; an id a client invented is
+	// accepted as a name but resolves to nothing, so it never becomes a channel.
+	if n := pushsvc.Subscribers("bidrl", "lot:1001"); n != 1 {
+		t.Fatalf("subscribers of lot:1001 = %d, want 1", n)
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/live", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("live with no lots: %d %s", rec.Code, rec.Body.Bytes())
-	}
+	conn.Close()
+
 	jobsAfter, err := q.List(ctx, jobs.Filter{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(jobsAfter) != len(jobsBefore) {
-		t.Fatalf("live enqueued work: %d jobs before, %d after", len(jobsBefore), len(jobsAfter))
+		t.Fatalf("live delivery enqueued work: %d jobs before, %d after", len(jobsBefore), len(jobsAfter))
 	}
 
 	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions", nil)

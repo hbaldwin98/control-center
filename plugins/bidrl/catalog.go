@@ -408,3 +408,28 @@ func (p *Plugin) freshenLot(ctx context.Context, h host.Host, lotID string) {
 			WHERE id = ? AND (ends_at IS NULL OR ends_at < ?)`, snap.EndsAt, auctionID, snap.EndsAt)
 	}
 }
+
+// dedupeIDs keeps the caller's order, drops blanks and repeats, and bounds the list.
+func dedupeIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+		if len(out) >= maxLiveLots {
+			break
+		}
+	}
+	return out
+}
+
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}

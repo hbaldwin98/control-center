@@ -15,6 +15,7 @@ import (
 	"github.com/hbaldwin98/control-center/host/browser"
 	"github.com/hbaldwin98/control-center/host/events"
 	"github.com/hbaldwin98/control-center/host/jobs"
+	"github.com/hbaldwin98/control-center/host/push"
 	"github.com/hbaldwin98/control-center/host/search"
 	"github.com/hbaldwin98/control-center/host/storage"
 )
@@ -105,6 +106,7 @@ type Host interface {
 	Browser() browser.Browser // headless sessions; the host owns the engine
 	Search() search.Search    // web lookup; the host owns SearXNG / the fake engine
 	Jobs() jobs.Jobs
+	Push() push.Push // live delivery to connected clients; the host owns the transport
 	Events() Events
 	Store() storage.DB
 	Blobs() storage.Blobs
