@@ -143,6 +143,37 @@ const routes = new Map<string, unknown>([
   }],
 ]);
 
+/** Enough of EventSource to see which feeds a screen opens, and that it closes them. */
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  static get opened(): string[] {
+    return FakeEventSource.instances.map((s) => s.url);
+  }
+  url: string;
+  closed = false;
+  onerror: ((ev: Event) => unknown) | null = null;
+  #listeners = new Map<string, Set<() => void>>();
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+  close(): void {
+    this.closed = true;
+  }
+  addEventListener(type: string, fn: () => void): void {
+    const set = this.#listeners.get(type) ?? new Set();
+    set.add(fn);
+    this.#listeners.set(type, set);
+  }
+  removeEventListener(type: string, fn: () => void): void {
+    this.#listeners.get(type)?.delete(fn);
+  }
+  /** Delivers one server-sent event of `type`, as the plugin's live route would. */
+  emit(type: string): void {
+    for (const fn of this.#listeners.get(type) ?? []) fn();
+  }
+}
+
 let container: HTMLDivElement;
 let root: Root;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -161,6 +192,8 @@ beforeEach(() => {
     );
   });
   vi.stubGlobal("fetch", fetchMock);
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -204,6 +237,56 @@ describe("bidrl screens", () => {
   ])("mounts %s", async (path, expected) => {
     await renderAt(path);
     expect(container.textContent).toContain(expected);
+  });
+
+  // The saved and lots screens span auctions, so the feed is opened for what is on
+  // screen rather than for an auction. Nothing renders from it -- bids arrive as
+  // events, which revalidate the snapshot -- so the stream URL is the only observable.
+  it.each([
+    ["/bidrl/saved", "2002"],
+    ["/bidrl/lots", "1001"],
+    ["/bidrl/auction/42", "1001"],
+    ["/bidrl/lot/1001", "1001"],
+  ])("opens a live feed for the lots %s is showing", async (path, lotIds) => {
+    await renderAt(path);
+    const source = FakeEventSource.opened.find((url) => url.includes("/plugins/bidrl/live"));
+    expect(source, "no live feed was opened").toBeDefined();
+    expect(new URL(String(source), "http://x").searchParams.get("lots")).toBe(lotIds);
+  });
+
+  it("opens no live feed when there is nothing on screen", async () => {
+    routes.set("/api/plugins/bidrl/lots", { lots: [], latestEventId: 1 });
+    try {
+      await renderAt("/bidrl/lots");
+      expect(FakeEventSource.opened.some((url) => url.includes("/plugins/bidrl/live"))).toBe(false);
+    } finally {
+      routes.set("/api/plugins/bidrl/lots", { lots: [lot()], latestEventId: 1 });
+    }
+  });
+
+  // The stream carries liveness only, so the badge is the one thing a screen renders
+  // from it -- and it must say nothing until the feed is actually up, since a badge
+  // that lies is worse than none.
+  it("shows the live badge only once the feed reports it is watching", async () => {
+    await renderAt("/bidrl/lots");
+    const live = FakeEventSource.instances.find((s) => s.url.includes("/plugins/bidrl/live"));
+    expect(live).toBeDefined();
+    expect(container.textContent).not.toContain("Live");
+
+    act(() => live?.emit("watching"));
+    expect(container.textContent).toContain("Live");
+
+    act(() => live?.emit("closed"));
+    expect(container.textContent).not.toContain("Live");
+  });
+
+  it("closes the live feed when the screen goes away", async () => {
+    await renderAt("/bidrl/lots");
+    const live = FakeEventSource.instances.find((s) => s.url.includes("/plugins/bidrl/live"));
+    expect(live).toBeDefined();
+    expect(live?.closed).toBe(false);
+    act(() => root.render(<div />));
+    expect(live?.closed).toBe(true);
   });
 
   it("shows every section tab on each screen, with the current one marked", async () => {

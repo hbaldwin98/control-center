@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,11 +127,30 @@ routes:
 		t.Fatal(err)
 	}
 
+	// The catalog refresh is a direct allowlisted request, which does not go through
+	// the engine, so the fake site has to be reachable both ways: as pages the engine
+	// serves, and as an origin the direct client reaches.
+	site := httptest.NewServer(bidrl.FakeSite())
+	t.Cleanup(site.Close)
+	siteURL, err := url.Parse(site.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	siteClient := site.Client()
+	siteTransport := siteClient.Transport
+	siteClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = siteURL.Scheme
+		clone.URL.Host = siteURL.Host
+		return siteTransport.RoundTrip(clone)
+	})
+
 	br, err := browser.New(bus, pol, browser.Options{
 		Engine: browser.NewFake(map[string]http.Handler{
 			"www.bidrl.com": bidrl.FakeSite(),
 			"bidrl.com":     bidrl.FakeSite(),
 		}),
+		Client: siteClient,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -206,6 +226,29 @@ routes:
 		t.Fatalf("add body %s", rec.Body.Bytes())
 	}
 	waitJob(posted.JobID)
+
+	// Opening a lot re-reads that one lot, which is the cheap half of the same trade the
+	// auction view makes: one small snapshot for one lot, rather than the whole catalog.
+	// The snapshot carries the username outright, so it names the winner where the
+	// catalog can only compare ids.
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots/1001", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("lot on open: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var openedLot struct {
+		CurrentBidCents int64  `json:"currentBidCents"`
+		BidCount        int    `json:"bidCount"`
+		HighBidder      string `json:"highBidder"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &openedLot); err != nil {
+		t.Fatal(err)
+	}
+	if openedLot.CurrentBidCents != 1700 || openedLot.BidCount != 6 {
+		t.Fatalf("lot 1001 was not refreshed on open: %+v", openedLot)
+	}
+	if openedLot.HighBidder != "sniper7" {
+		t.Fatalf("lot snapshot did not name the high bidder: %q", openedLot.HighBidder)
+	}
 
 	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
 	if rec.Code != http.StatusOK {
@@ -597,6 +640,85 @@ routes:
 	}
 	if len(sites.Auctions) != 1 || sites.Auctions[0].ID != "42" {
 		t.Fatalf("SITES auctions %+v", sites.Auctions)
+	}
+
+	// The live feed is a plugin route, not a job: it answers on the request itself and
+	// enqueues nothing. Asking for lots this install does not hold opens the stream and
+	// says so, rather than joining an upstream socket for ids a client made up.
+	// Opening the auction re-reads the catalog first, so the page shows the current bid
+	// without anyone pressing refresh. The fake's catalog is one increment above what
+	// collection stored, which is what makes the difference observable.
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("auction on open: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var opened struct {
+		Lots []struct {
+			ID              string `json:"id"`
+			CurrentBidCents int64  `json:"currentBidCents"`
+			BidCount        int    `json:"bidCount"`
+			HighBidder      string `json:"highBidder"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if len(opened.Lots) == 0 {
+		t.Fatal("auction view served no lots")
+	}
+	for _, l := range opened.Lots {
+		if l.ID != "1001" {
+			continue
+		}
+		if l.CurrentBidCents != 1800 || l.BidCount != 7 {
+			t.Fatalf("lot 1001 was not refreshed on open: %+v", l)
+		}
+		// The catalog names the winner by id only, and it is a different id than the one
+		// the lot snapshot just stored, so that username must be gone rather than left
+		// describing someone who was outbid.
+		if l.HighBidder != "" {
+			t.Fatalf("stale high bidder survived a catalog refresh: %q", l.HighBidder)
+		}
+	}
+	// The other side of the same rule: lot 1002's bidder id has not changed since
+	// collection recorded it, so the catalog -- which never sends usernames -- keeps
+	// the name rather than blanking a bidder who is still winning.
+	for _, l := range opened.Lots {
+		if l.ID != "1002" {
+			continue
+		}
+		if l.CurrentBidCents != 900 || l.BidCount != 3 {
+			t.Fatalf("lot 1002 was not refreshed on open: %+v", l)
+		}
+		if l.HighBidder != "bidder2" {
+			t.Fatalf("high bidder lost while the bidder id was unchanged: %q", l.HighBidder)
+		}
+	}
+
+	jobsBefore, err := q.List(ctx, jobs.Filter{Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/live?lots=no-such-lot", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("live stream: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("live content type = %q", ct)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "event: idle") {
+		t.Fatalf("live stream body = %q", body)
+	}
+	rec = serve(http.MethodGet, "/api/plugins/bidrl/live", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("live with no lots: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	jobsAfter, err := q.List(ctx, jobs.Filter{Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobsAfter) != len(jobsBefore) {
+		t.Fatalf("live enqueued work: %d jobs before, %d after", len(jobsBefore), len(jobsAfter))
 	}
 
 	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions", nil)

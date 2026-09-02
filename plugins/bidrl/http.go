@@ -141,6 +141,9 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "auction not found")
 		return
 	}
+	// One catalog request covers every lot below, so the page can be current on open
+	// instead of waiting for someone to press refresh.
+	p.freshenAuctions(r.Context(), h, []string{id})
 	lots, err := p.queryLots(h, r, `l.auction_id = ?`, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
@@ -619,6 +622,11 @@ func (p *Plugin) handleListFavorites(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
+	if p.freshenLots(r.Context(), h, lots) {
+		if refreshed, err := p.queryLots(h, r, where, args...); err == nil {
+			lots = refreshed
+		}
+	}
 	lots = filterLotsByQuery(lots, strings.TrimSpace(r.URL.Query().Get("q")))
 	sort.SliceStable(lots, func(i, j int) bool { return lots[i].SavedAt > lots[j].SavedAt })
 	writeJSON(w, http.StatusOK, map[string]any{"lots": lots, "latestEventId": latestEventID(r.Context(), h)})
@@ -676,6 +684,11 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
+	if p.freshenLots(r.Context(), h, lots) {
+		if refreshed, err := p.queryLots(h, r, where, args...); err == nil {
+			lots = refreshed
+		}
+	}
 	lots = filterLotsByQuery(lots, q)
 	if ending == "soon" {
 		now := h.Clock().Now()
@@ -716,6 +729,9 @@ func (p *Plugin) handleGetLot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
+	// One lot is one small request, so the screen people actually watch a price on is
+	// current when it opens.
+	p.freshenLot(r.Context(), h, r.PathValue("id"))
 	lots, err := p.queryLots(h, r, `l.id = ?`, r.PathValue("id"))
 	if err != nil || len(lots) == 0 {
 		writeErr(w, http.StatusNotFound, "not_found", "lot not found")
@@ -921,6 +937,11 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
+	}
+	if p.freshenLots(r.Context(), h, lots) {
+		if refreshed, err := p.queryLots(h, r, where, args...); err == nil {
+			lots = refreshed
+		}
 	}
 	lots = filterLotsByQuery(lots, q)
 	writeJSON(w, http.StatusOK, map[string]any{"filter": filter, "q": q, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})

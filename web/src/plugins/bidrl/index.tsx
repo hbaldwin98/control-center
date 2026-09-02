@@ -99,6 +99,8 @@ import {
   type SortDir,
   type SortState,
   type WatchlistsPage,
+  applyBidToLot,
+  applyBidToPage,
 } from "./model";
 import "./index.css";
 
@@ -113,7 +115,7 @@ function useFeed(filter: string, q: string): UseSnapshotResult<FeedPage> {
     const data = await api.get<FeedPage>(`/feed${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [filter, q]);
-  return useSnapshot(load, { events: "bidrl.**" });
+  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
 }
 
 function useAuctions(): UseSnapshotResult<AuctionsPage> {
@@ -129,7 +131,7 @@ function useAuction(id: string): UseSnapshotResult<AuctionPage> {
     const data = await api.get<AuctionPage>(`/auctions/${encodeURIComponent(id)}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [id]);
-  return useSnapshot(load, { events: "bidrl.**" });
+  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
 }
 
 function useLot(id: string): UseSnapshotResult<Lot> {
@@ -137,7 +139,7 @@ function useLot(id: string): UseSnapshotResult<Lot> {
     const data = await api.get<Lot>(`/lots/${encodeURIComponent(id)}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [id]);
-  return useSnapshot(load, { events: "bidrl.**" });
+  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToLot });
 }
 
 function useSites(): UseSnapshotResult<SitesPage> {
@@ -168,7 +170,7 @@ function useLots(
     const data = await api.get<LotsPage>(`/lots${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [filter, q, bucket, category, ending, affiliate]);
-  return useSnapshot(load, { events: "bidrl.**" });
+  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
 }
 
 function useFavorites(
@@ -185,7 +187,71 @@ function useFavorites(
     const data = await api.get<FavoritesPage>(`/favorites${qs ? `?${qs}` : ""}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
   }, [q, category, affiliate]);
-  return useSnapshot(load, { events: "bidrl.**" });
+  return useSnapshot(load, { events: "bidrl.**", apply: applyBidToPage });
+}
+
+// BidRL pushes bids over its own realtime feed rather than making the gallery poll.
+// The plugin joins that feed for exactly as long as this stream is open: the route
+// holds it for the lifetime of the request, so navigating away closes the socket with
+// no job, no window, and nothing to clean up.
+//
+// Nothing is rendered from this stream. The bids are written to the plugin's own rows
+// and announced as bidrl events, which is what already revalidates the snapshot below,
+// so there is one path for data and no second way for a screen to disagree with it.
+/**
+ * `off` covers every reason there is no feed -- not asked for, not connected, closed by
+ * the server, or nothing on screen to watch. A screen only ever distinguishes "these
+ * prices are arriving as they happen" from "these prices are a snapshot".
+ */
+type LiveStatus = "off" | "live";
+
+function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveStatus {
+  const key = useMemo(
+    () => Array.from(new Set((lots ?? []).map((lot) => lot.id).filter(Boolean))).sort().join(","),
+    [lots],
+  );
+  const [status, setStatus] = useState<LiveStatus>("off");
+  useEffect(() => {
+    if (!enabled || !key || typeof EventSource === "undefined") {
+      setStatus("off");
+      return;
+    }
+    const source = new EventSource(
+      `/api/plugins/bidrl/live?lots=${encodeURIComponent(key)}`,
+      { withCredentials: true },
+    );
+    // The stream says only whether it is live; the bids themselves arrive as events.
+    const live = () => setStatus("live");
+    const off = () => setStatus("off");
+    source.addEventListener("watching", live);
+    source.addEventListener("heartbeat", live);
+    source.addEventListener("closed", off);
+    source.addEventListener("idle", off);
+    source.addEventListener("unavailable", off);
+    // A live feed is an enhancement: if it cannot connect, the screen keeps working off
+    // its snapshot, so a failure closes quietly instead of retrying in a loop.
+    source.onerror = () => {
+      off();
+      source.close();
+    };
+    return () => {
+      off();
+      source.close();
+    };
+  }, [key, enabled]);
+  return status;
+}
+
+/** Says whether the prices on screen are arriving as they happen. Absent when they are
+ *  not, because a permanently visible "not live" is just noise. */
+function LiveDot({ status }: { status: LiveStatus }) {
+  if (status !== "live") return null;
+  return (
+    <span className="bidrl-live" title="Bids are updating as they are placed">
+      <span className="bidrl-live-dot" aria-hidden="true" />
+      Live
+    </span>
+  );
 }
 
 function useFindings(state: string, watchlist: string): UseSnapshotResult<FindingsPage> {
@@ -1889,6 +1955,7 @@ function SavedLots() {
   const snap = useFavorites(q, category, affiliate);
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
+  const live = useLiveBids(snap.status === "ready" ? snap.data.lots : undefined, !disabled);
   const selected = parseAffiliateParam(affiliate);
   const narrowed = Boolean(q || affiliate) || category !== "all";
 
@@ -1905,6 +1972,7 @@ function SavedLots() {
       <PageHeader
         title="Saved"
         lede="Lots you starred, newest first. Nothing here is removed by “Remove ended” — a saved lot keeps its photos, comparable, and location after the auction closes."
+        actions={<LiveDot status={live} />}
       />
       <Stack>
         <BidrlTabs />
@@ -2025,6 +2093,7 @@ function LotsCatalog() {
   const snap = useLots(filter, q, bucket, category, ending, affiliate);
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
+  const live = useLiveBids(snap.status === "ready" ? snap.data.lots : undefined, !disabled);
   const selected = parseAffiliateParam(affiliate);
   const narrowed =
     Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
@@ -2053,6 +2122,7 @@ function LotsCatalog() {
       <PageHeader
         title="Lots"
         lede="Every collected lot. Start from a preset, then narrow by text, bucket, category, or the locations you can actually drive to. Looking for something by purpose rather than by word? Ask on the Intent tab."
+        actions={<LiveDot status={live} />}
       />
       <Stack>
         <BidrlTabs />
@@ -2287,6 +2357,10 @@ function IntentSearch() {
 function AuctionView() {
   const id = useRouteParams().id ?? "";
   const snap = useAuction(id);
+  const live = useLiveBids(
+    snap.status === "ready" ? snap.data.lots : undefined,
+    !(snap.error instanceof PluginDisabledError),
+  );
   const [view, setView] = useLotView();
   const { busy, notice, error, run, setError } = useAction();
   const [deleting, setDeleting] = useState(false);
@@ -2315,6 +2389,7 @@ function AuctionView() {
         lede={auction ? undefined : "Auction"}
         actions={
           <div className="bidrl-actions">
+            <LiveDot status={live} />
             <Button
               variant="primary"
               disabled={disabled || pending}
@@ -2369,6 +2444,9 @@ function LotView() {
   const { busy, notice, error, run } = useAction();
   const disabled = snap.error instanceof PluginDisabledError;
   const lot = snap.status === "ready" ? snap.data : null;
+  // The screen someone actually watches a price on: keep it on the feed while it is up.
+  const watched = useMemo(() => (lot ? [lot] : undefined), [lot]);
+  const live = useLiveBids(watched, !disabled);
   // Siblings come from the lot's own auction, so paging through a scan never leaves the
   // page to go back to a list and pick the next row.
   const siblings = useAuctionLots(lot?.auctionId ?? "");
@@ -2380,6 +2458,7 @@ function LotView() {
         lede={lot?.lotCode ? `Lot ${lot.lotCode}` : undefined}
         actions={
           <div className="bidrl-actions">
+            <LiveDot status={live} />
             <Button
               variant="primary"
               disabled={disabled || busy !== null || (lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode")}

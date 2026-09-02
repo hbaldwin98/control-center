@@ -753,3 +753,63 @@ export function lotNeighbours<T extends { id: string }>(
     position: `${at + 1} of ${lots.length}`,
   };
 }
+
+/**
+ * A single broadcast bid, folded into the row a screen already has.
+ *
+ * Every other bidrl event -- a collection finishing, a scan, a catalog refresh that
+ * moved a hundred lots -- is an invalidation, and returning undefined refetches. This
+ * only shortcuts the one case where the event carries the whole change: one lot, one
+ * new price, arriving several times a minute while an auction closes.
+ */
+export type BidObserved = {
+  lotId: string;
+  currentBidCents?: number;
+  minBidCents?: number;
+  bidIncrementCents?: number;
+  bidCount?: number;
+  highBidder?: string;
+  endsAt?: string;
+  biddingExtended?: boolean;
+  reserveMet?: boolean;
+};
+
+function bidOf(event: Event): BidObserved | null {
+  if (event.type !== "bidrl.bid.observed") return null;
+  const payload = event.payload as BidObserved | undefined;
+  return payload && typeof payload.lotId === "string" ? payload : null;
+}
+
+function withBid(lot: Lot, bid: BidObserved): Lot {
+  return {
+    ...lot,
+    currentBidCents: bid.currentBidCents ?? lot.currentBidCents,
+    minBidCents: bid.minBidCents ?? lot.minBidCents,
+    bidIncrementCents: bid.bidIncrementCents ?? lot.bidIncrementCents,
+    bidCount: bid.bidCount ?? lot.bidCount,
+    highBidder: bid.highBidder ?? lot.highBidder,
+    endsAt: bid.endsAt || lot.endsAt,
+    biddingExtended: bid.biddingExtended ?? lot.biddingExtended,
+    reserveMet: bid.reserveMet ?? lot.reserveMet,
+  };
+}
+
+/** Folds a bid into a page of lots. A bid for a lot this page is not showing changes
+ *  nothing, which is still an answer -- it must not cause a refetch. */
+export function applyBidToPage<T extends { lots: Lot[] }>(page: T, event: Event): T | undefined {
+  const bid = bidOf(event);
+  if (!bid) return undefined;
+  let hit = false;
+  const lots = page.lots.map((lot) => {
+    if (lot.id !== bid.lotId) return lot;
+    hit = true;
+    return withBid(lot, bid);
+  });
+  return hit ? { ...page, lots } : page;
+}
+
+export function applyBidToLot(lot: Lot, event: Event): Lot | undefined {
+  const bid = bidOf(event);
+  if (!bid) return undefined;
+  return bid.lotId === lot.id ? withBid(lot, bid) : lot;
+}

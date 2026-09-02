@@ -15,7 +15,9 @@ plugins/bidrl/
   plugin.go        manifest, wiring
   collect.go       gallery ID census, then paced ItemData POSTs and photo Gets
   itemdata.go      parse POST /api/ItemData
-  pusher.go        parse GET /aucbeat/pusher/{auction}-{item}.json
+  pusher.go        parse GET /aucbeat/pusher/{auction}-{item}.json and live feed frames
+  catalog.go       POST /api/getitems: one request per auction for every lot's bid
+  live.go          GET /live: hold the site's Pusher feed while a view is open
   pace.go          400ms origin spacing, 429/403 backoff
   analyze.go       one vision call per lot, category + search_terms
   price.go         grounded pricing with stored citations
@@ -88,8 +90,17 @@ ignored so the calendar close matches BidRL's displayed Pacific time. Optional
 `POST /lots/{id}/enrich` re-POSTs ItemData for one lot when the operator wants a fuller
 record again.
 
-**Origin requests are paced.** ItemData POSTs and pusher GETs share one in-flight slot
-and a 400ms minimum interval. HTTP 429 or 403 backs off; three consecutive such responses
+**Bids are read one auction at a time, not one lot at a time.** `POST /api/getitems`
+returns every open lot's bid state for an auction in a single response -- a 444-lot
+auction is one 2 MB request in about 0.6s. The per-lot pusher snapshot answers the same
+question 444 times, spaced by the pacer, so it is used only where it really is one lot:
+the lot screen, where a few hundred bytes beats two megabytes of an auction nobody is
+looking at. `refresh` and the list views go through the catalog; the lot view goes
+through the snapshot. Neither goes through a browser session -- both are direct
+allowlisted requests, so a page load costs no engine and no session slot.
+
+**Origin requests are paced.** ItemData POSTs, catalog POSTs, and pusher GETs share one
+in-flight slot and a 400ms minimum interval. HTTP 429 or 403 backs off; three consecutive such responses
 stop the job rather than continuing into a ban.
 
 **Everything is user-triggered except two scheduled ticks, and those default to off.**
@@ -97,6 +108,75 @@ Collection starts from "add auction" or "collect", a scan from "scan", search fr
 "search", intent matching from "Ask", SITES listing from "refresh list", pricing from that
 scan or from "reprice", bids from "refresh bids", a single-lot ItemData refresh from
 "enrich", expired-record deletion from "Remove ended", and a watchlist from "Run now".
+
+**Bids are current on open.** Every screen that shows a price re-reads it before
+rendering: list views re-read the catalog for the auctions they are about to show (one
+request per auction, which is the only reason that is affordable at page-load time),
+and the lot screen re-reads its one lot. It stays inside a budget
+rather than becoming a job: a 30s TTL skips auctions refreshed moments ago, at most
+three auctions are fetched for one screen (soonest-closing first, where a wrong price
+matters most), and a 2.5s deadline gives up and serves what is stored. None of it can
+fail a request; the rows are already there. An auction counts as stale when its
+*stalest* open lot is stale -- one lot refreshed a moment ago by its own screen says
+nothing about the two hundred beside it -- and closed lots are left out of the question,
+since their prices cannot move.
+
+The TTL is what keeps this from feeding itself: a screen revalidates on every
+`bids.refreshed` event, so without it an active auction would turn one bid into a
+request, into an event, into another request.
+
+**Live bids come off the site's own feed.** BidRL's bid gallery does not poll: it opens
+one Pusher Channels websocket and subscribes to a channel per lot, and every card
+updates as bids are broadcast. The `live` job joins that same feed through the host's
+`Browser().Subscribe`, whose `bid` event carries exactly the `{"item":{...}}` payload
+`pusher.go` already parses, and writes each broadcast onto its lot.
+
+**It is a route, not a job.** Holding a websocket for as long as someone is looking at
+a page is request-shaped work: it starts when a view opens, ends when the view closes,
+and leaves nothing anyone would resume. So Lots, Saved, the auction view, and the lot
+screen open an
+`EventSource` on `GET /live?lots=…`, and the handler holds the BidRL feed for exactly
+the lifetime of that request — navigate away and the socket closes with it. No window,
+no renewal, and no job row per view. Jobs stay for what is genuinely background:
+collection, scanning, pricing, the sweep.
+
+The watched set is **whatever is on screen**, not an auction, since saved lots and
+search results span auctions and one socket carries all of them. Ids are resolved
+against `bidrl_lots` before they become channels, so an id a client made up never
+becomes a subscription or an UPDATE. Viewers share one browser session (refcounted,
+closed when the last one leaves) because sessions are capped per plugin and a tab that
+opened its own would starve collection of the one it needs.
+
+The stream carries `watching`, `heartbeat`, and `closed` liveness only — enough for the
+screen to show a **Live** badge, which is the one thing rendered from it. A badge that
+lied would be worse than none, so it appears only once the feed reports it is watching
+and disappears the moment it is not.
+
+The bids themselves are written to `bidrl_lots` and announced as `bid.observed` events
+carrying the values that changed: one lot, one new price. A screen folds that into the
+row it already has instead of re-fetching a list to learn one number, which is what
+keeps a closing auction from turning every bid into a request. Everything else a screen
+listens for — a collection, a scan, a catalog refresh that moved a hundred lots — stays
+an invalidation and refetches, because there is nothing useful to fold. There is still
+one path for data: the fold and the refetch both end at the same rows.
+
+Writes land as ordinary `bids.refreshed` events, which is what already revalidates the
+screens — no new event type, and the frontend renders nothing from the feed directly.
+It is a latency improvement and never the record: a feed can miss the window before it
+connected and end whenever the server decides to, so `refresh` remains the
+reconciliation path and the two write the same columns.
+
+The catalog and the feed carry the same fields under the same names, so both write a lot
+the same way -- with one exception. The catalog names the high bidder by numeric id and
+never by username, so a stored name survives only while the id confirms it is still the
+same person; when the id changes, or on a lot's first catalog refresh when there is no
+id yet to compare, the name is cleared rather than left describing someone who was
+outbid. The feed and ItemData both carry the username, so it returns as soon as either
+sees the lot.
+
+The feed's frames identify the lot only by channel name — the broadcast item object
+carries no id of its own — and `current_bid` arrives as a JSON string on one frame and
+a number on the next. Both shapes are pinned by fixtures captured from production.
 
 The exceptions are `sweep` and `match` — see [automation](#automation). Both check
 `automation.enabled` before doing anything, and it is `false` by default, so a fresh
@@ -189,7 +269,9 @@ right.
 |---|---|
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
 | Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — the only scheduled ones, both inert while `automation.enabled` is false |
-| API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh` |
+| API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
+| API | `GET /live?lots=…` — SSE; holds the BidRL feed for the lots a view is showing, for the life of the request |
+| Events | `bid.observed` — one lot's new price, foldable by a screen; `bids.refreshed` — many lots moved, refetch |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
 | API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
 | API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |
@@ -502,7 +584,7 @@ full-window view.
   plus keyword overlap and keeps only what stays close to the best match. It does not re-read
   photographs. Vectors live in `bidrl_lot_embeddings`, are skipped and dropped when a lot
   has ended, and are deleted with the lot on "Remove ended".
-- ItemData and pusher traffic to BidRL is paced at 400ms with one request in flight. Three
+- ItemData, catalog, and pusher traffic to BidRL is paced at 400ms with one request in flight. Three
   consecutive HTTP 429 or 403 responses stop the job.
 - Disabling BIDRL makes new plugin HTTP requests return `503`, blocks new jobs, AI
   dispatches, and browser sessions, closes admitted browser sessions, and cancels running

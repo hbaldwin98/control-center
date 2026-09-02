@@ -35,6 +35,9 @@ const (
 type Plugin struct {
 	mu sync.Mutex
 	h  host.Host
+
+	// live is the one browser session the bid feed shares across viewers.
+	live liveSession
 }
 
 // New returns a BIDRL plugin. Declarations do not depend on Init.
@@ -164,6 +167,7 @@ func (p *Plugin) Routes() []host.Route {
 		{Pattern: "POST /cleanup", Handler: http.HandlerFunc(p.handleCleanupExpired)},
 		{Pattern: "POST /auctions/{id}/scan", Handler: http.HandlerFunc(p.handleScan)},
 		{Pattern: "POST /auctions/{id}/refresh", Handler: http.HandlerFunc(p.handleRefresh)},
+		{Pattern: "GET /live", Handler: http.HandlerFunc(p.handleLive)},
 		{Pattern: "GET /lots", Handler: http.HandlerFunc(p.handleListLots)},
 		{Pattern: "GET /locations", Handler: http.HandlerFunc(p.handleListLocations)},
 		{Pattern: "GET /lots/{id}", Handler: http.HandlerFunc(p.handleGetLot)},

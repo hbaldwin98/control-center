@@ -24,10 +24,14 @@ type itemRecord struct {
 	IncrementCents *int64
 	BidCount       int
 	HighBidder     string
-	EndsAt         string
-	BiddingExt     bool
-	ReserveMet     bool
-	Images         []string
+	// HighBidderID is BidRL's numeric bidder id. Recording it alongside the username is
+	// what lets a later catalog refresh -- which knows only the id -- tell whether the
+	// stored name still belongs to whoever is winning, instead of clearing it.
+	HighBidderID string
+	EndsAt       string
+	BiddingExt   bool
+	ReserveMet   bool
+	Images       []string
 }
 
 func parseItemData(auctionID, itemID string, body []byte) (itemRecord, bool) {
@@ -52,7 +56,8 @@ func parseItemData(auctionID, itemID string, body []byte) (itemRecord, bool) {
 		LotCode:      firstString(item, "lot_number", "lotNumber", "lot"),
 		Description:  collapseText(html.UnescapeString(firstString(item, "description", "item_description", "desc"))),
 		AuctionTitle: collapseText(html.UnescapeString(firstString(auction, "title", "auction_title"))),
-		HighBidder:   firstString(item, "highbidder_username", "high_bidder_username", "high_bidder"),
+		HighBidder:   firstString(item, "highbidder_username", "high_bidder_username"),
+		HighBidderID: firstString(item, "high_bidder"),
 		BidCount:     firstInt(item, "bid_count", "bids", "num_bids"),
 		BiddingExt:   firstBool(item, "bidding_extended", "extended"),
 		ReserveMet:   firstBool(item, "reserve_met", "reserveMet"),
@@ -75,6 +80,7 @@ func parseItemData(auctionID, itemID string, body []byte) (itemRecord, bool) {
 	rec.Description = truncateRunes(rec.Description, 4000)
 	rec.LotCode = strings.TrimSpace(rec.LotCode)
 	rec.HighBidder = truncateRunes(strings.TrimSpace(rec.HighBidder), 80)
+	rec.HighBidderID = truncateRunes(strings.TrimSpace(rec.HighBidderID), 80)
 	if rec.URL == "" && rec.AuctionID != "" && rec.ItemID != "" {
 		rec.URL = fmt.Sprintf("https://www.bidrl.com/auction/%s/item/%s/", rec.AuctionID, rec.ItemID)
 	}

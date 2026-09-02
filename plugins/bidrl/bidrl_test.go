@@ -176,7 +176,7 @@ func TestPluginContract(t *testing.T) {
 	if !m.Automated {
 		t.Fatalf("a plugin with cron must declare Automated")
 	}
-	if len(p.Routes()) != 34 {
+	if len(p.Routes()) != 35 {
 		t.Fatalf("routes = %d", len(p.Routes()))
 	}
 	if len(p.Subscriptions()) != 1 || p.Subscriptions()[0].Durable == nil {
@@ -192,6 +192,7 @@ func TestPluginContract(t *testing.T) {
 		"bidrl_lots", "bidrl_affiliate_auctions", "itemdata_at", "reused_from_lot_id",
 		"bidrl_intent_searches", "bidrl_lot_embeddings", "affiliate_id",
 		"bidrl_favorites", "bidrl_watchlists", "strftime", "bidrl_automation",
+		"high_bidder_id",
 	}
 	if len(mig.migrations) != len(wantMigrations) {
 		t.Fatalf("migrations = %d, want %d", len(mig.migrations), len(wantMigrations))
@@ -1274,5 +1275,209 @@ func TestMigrationVersionsAreUniqueAndIncreasing(t *testing.T) {
 		}
 		seen[m.Version] = m.Name
 		prev = m.Version
+	}
+}
+
+func TestParsePusherFrameReadsBroadcastBid(t *testing.T) {
+	frame := []byte(`{"event":"bid","channel":"www.bidrl.com-item-1001","data":"{\"item\":{\"id\":1001,\"current_bid\":\"17.00\",\"minimum_bid\":\"18.00\",\"bid_count\":5,\"highbidder_username\":\"goldwing44\",\"end_time\":\"1788396360\",\"bidding_extended\":true}}"}`)
+	ev, ok := parsePusherFrame(frame)
+	if !ok {
+		t.Fatal("frame not parsed")
+	}
+	if ev.ItemID != "1001" {
+		t.Errorf("ItemID = %q, want 1001", ev.ItemID)
+	}
+	if ev.Snap.BidCents == nil || *ev.Snap.BidCents != 1700 {
+		t.Errorf("BidCents = %v, want 1700", ev.Snap.BidCents)
+	}
+	if ev.Snap.BidCount != 5 || ev.Snap.HighBidder != "goldwing44" {
+		t.Errorf("snapshot = %+v", ev.Snap)
+	}
+	if !ev.Snap.BiddingExt {
+		t.Error("bidding_extended lost")
+	}
+	if ev.Snap.EndsAt == "" {
+		t.Error("EndsAt lost")
+	}
+}
+
+func TestParsePusherFrameAcceptsInlineObjectAndChannelID(t *testing.T) {
+	frame := []byte(`{"event":"bid","channel":"www.bidrl.com-item-1002","data":{"item":{"current_bid":"9.00","bid_count":3}}}`)
+	ev, ok := parsePusherFrame(frame)
+	if !ok {
+		t.Fatal("inline object payload not parsed")
+	}
+	if ev.ItemID != "1002" {
+		t.Errorf("ItemID = %q, want 1002 from the channel name", ev.ItemID)
+	}
+}
+
+func TestParsePusherFrameIgnoresProtocolChatter(t *testing.T) {
+	for _, frame := range []string{
+		`{"event":"pusher:connection_established","data":"{\"socket_id\":\"1.2\"}"}`,
+		`{"event":"pusher_internal:subscription_succeeded","channel":"www.bidrl.com-item-1001","data":"{}"}`,
+		`{"event":"pusher:ping","data":"{}"}`,
+		`{"event":"minimum_bid","channel":"www.bidrl.com-item-1001","data":"{\"minimum_bid\":\"3.00\"}"}`,
+		`{"event":"bid","channel":"www.bidrl.com-item-1001","data":"{\"item\":{}}"}`,
+		`not json`,
+	} {
+		if ev, ok := parsePusherFrame([]byte(frame)); ok {
+			t.Errorf("parsePusherFrame(%s) = %+v, want ignored", frame, ev)
+		}
+	}
+}
+
+func TestSubscribeFramesJoinOneChannelPerLot(t *testing.T) {
+	frames := subscribeFrames(map[string]liveLot{
+		"1001": {ID: "1001", AuctionID: "42"},
+		"1002": {ID: "1002", AuctionID: "99"},
+	})
+	if len(frames) != 2 {
+		t.Fatalf("got %d frames, want 2", len(frames))
+	}
+	if !strings.Contains(string(frames[0]), `"www.bidrl.com-item-1001"`) {
+		t.Errorf("frame = %s", frames[0])
+	}
+	if !strings.Contains(string(frames[0]), `"pusher:subscribe"`) {
+		t.Errorf("frame = %s", frames[0])
+	}
+}
+
+func TestDedupeIDsKeepsOrderAndCaps(t *testing.T) {
+	got := dedupeIDs([]string{" 1001 ", "1002", "1001", "", "  "})
+	if len(got) != 2 || got[0] != "1001" || got[1] != "1002" {
+		t.Fatalf("dedupeIDs = %q", got)
+	}
+	many := make([]string, maxLiveLots+50)
+	for i := range many {
+		many[i] = fmt.Sprint(i)
+	}
+	if n := len(dedupeIDs(many)); n != maxLiveLots {
+		t.Errorf("cap = %d, want %d", n, maxLiveLots)
+	}
+}
+
+func TestParsePusherFrameReadsCapturedProductionFrames(t *testing.T) {
+	frames := []struct {
+		raw    string
+		lot    string
+		cents  int64
+		bidder string
+		bids   int
+	}{
+		{`{"event":"bid","data":"{\"item\":{\"current_bid\":\"25.00\",\"bid_count\":36,\"minimum_bid\":25.25,\"high_bidder\":\"54991\",\"highbidder_username\":\"Melface92\",\"bidding_extended\":false,\"end_time\":\"1788312870\",\"current_increment\":\"0.25\",\"reserve_met\":false}}","channel":"www.bidrl.com-item-25814891"}`,
+			"25814891", 2500, "Melface92", 36},
+		{`{"event":"bid","data":"{\"item\":{\"current_bid\":\"90.53\",\"high_bidder\":\"174351\",\"buyer_number\":\"\",\"bid_count\":344,\"minimum_bid\":90.78,\"highbidder_username\":\"Drakeley\",\"bidding_extended\":false,\"end_time\":\"1788312420\",\"current_increment\":\"0.25\",\"reserve_met\":false}}","channel":"www.bidrl.com-item-25814553"}`,
+			"25814553", 9053, "Drakeley", 344},
+		{`{"event":"bid","data":"{\"item\":{\"bid_count\":32,\"current_bid\":28.75,\"minimum_bid\":29,\"high_bidder\":\"59396\",\"highbidder_username\":\"Rober\",\"bidding_extended\":false,\"end_time\":\"1788312555\",\"current_increment\":\"0.25\",\"reserve_met\":false}}","channel":"www.bidrl.com-item-25814904"}`,
+			"25814904", 2875, "Rober", 32},
+	}
+	for _, want := range frames {
+		ev, ok := parsePusherFrame([]byte(want.raw))
+		if !ok {
+			t.Fatalf("lot %s: frame not parsed", want.lot)
+		}
+		if ev.ItemID != want.lot {
+			t.Errorf("ItemID = %q, want %q from the channel name", ev.ItemID, want.lot)
+		}
+		if ev.Snap.BidCents == nil || *ev.Snap.BidCents != want.cents {
+			t.Errorf("lot %s: BidCents = %v, want %d", want.lot, ev.Snap.BidCents, want.cents)
+		}
+		if ev.Snap.HighBidder != want.bidder || ev.Snap.BidCount != want.bids {
+			t.Errorf("lot %s: snapshot = %+v", want.lot, ev.Snap)
+		}
+		if ev.Snap.EndsAt == "" {
+			t.Errorf("lot %s: EndsAt lost", want.lot)
+		}
+	}
+}
+
+// The field shapes here are what production actually sends: ids and counts as strings,
+// current_bid as a string on one lot and a number on the next, the high bidder as a
+// numeric id with no username anywhere, and a per-item time_offset.
+func TestParseCatalogBidsReadsEveryLotInOneResponse(t *testing.T) {
+	body := []byte(`{"total":"3","page":"1","perpage":"500","total_pages":"1","items":[
+		{"id":"25811337","auction_id":"191449","current_bid":"1.00","minimum_bid":"1.25","bid_count":"1",
+		 "high_bidder":"54991","end_time":"1788390000","time_offset":-7200,"current_increment":"0.25",
+		 "bidding_extended":"0","reserve_met":false},
+		{"id":"25814904","auction_id":"191449","current_bid":28.75,"minimum_bid":29,"bid_count":32,
+		 "high_bidder":"59396","end_time":"1788312555","time_offset":-7200,"current_increment":"0.25",
+		 "bidding_extended":"1","reserve_met":true},
+		{"auction_id":"191449","current_bid":"5.00"}
+	]}`)
+	bids, ok := parseCatalogBids(body)
+	if !ok {
+		t.Fatal("catalog not parsed")
+	}
+	// The third item has no id, so there is nothing to write it onto.
+	if len(bids.Snapshots) != 2 {
+		t.Fatalf("snapshots = %d, want 2", len(bids.Snapshots))
+	}
+	if bids.Total != 3 || bids.Pages != 1 {
+		t.Errorf("total = %d, pages = %d", bids.Total, bids.Pages)
+	}
+
+	first := bids.Snapshots["25811337"]
+	if first.BidCents == nil || *first.BidCents != 100 || first.BidCount != 1 {
+		t.Errorf("first = %+v", first)
+	}
+	if first.HighBidderID != "54991" {
+		t.Errorf("HighBidderID = %q", first.HighBidderID)
+	}
+	// The catalog never names the bidder, which is what makes the id load-bearing.
+	if first.HighBidder != "" {
+		t.Errorf("HighBidder = %q, want empty", first.HighBidder)
+	}
+	if first.EndsAt == "" {
+		t.Error("EndsAt lost")
+	}
+
+	second := bids.Snapshots["25814904"]
+	if second.BidCents == nil || *second.BidCents != 2875 {
+		t.Errorf("numeric current_bid = %v", second.BidCents)
+	}
+	if second.MinBidCents == nil || *second.MinBidCents != 2900 {
+		t.Errorf("numeric minimum_bid = %v", second.MinBidCents)
+	}
+	if !second.BiddingExt || !second.ReserveMet {
+		t.Errorf("flags = %+v", second)
+	}
+}
+
+func TestParseCatalogBidsRejectsUnrelatedJSON(t *testing.T) {
+	for _, body := range []string{`{"items":[]}`, `{"total":"3"}`, `not json`, `{"items":[{"auction_id":"1"}]}`} {
+		if bids, ok := parseCatalogBids([]byte(body)); ok {
+			t.Errorf("parseCatalogBids(%s) = %+v, want rejected", body, bids)
+		}
+	}
+}
+
+// The catalog and the feed carry the same fields under the same names, so both write a
+// lot the same way. This pins that: one payload through each parser must agree.
+func TestCatalogAndFeedAgreeOnTheSameLot(t *testing.T) {
+	catalogBody := []byte(`{"total":"1","total_pages":"1","items":[{"id":"1001","current_bid":"25.00",
+		"minimum_bid":"25.25","bid_count":"36","high_bidder":"54991","end_time":"1788312870","time_offset":-7200}]}`)
+	feedFrame := []byte(`{"event":"bid","channel":"www.bidrl.com-item-1001","data":"{\"item\":{\"current_bid\":\"25.00\",` +
+		`\"minimum_bid\":25.25,\"bid_count\":36,\"high_bidder\":\"54991\",\"highbidder_username\":\"Melface92\",` +
+		`\"end_time\":\"1788312870\",\"time_offset\":-7200}}"}`)
+
+	cat, ok := parseCatalogBids(catalogBody)
+	if !ok {
+		t.Fatal("catalog not parsed")
+	}
+	ev, ok := parsePusherFrame(feedFrame)
+	if !ok {
+		t.Fatal("frame not parsed")
+	}
+	got := cat.Snapshots["1001"]
+	if *got.BidCents != *ev.Snap.BidCents || got.BidCount != ev.Snap.BidCount || got.EndsAt != ev.Snap.EndsAt {
+		t.Fatalf("catalog %+v disagrees with feed %+v", got.pusherSnapshot, ev.Snap)
+	}
+	if got.HighBidderID != ev.Snap.HighBidderID {
+		t.Errorf("bidder id: catalog %q, feed %q", got.HighBidderID, ev.Snap.HighBidderID)
+	}
+	// Only the feed can name the bidder.
+	if got.HighBidder != "" || ev.Snap.HighBidder != "Melface92" {
+		t.Errorf("names: catalog %q, feed %q", got.HighBidder, ev.Snap.HighBidder)
 	}
 }

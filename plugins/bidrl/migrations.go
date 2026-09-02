@@ -286,6 +286,12 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			) STRICT;
 			INSERT INTO bidrl_automation(id) VALUES (1);
 		`,
+	}, {
+		Version: 12,
+		Name:    "high_bidder_id",
+		Up: `
+			ALTER TABLE bidrl_lots ADD COLUMN high_bidder_id TEXT NOT NULL DEFAULT '';
+		`,
 	}})
 }
 

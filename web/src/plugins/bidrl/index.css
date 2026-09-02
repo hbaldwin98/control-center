@@ -261,11 +261,13 @@
 
 .bidrl-lot-card__where {
   color: var(--text-muted);
+  text-align: right;
 }
 
 .bidrl-lot-card__where .bidrl-lot-location {
   display: block;
   max-width: none;
+  text-align: right;
 }
 
 .bidrl-lot-card__facts > .cc-badge,
@@ -778,4 +780,34 @@ tr.bidrl-similar-row td:first-child {
   flex-direction: column;
   gap: 4px;
   align-items: flex-start;
+}
+
+/* Live feed indicator.
+   Only rendered while bids are actually streaming, so it needs no "off" state. The dot
+   pulses because a static one reads as a status light that might be stale. */
+.bidrl-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--cc-text-muted, #5b6472);
+  white-space: nowrap;
+}
+
+.bidrl-live-dot {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--cc-success, #1f9d55);
+  animation: bidrl-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes bidrl-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bidrl-live-dot { animation: none; }
 }

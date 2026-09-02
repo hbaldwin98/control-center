@@ -51,7 +51,13 @@ export function useEvents<T = unknown>(
 }
 
 /** Called for each event that arrives after a snapshot's boundary. */
-export type ApplyEvent<T> = (current: T, event: Event) => T;
+/**
+ * Folds one later event into the current state. Returning `undefined` means this event
+ * cannot be folded, and the snapshot is refetched instead -- which is what lets a
+ * reducer handle the one event it understands without having to model every other event
+ * its pattern matches.
+ */
+export type ApplyEvent<T> = (current: T, event: Event) => T | undefined;
 
 export type UseSnapshotOptions<T> = {
   /** Stream pattern, or patterns, whose events update this snapshot. */
@@ -132,13 +138,15 @@ export function useSnapshot<T>(
         for (const event of pending) {
           if (!idAbove(event.id, snap.asOfEventId) || seen.has(event.id)) continue;
           seen.add(event.id);
-          if (applyRef.current) current = applyRef.current(current, event);
-          else {
-            // No reducer: the event is an invalidation. Refetch instead of guessing.
+          const folded = applyRef.current?.(current, event);
+          if (folded === undefined) {
+            // No reducer, or one that cannot fold this event: it is an invalidation.
+            // Refetch instead of guessing.
             for (const b of buffers) b.close();
             if (!cancelled) reload();
             return;
           }
+          current = folded;
         }
         setState({ status: "ready", data: current, error: null });
 
@@ -150,11 +158,17 @@ export function useSnapshot<T>(
               reload();
               return;
             }
-            setState((prev) =>
-              prev.status === "ready"
-                ? { status: "ready", data: fold(prev.data, event), error: null }
-                : prev,
-            );
+            let refetch = false;
+            setState((prev) => {
+              if (prev.status !== "ready") return prev;
+              const folded = fold(prev.data, event);
+              if (folded === undefined) {
+                refetch = true;
+                return prev;
+              }
+              return { status: "ready", data: folded, error: null };
+            });
+            if (refetch) reload();
           };
           for (const p of patterns) unsubs.push(stream.subscribe(p, onEvent));
         }

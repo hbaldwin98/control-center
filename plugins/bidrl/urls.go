@@ -16,6 +16,40 @@ var allowedHosts = []string{
 	"d3ugkdpeq35ojy.cloudfront.net",
 }
 
+// BidRL's realtime feed is Pusher Channels: the site config names the app key and the
+// us3 cluster, and every catalog card subscribes to one channel per lot over a single
+// multiplexed socket. The websocket host is not on allowedHosts because nothing may
+// fetch https from it; it is added to the session allowlist only by the live job.
+const (
+	pusherWSHost      = "ws-us3.pusher.com"
+	pusherAppKey      = "8a9aa527c32e9ca02b0f"
+	pusherChannelBase = "www.bidrl.com"
+)
+
+// feedURL is the Pusher Channels endpoint for the app key the site ships.
+func feedURL() string {
+	return "wss://" + pusherWSHost + "/app/" + pusherAppKey +
+		"?protocol=7&client=control-center&version=1.0"
+}
+
+// itemChannel is the per-lot channel the bid gallery subscribes to. Its "bid" event
+// carries the same {"item":{...}} payload the polled snapshot does.
+func itemChannel(itemID string) string {
+	return pusherChannelBase + "-item-" + itemID
+}
+
+// itemIDFromChannel is itemChannel reversed, for a frame whose payload omits the id.
+func itemIDFromChannel(channel string) string {
+	return strings.TrimPrefix(channel, pusherChannelBase+"-item-")
+}
+
+// feedHosts is the session allowlist for the live job: the site, plus the feed.
+func feedHosts() []string {
+	out := make([]string, 0, len(allowedHosts)+1)
+	out = append(out, allowedHosts...)
+	return append(out, pusherWSHost)
+}
+
 func allowedHostSet() map[string]struct{} {
 	out := make(map[string]struct{}, len(allowedHosts))
 	for _, h := range allowedHosts {

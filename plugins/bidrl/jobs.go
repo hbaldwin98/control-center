@@ -82,6 +82,9 @@ func (p *Plugin) repriceJob(jc hostjobs.Context) error {
 	return p.priceLot(jc, h, lot, basis, model, ident, notes, "", true)
 }
 
+// refreshJob re-reads one auction's bids from the catalog endpoint. That is a single
+// request for every lot in the auction, so this no longer opens a browser session, no
+// longer walks the lots, and no longer pays the pacer once per lot.
 func (p *Plugin) refreshJob(jc hostjobs.Context) error {
 	h, ok := p.host()
 	if !ok {
@@ -91,82 +94,29 @@ func (p *Plugin) refreshJob(jc hostjobs.Context) error {
 	if err := jc.Args(&args); err != nil {
 		return err
 	}
-	rows, err := h.Store().Query(jc, `SELECT id, title FROM bidrl_lots WHERE auction_id = ? ORDER BY id`, args.AuctionID)
-	if err != nil {
-		return err
+	if args.AuctionID == "" {
+		return hostjobs.Permanent(fmt.Errorf("bidrl: refresh needs an auction id"))
 	}
-	type item struct{ ID, Title string }
-	var lots []item
-	for rows.Next() {
-		var it item
-		if err := rows.Scan(&it.ID, &it.Title); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		lots = append(lots, it)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	sess, err := h.Browser().Open(jc, hostbrowser.OpenOptions{AllowedHosts: allowedHosts})
-	if err != nil {
-		return err
-	}
-	defer sess.Close(jc)
-	page, err := sess.NewPage(jc)
-	if err != nil {
-		return err
-	}
-	defer page.Close(jc)
-
-	var gallery string
-	_ = h.Store().QueryRow(jc, `SELECT url FROM bidrl_auctions WHERE id = ?`, args.AuctionID).Scan(&gallery)
-	if gallery != "" {
-		_ = page.Goto(jc, gallery)
-		_ = page.WaitFor(jc, "body", 15*time.Second)
-	}
-
+	_ = jc.Progress(0.1, "reading the catalog")
 	pace := newPacer(bidrlMinInterval)
-	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
-	var endsAt string
-	for i, lot := range lots {
-		if err := jc.Err(); err != nil {
-			return err
-		}
-		_ = jc.Progress(float64(i)/float64(max(1, len(lots))), lot.Title)
-		snap, err := p.fetchPusher(jc, page, pace, args.AuctionID, lot.ID)
-		if err != nil {
-			_ = jc.Logf("pusher %s: %v", lot.ID, err)
-			if stopCollect(err) {
-				return err
-			}
-			continue
-		}
-		ext, reserve := 0, 0
-		if snap.BiddingExt {
-			ext = 1
-		}
-		if snap.ReserveMet {
-			reserve = 1
-		}
-		if _, err := h.Store().Exec(jc, `UPDATE bidrl_lots SET current_bid_cents = ?, min_bid_cents = ?, bid_increment_cents = ?,
-			bid_count = ?, high_bidder = ?, ends_at = ?, bidding_extended = ?, reserve_met = ?, bids_refreshed_at = ? WHERE id = ?`,
-			snap.BidCents, snap.MinBidCents, snap.IncrementCents, snap.BidCount, snap.HighBidder, snap.EndsAt, ext, reserve, now, lot.ID); err != nil {
-			return err
-		}
-		if snap.EndsAt != "" && snap.EndsAt > endsAt {
-			endsAt = snap.EndsAt
-		}
+	bids, err := p.fetchCatalogBids(jc, h, pace, args.AuctionID)
+	if err != nil {
+		return err
 	}
-	if endsAt != "" {
-		if _, err := h.Store().Exec(jc, `UPDATE bidrl_auctions SET ends_at = ? WHERE id = ?`, endsAt, args.AuctionID); err != nil {
-			return err
-		}
+	_ = jc.Progress(0.6, fmt.Sprintf("%d lots", len(bids.Snapshots)))
+	changed, err := p.applyCatalogBids(jc, h, args.AuctionID, bids)
+	if err != nil {
+		return err
+	}
+	_ = jc.Logf("catalog refresh updated %d of %d lots", changed, len(bids.Snapshots))
+	if err := jc.Progress(1, fmt.Sprintf("%d lots refreshed", changed)); err != nil {
+		return err
 	}
 	return h.Events().Publish(jc, "bids.refreshed", args.AuctionID, map[string]any{
-		"auctionId": args.AuctionID, "at": now, "lots": len(lots),
+		"auctionId": args.AuctionID,
+		"at":        h.Clock().Now().UTC().Format(time.RFC3339Nano),
+		"lots":      changed,
+		"source":    "catalog",
 	})
 }
 
@@ -215,10 +165,10 @@ func (p *Plugin) enrichJob(jc hostjobs.Context) error {
 		lotURL = lot.URL
 	}
 	if _, err := h.Store().Exec(jc, `UPDATE bidrl_lots SET url = ?, lot_code = ?, title = ?, current_bid_cents = ?, min_bid_cents = ?,
-		bid_increment_cents = ?, bid_count = ?, high_bidder = ?, ends_at = ?, bidding_extended = ?, reserve_met = ?,
+		bid_increment_cents = ?, bid_count = ?, high_bidder = ?, high_bidder_id = ?, ends_at = ?, bidding_extended = ?, reserve_met = ?,
 		description = ?, itemdata_at = ? WHERE id = ?`,
 		lotURL, rec.LotCode, rec.Title, rec.BidCents, rec.MinBidCents, rec.IncrementCents, rec.BidCount, rec.HighBidder,
-		rec.EndsAt, ext, reserve, rec.Description, now, lot.ID); err != nil {
+		rec.HighBidderID, rec.EndsAt, ext, reserve, rec.Description, now, lot.ID); err != nil {
 		return err
 	}
 	if rec.EndsAt != "" {

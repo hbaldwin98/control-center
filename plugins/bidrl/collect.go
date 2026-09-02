@@ -30,6 +30,7 @@ type collectedLot struct {
 	IncrementCents *int64
 	BidCount       int
 	HighBidder     string
+	HighBidderID   string
 	EndsAt         string
 	BiddingExt     bool
 	ReserveMet     bool
@@ -393,7 +394,7 @@ func (rec itemRecord) toCollected(itemID, auctionID string, raw parsedLot) colle
 	return collectedLot{
 		ID: id, URL: lotURL, Title: title, LotCode: code, Description: rec.Description,
 		BidCents: bid, MinBidCents: rec.MinBidCents, IncrementCents: rec.IncrementCents,
-		BidCount: rec.BidCount, HighBidder: rec.HighBidder, EndsAt: rec.EndsAt,
+		BidCount: rec.BidCount, HighBidder: rec.HighBidder, HighBidderID: rec.HighBidderID, EndsAt: rec.EndsAt,
 		BiddingExt: rec.BiddingExt, ReserveMet: rec.ReserveMet,
 	}
 }
@@ -420,27 +421,6 @@ func (p *Plugin) fetchItemData(jc hostjobs.Context, page hostbrowser.Page, pace 
 		return itemRecord{}, fmt.Errorf("bidrl: unreadable ItemData for item %s", itemID)
 	}
 	return rec, nil
-}
-
-func (p *Plugin) fetchPusher(jc hostjobs.Context, page hostbrowser.Page, pace *pacer, auctionID, itemID string) (pusherSnapshot, error) {
-	if err := pace.wait(jc); err != nil {
-		return pusherSnapshot{}, err
-	}
-	res, err := page.Get(jc, pusherURL(auctionID, itemID))
-	if err != nil {
-		return pusherSnapshot{}, err
-	}
-	if err := pace.observe(jc, res.Status); err != nil {
-		return pusherSnapshot{}, err
-	}
-	if res.Status >= 400 {
-		return pusherSnapshot{}, fmt.Errorf("bidrl: pusher HTTP %d", res.Status)
-	}
-	snap, ok := parsePusher(res.Body)
-	if !ok {
-		return pusherSnapshot{}, fmt.Errorf("bidrl: unreadable pusher for item %s", itemID)
-	}
-	return snap, nil
 }
 
 func (p *Plugin) downloadPhotos(jc hostjobs.Context, h host.Host, page hostbrowser.Page, auctionID, lotID string, images []string) ([]storedImage, error) {
@@ -514,14 +494,14 @@ func (p *Plugin) storeCollected(jc hostjobs.Context, h host.Host, auctionID, pag
 			if lot.ReserveMet {
 				reserve = 1
 			}
-			if _, err := tx.Exec(jc, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, current_bid_cents, currency, bucket, created_at, ends_at, bid_count, high_bidder, min_bid_cents, bid_increment_cents, bidding_extended, reserve_met, description, itemdata_at)
-				VALUES (?, ?, ?, ?, ?, ?, 'USD', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			if _, err := tx.Exec(jc, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, current_bid_cents, currency, bucket, created_at, ends_at, bid_count, high_bidder, high_bidder_id, min_bid_cents, bid_increment_cents, bidding_extended, reserve_met, description, itemdata_at)
+				VALUES (?, ?, ?, ?, ?, ?, 'USD', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(id) DO UPDATE SET url = excluded.url, lot_code = excluded.lot_code, title = excluded.title, current_bid_cents = excluded.current_bid_cents,
-					ends_at = excluded.ends_at, bid_count = excluded.bid_count, high_bidder = excluded.high_bidder, min_bid_cents = excluded.min_bid_cents,
+					ends_at = excluded.ends_at, bid_count = excluded.bid_count, high_bidder = excluded.high_bidder, high_bidder_id = excluded.high_bidder_id, min_bid_cents = excluded.min_bid_cents,
 					bid_increment_cents = excluded.bid_increment_cents, bidding_extended = excluded.bidding_extended, reserve_met = excluded.reserve_met,
 					description = excluded.description, itemdata_at = excluded.itemdata_at`,
 				lot.ID, auctionID, lot.URL, lot.LotCode, lot.Title, lot.BidCents, now, lot.EndsAt, lot.BidCount, lot.HighBidder,
-				lot.MinBidCents, lot.IncrementCents, ext, reserve, lot.Description, now); err != nil {
+				lot.HighBidderID, lot.MinBidCents, lot.IncrementCents, ext, reserve, lot.Description, now); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(jc, `DELETE FROM bidrl_images WHERE lot_id = ?`, lot.ID); err != nil {
