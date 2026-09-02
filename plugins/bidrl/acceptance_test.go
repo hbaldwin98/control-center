@@ -1,220 +1,70 @@
-package pluginhost
+package bidrl_test
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/hbaldwin98/control-center/internal/core/ai"
-	"github.com/hbaldwin98/control-center/internal/core/browser"
-	"github.com/hbaldwin98/control-center/internal/core/credentials"
-	"github.com/hbaldwin98/control-center/internal/core/events"
-	"github.com/hbaldwin98/control-center/internal/core/jobs"
-	"github.com/hbaldwin98/control-center/internal/core/policy"
-	"github.com/hbaldwin98/control-center/internal/core/search"
-	"github.com/hbaldwin98/control-center/internal/core/storage"
+	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
+
+	"github.com/hbaldwin98/control-center/host/hosttest"
 	"github.com/hbaldwin98/control-center/plugins/bidrl"
 )
 
-func TestBidrlCollectsAnalyzesAndPrices(t *testing.T) {
+// TestCollectsAnalyzesAndPrices walks the whole pipeline: add an auction, collect its
+// catalog, analyze the lots, price them, and rank them against a stated intent.
+//
+// The fake site is the plugin's own FakeSite, served for the real bidrl.com hosts, so
+// the URLs under test are the production ones. The models are answered by this
+// package's own fake (modelfake_test.go); the assertions below depend on what those
+// answers say, which is why they live beside the plugin rather than in the host.
+func TestCollectsAnalyzesAndPrices(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
-	store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(dir, "cc.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	blobs, err := storage.NewBlobStore(store, storage.BlobOptions{
-		Dir: filepath.Join(dir, "blobs"), MaxObjectBytes: 1 << 20, MaxScopeBytes: 10 << 20,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bus, err := events.New(store, store, events.Options{PollInterval: 20 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bus.Start(ctx)
-	t.Cleanup(bus.Stop)
 
-	pol, err := policy.New(store, store, bus, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q, err := jobs.New(store, store, bus, pol, jobs.Options{
-		PollInterval: 20 * time.Millisecond, LeaseTTL: time.Second, Heartbeat: 40 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	q.Start(ctx)
-	t.Cleanup(q.Stop)
-
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	creds, err := credentials.New(store, store, bus, credentials.Options{Keys: map[int][]byte{1: key}, Active: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	actx := credentials.WithActor(ctx, "admin")
-	if _, err := creds.CreateAPIKey(actx, credentials.APIKeyInput{
-		ID: "fake-key", Provider: "fake", Secret: credentials.SecretInput{Value: "test-token"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	models := filepath.Join(dir, "models.yaml")
-	if err := os.WriteFile(models, []byte(`
-routes:
-  cheap-vision:
-    capabilities: [chat, vision]
-    maxInputTokens: 1024
-    maxOutputTokens: 256
-    attempts:
-      - provider: fake
-        model: echo
-        credential: fake-key
-        inputMicroUSDPerMillion: 1000000
-        outputMicroUSDPerMillion: 2000000
-  grounded-price:
-    capabilities: [chat]
-    maxInputTokens: 512
-    maxOutputTokens: 256
-    attempts:
-      - provider: fake
-        model: echo
-        credential: fake-key
-        inputMicroUSDPerMillion: 1000000
-        outputMicroUSDPerMillion: 2000000
-  intent-expand:
-    capabilities: [chat]
-    maxInputTokens: 512
-    maxOutputTokens: 256
-    attempts:
-      - provider: fake
-        model: echo
-        credential: fake-key
-        inputMicroUSDPerMillion: 1000000
-        outputMicroUSDPerMillion: 2000000
-  intent-match:
-    capabilities: [embed]
-    maxInputTokens: 8192
-    maxOutputTokens: 1
-    attempts:
-      - provider: fake
-        model: echo
-        credential: fake-key
-        inputMicroUSDPerMillion: 1000000
-        outputMicroUSDPerMillion: 0
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	seed, err := ai.LoadSeed(models)
-	if err != nil {
-		t.Fatal(err)
-	}
-	aisvc, err := ai.New(store, store, bus, pol, creds, ai.Options{Seed: seed, Refs: creds})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The catalog refresh is a direct allowlisted request, which does not go through
-	// the engine, so the fake site has to be reachable both ways: as pages the engine
-	// serves, and as an origin the direct client reaches.
-	site := httptest.NewServer(bidrl.FakeSite())
-	t.Cleanup(site.Close)
-	siteURL, err := url.Parse(site.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	siteClient := site.Client()
-	siteTransport := siteClient.Transport
-	siteClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		clone := req.Clone(req.Context())
-		clone.URL.Scheme = siteURL.Scheme
-		clone.URL.Host = siteURL.Host
-		return siteTransport.RoundTrip(clone)
-	})
-
-	br, err := browser.New(bus, pol, browser.Options{
-		Engine: browser.NewFake(map[string]http.Handler{
-			"www.bidrl.com": bidrl.FakeSite(),
-			"bidrl.com":     bidrl.FakeSite(),
-		}),
-		Client: siteClient,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(br.Close)
-
-	searchsvc := search.New(pol, search.Options{Engine: search.Fake{}})
-
-	reg, err := New(ctx, store, Options{
-		DB: store, Blobs: blobs, Events: bus, Policy: pol, Jobs: q, AI: aisvc, Browser: br,
-		Search: searchsvc, Creds: creds, Refs: creds, ShutdownTimeout: time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.RegisterAll(bidrl.New()); err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = reg.Stop(context.Background()) })
-
-	if err := pol.SetBudget(ctx, "bidrl", policy.Budget{Daily: 50_000_000, OnExceed: policy.ExceedReject}); err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.Enable(ctx, "bidrl", "test", "acceptance"); err != nil {
-		t.Fatal(err)
-	}
+	h := hosttest.New(t, bidrl.New())
+	site := bidrl.FakeSite()
+	// The catalog refresh is a direct allowlisted request and the lot pages go through
+	// the engine; both reach the same site.
+	h.Browser.Handle("www.bidrl.com", site)
+	h.Browser.Handle("bidrl.com", site)
+	installModels(h.AI)
+	installSearch(h.Search)
+	h.Run(ctx)
 
 	serve := func(method, path string, body []byte) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		t.Helper()
+		if method == http.MethodGet {
+			return h.GET(path)
+		}
+		req := httptest.NewRequest(method, path, strings.NewReader(string(body)))
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
-		reg.ServeHTTP(rec, req)
-		return rec
+		return h.Do(req)
 	}
+
+	// waitJob runs the job the request enqueued, then anything that job enqueued in
+	// turn. The real queue runs both without being asked; here the test decides when,
+	// which is what makes the run deterministic.
 	waitJob := func(id int64) {
 		t.Helper()
-		deadline := time.Now().Add(15 * time.Second)
-		var last *jobs.Job
-		for time.Now().Before(deadline) {
-			j, err := q.Get(ctx, id)
-			if err == nil {
-				last = j
-				if j.State == jobs.StateSucceeded {
-					return
-				}
-				if j.State == jobs.StateFailed || j.State == jobs.StateDead {
-					t.Fatalf("job %d %s: %s", id, j.State, j.LastError)
-				}
-			}
-			time.Sleep(20 * time.Millisecond)
+		if err := h.RunJob(ctx, id); err != nil {
+			t.Fatalf("job %d failed: %v", id, err)
 		}
-		if last == nil {
-			t.Fatalf("job %d never appeared", id)
+		for _, l := range h.Job(ctx, id).Logs {
+			t.Logf("JOBLOG %d: %s", id, l.Line)
 		}
-		t.Fatalf("job %d state %s: %s", id, last.State, last.LastError)
+		if err := h.Drain(ctx); err != nil {
+			t.Fatalf("follow-on job failed: %v", err)
+		}
 	}
 
 	body, _ := json.Marshal(map[string]string{"url": "https://www.bidrl.com/auction/42/bidgallery"})
-	rec := serve(http.MethodPost, "/api/plugins/bidrl/auctions", body)
+	rec := serve(http.MethodPost, "/auctions", body)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("add auction: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -231,7 +81,7 @@ routes:
 	// auction view makes: one small snapshot for one lot, rather than the whole catalog.
 	// The snapshot carries the username outright, so it names the winner where the
 	// catalog can only compare ids.
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots/1001", nil)
+	rec = serve(http.MethodGet, "/lots/1001", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("lot on open: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -250,7 +100,7 @@ routes:
 		t.Fatalf("lot snapshot did not name the high bidder: %q", openedLot.HighBidder)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
+	rec = serve(http.MethodGet, "/auctions/42", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get auction: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -273,7 +123,7 @@ routes:
 
 	// The lot screen pages through an auction from this, so it has to list every lot in
 	// the same order the auction screen does, and carry none of the heavy columns.
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42/index", nil)
+	rec = serve(http.MethodGet, "/auctions/42/index", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("auction index: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -296,11 +146,11 @@ routes:
 			t.Fatalf("auction index order: %+v vs %+v", index.Lots, auction.Lots)
 		}
 	}
-	if rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/nope/index", nil); rec.Code != http.StatusNotFound {
+	if rec = serve(http.MethodGet, "/auctions/nope/index", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing auction index: %d", rec.Code)
 	}
 
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/auctions/42/scan", nil)
+	rec = serve(http.MethodPost, "/auctions/42/scan", nil)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("scan: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -314,7 +164,7 @@ routes:
 
 	// The front page counts in SQL and returns two short lists, so it never ships the lot
 	// table to the browser just to count it.
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/overview", nil)
+	rec = serve(http.MethodGet, "/overview", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overview: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -350,7 +200,7 @@ routes:
 		t.Fatal("overview deal carries no gap")
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/feed?filter=deals", nil)
+	rec = serve(http.MethodGet, "/feed?filter=deals", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("feed: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -374,7 +224,7 @@ routes:
 		t.Fatalf("priced lot %+v", feed.Lots[0])
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/feed?filter=worth_opening", nil)
+	rec = serve(http.MethodGet, "/feed?filter=worth_opening", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("worth opening: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -392,7 +242,7 @@ routes:
 		t.Fatalf("worth opening %+v", worth.Lots)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/feed?filter=all", nil)
+	rec = serve(http.MethodGet, "/feed?filter=all", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("all: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -409,7 +259,7 @@ routes:
 		t.Fatalf("all lots %+v", all.Lots)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots?bucket=priced", nil)
+	rec = serve(http.MethodGet, "/lots?bucket=priced", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("lots priced: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -425,7 +275,7 @@ routes:
 		t.Fatalf("priced lots %+v", priced.Lots)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots?q=keurig", nil)
+	rec = serve(http.MethodGet, "/lots?q=keurig", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("lots q: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -441,7 +291,7 @@ routes:
 		t.Fatalf("keurig lots %+v", found.Lots)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/lots?category=appliances", nil)
+	rec = serve(http.MethodGet, "/lots?category=appliances", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("lots category: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -457,7 +307,7 @@ routes:
 		t.Fatalf("appliance lots %+v", appliances.Lots)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/feed?filter=all&q=keurig", nil)
+	rec = serve(http.MethodGet, "/feed?filter=all&q=keurig", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("feed q: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -474,7 +324,7 @@ routes:
 	}
 
 	searchBody, _ := json.Marshal(map[string]string{"query": "keurig", "scope": "prefer"})
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/search", searchBody)
+	rec = serve(http.MethodPost, "/search", searchBody)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("search: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -487,7 +337,7 @@ routes:
 	}
 	waitJob(searched.JobID)
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/search", nil)
+	rec = serve(http.MethodGet, "/search", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get search: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -522,7 +372,7 @@ routes:
 	}
 
 	coffeeBody, _ := json.Marshal(map[string]string{"query": "help me make coffee in the morning"})
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/intent", coffeeBody)
+	rec = serve(http.MethodPost, "/intent", coffeeBody)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("intent coffee: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -533,7 +383,7 @@ routes:
 		t.Fatalf("intent body %s", rec.Body.Bytes())
 	}
 	waitJob(intentPosted.JobID)
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/intent", nil)
+	rec = serve(http.MethodGet, "/intent", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get intent: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -556,7 +406,7 @@ routes:
 	}
 
 	sitBody, _ := json.Marshal(map[string]string{"query": "a comfortable place to sit at a desk"})
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/intent", sitBody)
+	rec = serve(http.MethodPost, "/intent", sitBody)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("intent sit: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -564,7 +414,7 @@ routes:
 		t.Fatalf("sit intent body %s", rec.Body.Bytes())
 	}
 	waitJob(intentPosted.JobID)
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/intent", nil)
+	rec = serve(http.MethodGet, "/intent", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get sit intent: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -580,18 +430,20 @@ routes:
 		}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := store.Exec(ctx, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, bucket, created_at, description)
+	// The plugin reads its own clock, so fixture timestamps have to come from the same
+	// one. Wall-clock values would sit in the plugin's future and never look expired.
+	now := h.Clock.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := h.DB().Exec(`INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, bucket, created_at, description)
 		VALUES ('1004', '42', 'https://www.bidrl.com/auction/42/item/tent-1004', 'T1004', '4-person camping tent', 'pending', ?, 'Rainfly, stakes, and a stuff sack')`, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Exec(ctx, `INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, bucket, created_at, description)
+	if _, err := h.DB().Exec(`INSERT INTO bidrl_lots(id, auction_id, url, lot_code, title, bucket, created_at, description)
 		VALUES ('1005', '42', 'https://www.bidrl.com/auction/42/item/headlamp-1005', 'T1005', 'Black Diamond LED headlamp', 'pending', ?, '210 lumens, elastic strap')`, now); err != nil {
 		t.Fatal(err)
 	}
 
 	campBody, _ := json.Marshal(map[string]string{"query": "things that would help me camp"})
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/intent", campBody)
+	rec = serve(http.MethodPost, "/intent", campBody)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("intent camp: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -599,7 +451,7 @@ routes:
 		t.Fatalf("camp intent body %s", rec.Body.Bytes())
 	}
 	waitJob(intentPosted.JobID)
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/intent", nil)
+	rec = serve(http.MethodGet, "/intent", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get camp intent: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -625,7 +477,7 @@ routes:
 		t.Fatalf("camping should match the tent and a headlamp with no camp in the title: %+v", intentPage)
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/sites/auctions", nil)
+	rec = serve(http.MethodGet, "/sites/auctions", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sites: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -648,7 +500,7 @@ routes:
 	// Opening the auction re-reads the catalog first, so the page shows the current bid
 	// without anyone pressing refresh. The fake's catalog is one increment above what
 	// collection stored, which is what makes the difference observable.
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
+	rec = serve(http.MethodGet, "/auctions/42", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("auction on open: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -695,11 +547,12 @@ routes:
 		}
 	}
 
-	jobsBefore, err := q.List(ctx, jobs.Filter{Limit: 1000})
+	// The live stream must not schedule work; it reads what is already there.
+	jobsBefore, err := h.Host().Jobs().List(ctx, hostjobs.Filter{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/live?lots=no-such-lot", nil)
+	rec = serve(http.MethodGet, "/live?lots=no-such-lot", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("live stream: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -709,11 +562,11 @@ routes:
 	if body := rec.Body.String(); !strings.Contains(body, "event: idle") {
 		t.Fatalf("live stream body = %q", body)
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/live", nil)
+	rec = serve(http.MethodGet, "/live", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("live with no lots: %d %s", rec.Code, rec.Body.Bytes())
 	}
-	jobsAfter, err := q.List(ctx, jobs.Filter{Limit: 1000})
+	jobsAfter, err := h.Host().Jobs().List(ctx, hostjobs.Filter{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,7 +574,7 @@ routes:
 		t.Fatalf("live enqueued work: %d jobs before, %d after", len(jobsBefore), len(jobsAfter))
 	}
 
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions", nil)
+	rec = serve(http.MethodGet, "/auctions", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list auctions: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -739,11 +592,11 @@ routes:
 		t.Fatalf("collected auctions %+v", listed.Auctions)
 	}
 
-	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
-	if _, err := store.Exec(ctx, `UPDATE bidrl_lots SET ends_at = ? WHERE id = '1002'`, past); err != nil {
+	past := h.Clock.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	if _, err := h.DB().Exec(`UPDATE bidrl_lots SET ends_at = ? WHERE id = '1002'`, past); err != nil {
 		t.Fatal(err)
 	}
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/cleanup", nil)
+	rec = serve(http.MethodPost, "/cleanup", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("cleanup: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -758,7 +611,7 @@ routes:
 	if cleaned.Auctions != 0 || cleaned.Lots != 1 {
 		t.Fatalf("cleanup %+v", cleaned)
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
+	rec = serve(http.MethodGet, "/auctions/42", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("auction after lot cleanup: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -793,10 +646,10 @@ routes:
 		t.Fatalf("unscanned tent or headlamp missing after cleanup %+v", remaining)
 	}
 
-	if _, err := store.Exec(ctx, `UPDATE bidrl_affiliate_auctions SET ends_at = ? WHERE id = '42'`, past); err != nil {
+	if _, err := h.DB().Exec(`UPDATE bidrl_affiliate_auctions SET ends_at = ? WHERE id = '42'`, past); err != nil {
 		t.Fatal(err)
 	}
-	rec = serve(http.MethodPost, "/api/plugins/bidrl/cleanup", nil)
+	rec = serve(http.MethodPost, "/cleanup", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sites cleanup: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -806,7 +659,7 @@ routes:
 	if cleaned.Sites != 1 {
 		t.Fatalf("sites cleanup %+v", cleaned)
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/sites/auctions", nil)
+	rec = serve(http.MethodGet, "/sites/auctions", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sites after cleanup: %d %s", rec.Code, rec.Body.Bytes())
 	}
@@ -817,16 +670,12 @@ routes:
 		t.Fatalf("ended SITES listing still present: %+v", sites.Auctions)
 	}
 
-	rec = serve(http.MethodDelete, "/api/plugins/bidrl/auctions/42", nil)
+	rec = serve(http.MethodDelete, "/auctions/42", nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.Bytes())
 	}
-	rec = serve(http.MethodGet, "/api/plugins/bidrl/auctions/42", nil)
+	rec = serve(http.MethodGet, "/auctions/42", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("deleted auction still present: %d", rec.Code)
 	}
 }
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }

@@ -534,6 +534,21 @@ page you did not program fails to load, and a URL outside the session allowlist 
 denied — each the error the real host would give you, so the mistake surfaces in your
 test rather than in production.
 
+When a canned value is not enough — your prompt carries a schema, or you build queries
+at runtime — answer with a function instead:
+
+```go
+h.AI.AnswerChat("cheap-vision", func(req hostai.ChatRequest) (*hostai.ChatResponse, error) { … })
+h.AI.AnswerEmbed("intent-match", …)
+h.Search.Answer(func(req hostsearch.Request) ([]hostsearch.Hit, error) { … })
+h.Browser.Handle("api.example.com", mux)   // serve a whole site through a handler
+h.Browser.Credential("portal-login", "hunter2") // the host injects it; you never see it
+```
+
+Model behaviour your plugin depends on belongs in your plugin's tests, written in your
+plugin's own terms. It does not belong in the host: core cannot be expected to know what
+your schema fields mean.
+
 **What it cannot tell you.** Delivery here is synchronous and lossless, so it cannot
 prove your plugin survives a dropped live event; use a durable subscription, which the
 real host does guarantee. It has no renderer, so `WaitFor` and `Click` are approximate.

@@ -85,15 +85,21 @@ func New(tb TB, plugin host.Plugin) *Harness {
 	// Each plugin gets its own private database, which is what makes a cross-plugin
 	// read impossible rather than merely rejected. The shared cache keeps every
 	// connection in the pool looking at the same in-memory database.
-	sqlDB, err := sql.Open("sqlite", "file:"+m.ID+"?mode=memory&cache=shared&_pragma=foreign_keys(1)")
+	sqlDB, err := sql.Open("sqlite",
+		"file:"+m.ID+"?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		tb.Fatalf("hosttest: open database: %v", err)
 		return nil
 	}
-	// One connection: an in-memory SQLite database lives as long as a connection to it
-	// does, and serializing removes a source of nondeterminism the double does not
-	// need.
-	sqlDB.SetMaxOpenConns(1)
+	// More than one connection, because plugin code legitimately opens a second query
+	// while the first is still being scanned -- an HTTP handler reading a list and then
+	// looking something up per row. The real host serves those from a read pool; a
+	// single-connection pool here would deadlock on a pattern that works in production.
+	sqlDB.SetMaxOpenConns(4)
+	// An in-memory SQLite database lives only as long as a connection to it does, so
+	// the pool must never drop to zero while the test is running.
+	sqlDB.SetMaxIdleConns(4)
+	sqlDB.SetConnMaxLifetime(0)
 
 	h := &Harness{tb: tb, plugin: plugin, manifest: m, sqlDB: sqlDB, enabled: true}
 	h.Clock = &Clock{now: DefaultNow}
@@ -101,7 +107,11 @@ func New(tb TB, plugin host.Plugin) *Harness {
 	h.Log = &Logger{tb: tb, attrs: []any{"plugin", m.ID}, lines: lines}
 
 	gate := h.gate
-	h.AI = &AIFake{chats: map[string][]chatReply{}, embeds: map[string][]embedReply{}, gate: gate, clock: h.Clock}
+	h.AI = &AIFake{
+		chats: map[string][]chatReply{}, chatFns: map[string]ChatFunc{},
+		embeds: map[string][]embedReply{}, embedFns: map[string]EmbedFunc{},
+		gate: gate, clock: h.Clock,
+	}
 	h.Search = &SearchFake{hits: map[string][]hostsearch.Hit{}, gate: gate}
 	h.Browser = &BrowserFake{
 		pages:    map[string]string{},

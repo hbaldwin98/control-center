@@ -25,12 +25,14 @@ import (
 // model. That is the failure a plugin most needs to handle, so the double defaults to
 // it rather than to a friendly empty response.
 type AIFake struct {
-	mu     sync.Mutex
-	chats  map[string][]chatReply
-	embeds map[string][]embedReply
-	calls  []AICall
-	gate   func(mutating bool) error
-	clock  *Clock
+	mu       sync.Mutex
+	chats    map[string][]chatReply
+	chatFns  map[string]ChatFunc
+	embeds   map[string][]embedReply
+	embedFns map[string]EmbedFunc
+	calls    []AICall
+	gate     func(mutating bool) error
+	clock    *Clock
 }
 
 // AICall is one recorded request, so a test can assert on what the plugin asked for
@@ -50,6 +52,30 @@ type chatReply struct {
 type embedReply struct {
 	resp *hostai.EmbedResponse
 	err  error
+}
+
+// ChatFunc answers a chat request. Use it when the answer has to depend on what was
+// asked -- a schema the plugin sent, a value it put in the prompt -- rather than being
+// a fixed string. It is how a plugin models its own provider's behaviour in its own
+// tests, instead of that knowledge having to live in the host.
+type ChatFunc func(req hostai.ChatRequest) (*hostai.ChatResponse, error)
+
+// EmbedFunc answers an embedding request the same way.
+type EmbedFunc func(req hostai.EmbedRequest) (*hostai.EmbedResponse, error)
+
+// AnswerChat installs a function to answer every call on a route. It takes precedence
+// over queued replies.
+func (f *AIFake) AnswerChat(model string, fn ChatFunc) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.chatFns[model] = fn
+}
+
+// AnswerEmbed installs a function to answer every embedding call on a route.
+func (f *AIFake) AnswerEmbed(model string, fn EmbedFunc) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.embedFns[model] = fn
 }
 
 // Reply queues a plain text answer for the next call on a logical model route.
@@ -117,7 +143,7 @@ func (f *AIFake) Chat(ctx context.Context, req hostai.ChatRequest) (*hostai.Chat
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, AICall{Kind: "chat", Request: req})
-	return f.nextChat(req.Model)
+	return f.nextChat(req)
 }
 
 func (f *AIFake) ChatStream(ctx context.Context, req hostai.ChatRequest) (hostai.Stream, error) {
@@ -126,7 +152,7 @@ func (f *AIFake) ChatStream(ctx context.Context, req hostai.ChatRequest) (hostai
 	}
 	f.mu.Lock()
 	f.calls = append(f.calls, AICall{Kind: "stream", Request: req})
-	resp, err := f.nextChat(req.Model)
+	resp, err := f.nextChat(req)
 	f.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -149,6 +175,9 @@ func (f *AIFake) Embed(ctx context.Context, req hostai.EmbedRequest) (*hostai.Em
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, AICall{Kind: "embed", Embed: req})
+	if fn, ok := f.embedFns[req.Model]; ok {
+		return fn(req)
+	}
 	queue := f.embeds[req.Model]
 	if len(queue) == 0 {
 		return nil, fmt.Errorf("%w: %s", hostai.ErrUnknownRoute, req.Model)
@@ -161,7 +190,11 @@ func (f *AIFake) Embed(ctx context.Context, req hostai.EmbedRequest) (*hostai.Em
 }
 
 // nextChat consumes one queued reply. The caller holds the lock.
-func (f *AIFake) nextChat(model string) (*hostai.ChatResponse, error) {
+func (f *AIFake) nextChat(req hostai.ChatRequest) (*hostai.ChatResponse, error) {
+	model := req.Model
+	if fn, ok := f.chatFns[model]; ok {
+		return fn(req)
+	}
 	queue := f.chats[model]
 	if len(queue) == 0 {
 		return nil, fmt.Errorf("%w: %s", hostai.ErrUnknownRoute, model)
@@ -199,9 +232,23 @@ type SearchFake struct {
 	mu    sync.Mutex
 	hits  map[string][]hostsearch.Hit
 	def   []hostsearch.Hit
+	fn    SearchFunc
 	err   error
 	calls []hostsearch.Request
 	gate  func(mutating bool) error
+}
+
+// SearchFunc answers a lookup. Use it when the plugin composes its queries at runtime,
+// so no fixed query string would match. Its hits are still filtered by the request's
+// allowlist, exactly as programmed ones are.
+type SearchFunc func(req hostsearch.Request) ([]hostsearch.Hit, error)
+
+// Answer installs a function to answer every query. It takes precedence over hits
+// programmed for an exact query and over the default.
+func (f *SearchFake) Answer(fn SearchFunc) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fn = fn
 }
 
 // Results programs the hits returned for an exact query string.
@@ -245,9 +292,19 @@ func (f *SearchFake) Query(ctx context.Context, req hostsearch.Request) ([]hosts
 	if f.err != nil {
 		return nil, f.err
 	}
-	hits, ok := f.hits[req.Query]
-	if !ok {
-		hits = f.def
+	var hits []hostsearch.Hit
+	switch {
+	case f.fn != nil:
+		answered, err := f.fn(req)
+		if err != nil {
+			return nil, err
+		}
+		hits = answered
+	default:
+		var ok bool
+		if hits, ok = f.hits[req.Query]; !ok {
+			hits = f.def
+		}
 	}
 	out := make([]hostsearch.Hit, 0, len(hits))
 	for _, h := range hits {
@@ -559,6 +616,15 @@ func (p *fakePage) Post(ctx context.Context, rawURL string, form url.Values) (ho
 	p.session.owner.mu.Lock()
 	p.session.owner.posts = append(p.session.owner.posts, Post{URL: rawURL, Form: form})
 	p.session.owner.mu.Unlock()
+
+	// A registered site handler must see this as the POST it is, with the form body
+	// the page submitted. Serving it as a GET would make a handler that routes on
+	// method answer 405 to a request the real engine would have delivered correctly.
+	req := httptest.NewRequest(http.MethodPost, rawURL, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if res, ok := p.session.owner.serve(req); ok {
+		return res, nil
+	}
 	return p.session.owner.fetch(rawURL)
 }
 

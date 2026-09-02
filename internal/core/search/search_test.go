@@ -11,22 +11,36 @@ import (
 	"time"
 )
 
-func TestFakeSearchFindsKeurig(t *testing.T) {
+func TestFakeEngineAnswersAndHonoursTheAllowlist(t *testing.T) {
 	svc := New(nil, Options{Engine: Fake{}})
-	ctx := WithPlugin(context.Background(), "bidrl")
-	hits, err := svc.Query(ctx, Request{Query: "Keurig K-Supreme Plus used price"})
+	ctx := WithPlugin(context.Background(), "example")
+
+	hits, err := svc.Query(ctx, Request{Query: "some product used price"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) != 1 || !strings.Contains(hits[0].Snippet, "$129") || !strings.Contains(hits[0].URL, "ebay.com") {
+	if len(hits) != 1 || !strings.HasPrefix(hits[0].URL, "https://") {
 		t.Fatalf("hits = %#v", hits)
 	}
-	ebay, err := svc.Query(ctx, Request{Query: "Keurig K-Supreme Plus sold", AllowedDomains: []string{"ebay.com"}})
+
+	allowed, err := svc.Query(ctx, Request{
+		Query: "some product used price", AllowedDomains: []string{"example-market.test"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ebay) != 1 {
-		t.Fatalf("ebay allowlist = %#v", ebay)
+	if len(allowed) != 1 {
+		t.Fatalf("allowlisted host was filtered out: %#v", allowed)
+	}
+
+	denied, err := svc.Query(ctx, Request{
+		Query: "some product used price", AllowedDomains: []string{"somewhere-else.test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(denied) != 0 {
+		t.Fatalf("a host off the allowlist survived: %#v", denied)
 	}
 }
 
