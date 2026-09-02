@@ -30,5 +30,17 @@ export default defineConfig({
   },
   test: {
     environment: "happy-dom",
+    coverage: {
+      provider: "v8",
+      // Cobertura is what the CRAP analyzer reads; text is for a person at the
+      // terminal. The HTML report would be a third copy of the same numbers.
+      reporter: ["text-summary", "cobertura"],
+      reportsDirectory: "coverage",
+      include: ["src/**/*.{ts,tsx}"],
+      // Only the entry point is excluded: it has no behaviour of its own. The
+      // "types" modules are not type-only -- they carry real functions like
+      // pulseOf and verdictOf -- so they are measured with everything else.
+      exclude: ["src/main.tsx", "src/**/*.test.{ts,tsx}"],
+    },
   },
 });

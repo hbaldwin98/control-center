@@ -36,43 +36,56 @@ func main() {
 	}
 }
 
-func run() error {
-	var (
-		configPath = flag.String("config", "config/config.yaml", "path to the configuration file")
-		staticDir  = flag.String("static", "web/dist", "directory holding the built frontend")
-		logLevel   = flag.String("log-level", "info", "debug, info, warn, or error")
-	)
-	flag.Parse()
+// options are the command-line flags, parsed once.
+type options struct {
+	configPath string
+	staticDir  string
+	logLevel   string
+}
 
-	level, err := parseLevel(*logLevel)
+func parseFlags() options {
+	var o options
+	flag.StringVar(&o.configPath, "config", "config/config.yaml", "path to the configuration file")
+	flag.StringVar(&o.staticDir, "static", "web/dist", "directory holding the built frontend")
+	flag.StringVar(&o.logLevel, "log-level", "info", "debug, info, warn, or error")
+	flag.Parse()
+	return o
+}
+
+// boot installs the logger and reads everything the process needs before it touches
+// disk: the configuration file and the master key. Failing here is a misconfiguration,
+// and none of it has been started yet, so there is nothing to unwind.
+func boot(o options) (config.Config, []byte, error) {
+	level, err := parseLevel(o.logLevel)
 	if err != nil {
-		return err
+		return config.Config{}, nil, err
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(o.configPath)
 	if err != nil {
-		return err
+		return config.Config{}, nil, err
 	}
 
 	masterKey, err := credentials.ParseMasterKey(os.Getenv("CC_MASTER_KEY"))
 	if err != nil {
-		return fmt.Errorf("CC_MASTER_KEY must be 64 hex characters (32-byte AES-256 key): %w", err)
+		return config.Config{}, nil, fmt.Errorf("CC_MASTER_KEY must be 64 hex characters (32-byte AES-256 key): %w", err)
 	}
+	return cfg, masterKey, nil
+}
 
-	// Signals cancel the root context; every subsystem shuts down from there.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+// openData opens the database and the blob store, and recovers whatever a crash left
+// behind. The caller owns closing the store, so that defer stays in run alongside every
+// other shutdown step and the ordering is visible in one place.
+func openData(ctx context.Context, cfg config.Config) (*storage.Store, *storage.BlobStore, error) {
 	store, err := storage.Open(ctx, storage.Options{
 		Path:        cfg.Data.DB,
 		BusyTimeout: cfg.Data.BusyTimeout,
 		ReadPool:    cfg.Data.ReadPool,
 	})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer store.Close()
 	slog.Info("storage ready", "db", store.Path())
 
 	blobs, err := storage.NewBlobStore(store, storage.BlobOptions{
@@ -81,15 +94,38 @@ func run() error {
 		MaxScopeBytes:  cfg.Blobs.MaxScopeBytes,
 	})
 	if err != nil {
-		return err
+		store.Close()
+		return nil, nil, err
 	}
 	// A crash can leave staged temp files and unreferenced objects. Collect them before
 	// serving, so a restart exposes either the old blob or the new one, never a partial.
-	if removed, err := blobs.Recover(ctx); err != nil {
-		return err
-	} else if removed > 0 {
+	removed, err := blobs.Recover(ctx)
+	if err != nil {
+		store.Close()
+		return nil, nil, err
+	}
+	if removed > 0 {
 		slog.Info("blob recovery removed incomplete files", "count", removed)
 	}
+	return store, blobs, nil
+}
+
+func run() error {
+	o := parseFlags()
+	cfg, masterKey, err := boot(o)
+	if err != nil {
+		return err
+	}
+
+	// Signals cancel the root context; every subsystem shuts down from there.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store, blobs, err := openData(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
 
 	bus, err := events.New(store, store, events.Options{})
 	if err != nil {
@@ -176,9 +212,9 @@ func run() error {
 	notes.Start(ctx)
 	defer notes.Stop()
 
-	if _, err := os.Stat(*staticDir); err != nil {
-		slog.Warn("no frontend build found; serving placeholder", "dir", *staticDir)
-		*staticDir = ""
+	if _, err := os.Stat(o.staticDir); err != nil {
+		slog.Warn("no frontend build found; serving placeholder", "dir", o.staticDir)
+		o.staticDir = ""
 	}
 
 	ph, err := pluginhost.New(ctx, store, pluginhost.Options{
@@ -216,7 +252,7 @@ func run() error {
 			}
 			return out
 		},
-		StaticDir:         *staticDir,
+		StaticDir:         o.staticDir,
 		BootstrapPassword: os.Getenv("CC_BOOTSTRAP_PASSWORD"),
 	})
 	if err != nil {

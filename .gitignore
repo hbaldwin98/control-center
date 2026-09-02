@@ -19,6 +19,7 @@
 node_modules/
 /web/dist/
 /web/.vite/
+/web/coverage/
 
 # Tooling
 .opencode/
@@ -26,3 +27,7 @@ node_modules/
 
 # Machine-local agent state
 /.claude/
+
+# CRAP coverage reports (regenerate with scripts/coverage.sh)
+/.crap-coverage.out
+/.crap-web-coverage.xml
