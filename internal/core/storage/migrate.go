@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -159,6 +160,15 @@ func (s *Store) applyPrefixed(namespace, prefix string, migrations []Migration) 
 
 func (s *Store) applyOnePrefixed(ctx context.Context, namespace, prefix string, m Migration, sum string) error {
 	return s.Tx(ctx, func(tx Tx) error {
+		// The authorizer sees the table an ALTER TABLE renames, never the name it is
+		// renamed to, so `ALTER TABLE plug_x RENAME TO core_x` looks like a legal
+		// operation on a legal table. Comparing the schema either side of the migration
+		// is what closes that: the authorizer governs what the SQL may touch, and this
+		// governs what the database is left holding.
+		before, err := schemaOutside(ctx, tx, prefix)
+		if err != nil {
+			return err
+		}
 		if err := s.SetPluginAuthorizer(prefix); err != nil {
 			return err
 		}
@@ -169,7 +179,18 @@ func (s *Store) applyOnePrefixed(ctx context.Context, namespace, prefix string, 
 		if err := s.SetPluginAuthorizer(""); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx,
+		after, err := schemaOutside(ctx, tx, prefix)
+		if err != nil {
+			return err
+		}
+		for name := range after {
+			if _, existed := before[name]; !existed {
+				return fmt.Errorf(
+					"%w: migration %s/%d %q created %q, which is outside the %q namespace",
+					ErrSQLDenied, namespace, m.Version, m.Name, name, prefix)
+			}
+		}
+		_, err = tx.Exec(ctx,
 			`INSERT INTO core_migrations(namespace, version, name, checksum, applied_at)
 			 VALUES (?, ?, ?, ?, ?)`,
 			namespace, m.Version, m.Name, sum, time.Now().UTC().Format(time.RFC3339Nano))
@@ -245,3 +266,25 @@ func checksum(m Migration) string {
 // IsNoRows reports whether err is sql.ErrNoRows, so callers need not import database/sql
 // just to branch on an empty read.
 func IsNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
+
+// schemaOutside names every schema object that does not belong to prefix. Objects
+// SQLite owns are skipped: they are not the plugin's to create and cannot be named by
+// one, since every identifier a plugin declares must carry its prefix.
+func schemaOutside(ctx context.Context, tx Tx, prefix string) (map[string]struct{}, error) {
+	rows, err := tx.Query(ctx, `SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		return nil, fmt.Errorf("storage: read schema: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(name, prefix) {
+			out[name] = struct{}{}
+		}
+	}
+	return out, rows.Err()
+}

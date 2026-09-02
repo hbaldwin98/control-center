@@ -139,7 +139,31 @@ func authorize(prefix string, action int32, arg1, arg2, arg3, arg4 string) int32
 		return sqlite3.SQLITE_OK
 	case sqlite3.SQLITE_CREATE_VTABLE, sqlite3.SQLITE_DROP_VTABLE:
 		return sqlite3.SQLITE_DENY
-	case sqlite3.SQLITE_READ, sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+	case sqlite3.SQLITE_UPDATE:
+		// ALTER TABLE ... RENAME rewrites the table's row in sqlite_sequence, SQLite's
+		// AUTOINCREMENT bookkeeping. It does so whether or not the renamed table has an
+		// AUTOINCREMENT column, and sqlite_sequence exists as soon as anything in the
+		// database has one -- which core does. That is why a plugin rename works in the
+		// plugin's own test database, where no such table exists, and fails against a
+		// real one.
+		//
+		// Only the `name` column is opened up, which is the column the rename writes.
+		// `seq` stays closed: a plugin that could write it could reset another table's
+		// counter and make the next id a repeat of a deleted one.
+		if tableAllowed(prefix, arg1) {
+			return sqlite3.SQLITE_OK
+		}
+		if isSequenceTable(arg1) && strings.EqualFold(arg2, "name") {
+			return sqlite3.SQLITE_OK
+		}
+		return sqlite3.SQLITE_DENY
+	case sqlite3.SQLITE_READ:
+		// The same rename reads sqlite_sequence to find the row it is about to rewrite.
+		if tableAllowed(prefix, arg1) || isSequenceTable(arg1) {
+			return sqlite3.SQLITE_OK
+		}
+		return sqlite3.SQLITE_DENY
+	case sqlite3.SQLITE_INSERT, sqlite3.SQLITE_DELETE,
 		sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE,
 		sqlite3.SQLITE_ANALYZE:
 		if tableAllowed(prefix, arg1) {
@@ -168,6 +192,19 @@ func authorize(prefix string, action int32, arg1, arg2, arg3, arg4 string) int32
 	default:
 		return sqlite3.SQLITE_DENY
 	}
+}
+
+// isSequenceTable reports whether name is SQLite's AUTOINCREMENT bookkeeping table,
+// with or without a schema qualifier.
+func isSequenceTable(name string) bool {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		schema := name[:i]
+		if schema != "" && !strings.EqualFold(schema, "main") {
+			return false
+		}
+		name = name[i+1:]
+	}
+	return strings.EqualFold(name, "sqlite_sequence")
 }
 
 func tableAllowed(prefix, name string) bool {
