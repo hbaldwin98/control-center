@@ -18,7 +18,8 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 10 | `tid` | ✅ | Daily Turlock Irrigation District usage, metrics, and insight flow through host capabilities. |
 | 11 | `pagewatch` | ✅ | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
 | 12 | `bidrl` | ✅ | The first real plugin. |
-| 13 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
+| 13 | `push` | ✅ | Host-owned live delivery: topics, refcounted demand, fan-out, backpressure, and one SSE transport. |
+| 14 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
 
 ---
 
@@ -216,6 +217,19 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
 | Automation UI | ⬜ | Backend automation (scheduled `sweep` / `match`, throttle latch, `GET /automation`, `POST /automation/resume`) exists; the UI for it needs building out — turning `automation.enabled` and locations on, watchlist management, both last ticks and what they did, the latch with a resume control, and the Findings backlog count. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
+
+## Milestone 13 — `push` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| `internal/core/push` hub | ✅ | Connections, per-plugin topic namespaces, fan-out, per-connection buffers, and teardown on plugin disable. |
+| `host/push` SDK: `Publish`, `Available`, `Unavailable`, `Subscribers`, `Watch` | ✅ | Plugins write no transport code; topic names and payloads are opaque to the host. |
+| Refcounted demand | ✅ | `Join` on a topic's first subscriber, `Leave` on its last, serialized per topic so the two strictly alternate. Ten screens on one topic are one lot of upstream work. |
+| Backpressure | ✅ | A connection past its buffer is dropped rather than allowed to stall the publisher; a dropped client reconnects and refetches. |
+| SSE transport | ✅ | `GET /api/push/{plugin}?topics=…` behind the ordinary API auth, with heartbeats, write deadlines, and availability resync on connect. |
+| `bidrl` adoption | ✅ | A lot is a `lot:<id>` topic; the plugin's own `/live` route and its per-request socket are gone. |
+| Websocket transport | ⬜ | Deliberately not built. The plugin contract is topics and payloads, so it changes nothing a plugin sees; it earns its cost the first time a client needs to send as well as receive. |
+| End-to-end acceptance test | ⬜ | Covered by unit and handler tests plus the bidrl acceptance test. Nobody has yet watched a real bid move a number on a running screen. |
 
 ---
 

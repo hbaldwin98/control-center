@@ -16,6 +16,8 @@ package push
 // What a plugin gets, through host/push.
 type Push interface {
     Publish(ctx context.Context, topic string, payload any) error
+    Available(ctx context.Context, topic string) error
+    Unavailable(ctx context.Context, topic string) error
     Subscribers(topic string) int
     Watch(w Watcher) (unwatch func())
 }
@@ -81,6 +83,29 @@ So delivery is best-effort and unordered across topics. Anything that must survi
 disconnect belongs in the event log or a table. The pattern to follow is BidRL's: write
 the change, then publish it. The database stays the one source of truth, and the
 message only saves a screen from refetching a list to learn one number.
+
+---
+
+## Availability
+
+`Publish` carries values; `Available` and `Unavailable` carry whether the topic is
+being fed at all. Both directions are needed, because silence is ambiguous: a feed that
+reconnected to a quiet auction looks exactly like one that never came back. A plugin
+that knows which it is should say so rather than leave a screen guessing, and a screen
+that cannot tell will either claim liveness it does not have or refuse to claim
+liveness it does.
+
+The hub reports a failed `Join` as `unavailable` itself, and a plugin whose upstream
+dies later reports it the same way, so a client needs one listener rather than a
+convention per plugin. No reason travels with either signal: what broke upstream is not
+a viewer's business.
+
+**Resync on connect.** When a connection opens, every topic the hub is already feeding
+is announced to that connection alone. Without it a reconnecting browser would sit dark
+until the next change, which is the same failure as never connecting.
+
+Neither signal is an error or a state the hub enforces — publishing to a topic works
+regardless. They exist for the screen.
 
 ---
 

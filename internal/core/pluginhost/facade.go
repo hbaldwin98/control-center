@@ -767,6 +767,20 @@ func (a *pushAdapter) Publish(ctx context.Context, topic string, payload any) er
 	return nil
 }
 
+func (a *pushAdapter) Available(ctx context.Context, topic string) error {
+	if err := a.inner.Available(ctx, topic); err != nil {
+		return mapPushErr(err)
+	}
+	return nil
+}
+
+func (a *pushAdapter) Unavailable(ctx context.Context, topic string) error {
+	if err := a.inner.Unavailable(ctx, topic); err != nil {
+		return mapPushErr(err)
+	}
+	return nil
+}
+
 func (a *pushAdapter) Subscribers(topic string) int { return a.inner.Subscribers(topic) }
 
 func (a *pushAdapter) Watch(w hostpush.Watcher) func() {
@@ -798,5 +812,7 @@ func mapPushErr(err error) error {
 type disabledPush struct{}
 
 func (disabledPush) Publish(context.Context, string, any) error { return hostpolicy.ErrPluginDisabled }
+func (disabledPush) Available(context.Context, string) error    { return hostpolicy.ErrPluginDisabled }
+func (disabledPush) Unavailable(context.Context, string) error  { return hostpolicy.ErrPluginDisabled }
 func (disabledPush) Subscribers(string) int                     { return 0 }
 func (disabledPush) Watch(hostpush.Watcher) func()              { return func() {} }

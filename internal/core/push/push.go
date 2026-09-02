@@ -246,6 +246,41 @@ func (s *Service) Publish(ctx context.Context, pluginID, topic string, payload a
 	return nil
 }
 
+// Available is the counterpart: the topic is being fed again.
+//
+// Both directions are needed because the alternative is a screen inferring liveness
+// from traffic, and silence is ambiguous -- a feed that reconnected to a quiet auction
+// looks exactly like one that never came back. A plugin that knows which it is should
+// say so rather than leave a badge guessing.
+func (s *Service) Available(ctx context.Context, pluginID, topic string) error {
+	return s.signal(ctx, pluginID, topic, "available")
+}
+
+// Unavailable tells everyone watching a topic that it is not being fed right now.
+//
+// It exists so "this topic has gone quiet" is said the same way whoever notices it.
+// The hub reports a failed Join this way; a plugin whose upstream dies later reports it
+// the same way, and a client needs one listener rather than a convention per plugin. No
+// reason travels with it: what broke upstream is not a viewer's business, and the
+// screen's only decision is whether to claim the data is live.
+func (s *Service) Unavailable(ctx context.Context, pluginID, topic string) error {
+	return s.signal(ctx, pluginID, topic, "unavailable")
+}
+
+func (s *Service) signal(ctx context.Context, pluginID, topic, event string) error {
+	if strings.TrimSpace(pluginID) == "" {
+		return ErrNoPlugin
+	}
+	if err := ValidTopic(topic); err != nil {
+		return err
+	}
+	if err := s.gate.CheckWork(ctx, pluginID); err != nil {
+		return err
+	}
+	s.notify(pluginID, topic, event)
+	return nil
+}
+
 // Subscribers reports how many connections watch a topic right now.
 func (s *Service) Subscribers(pluginID, topic string) int {
 	s.mu.Lock()

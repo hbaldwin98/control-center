@@ -25,6 +25,20 @@ type Push interface {
 	// anything that must survive a disconnect belongs in the event log or a table.
 	Publish(ctx context.Context, topic string, payload any) error
 
+	// Available says a topic is being fed again -- typically the moment the upstream
+	// work behind it connects. It is what lets a screen claim liveness before the
+	// first payload arrives, which matters because a quiet topic and a dead one look
+	// identical from the outside.
+	Available(ctx context.Context, topic string) error
+
+	// Unavailable tells everyone watching a topic that it is not being fed right now.
+	// Use it the moment the upstream work behind a topic fails or ends, so a screen
+	// stops claiming the values it is showing are live. No reason travels with it.
+	//
+	// It is not an error and not permanent: publishing to the topic again is all it
+	// takes to resume.
+	Unavailable(ctx context.Context, topic string) error
+
 	// Subscribers reports how many connections are watching topic. It is a hint for
 	// skipping expensive work nobody would see, never a lock: the count can change
 	// the instant it is read.

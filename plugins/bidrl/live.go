@@ -190,7 +190,7 @@ func (f *liveFeed) run(ctx context.Context, h host.Host, gen int, watched map[st
 	sess, err := h.Browser().Open(ctx, hostbrowser.OpenOptions{AllowedHosts: feedHosts()})
 	if err != nil {
 		h.Log().Warn("bidrl: live feed session failed", "err", err)
-		f.unavailable(ctx, h, watched)
+		f.signal(h, watched, false)
 		return
 	}
 	defer func() { _ = sess.Close(context.Background()) }()
@@ -204,12 +204,25 @@ func (f *liveFeed) run(ctx context.Context, h host.Host, gen int, watched map[st
 	})
 	if err != nil {
 		h.Log().Warn("bidrl: live feed subscribe failed", "err", err)
-		f.unavailable(ctx, h, watched)
+		f.signal(h, watched, false)
 		return
 	}
 	defer func() { _ = sub.Close(context.Background()) }()
 
 	h.Log().Info("bidrl: live feed joined", "lots", len(watched), "generation", gen)
+	f.signal(h, watched, true)
+
+	// A generation that ends on its own -- the site dropped the socket, or a write
+	// failed -- leaves these lots unfed, and every screen watching one has to be told
+	// rather than left showing a live badge over a dead feed. A cancelled context is
+	// the one case to stay quiet about: either a rebuild is already replacing this
+	// generation, or the plugin was disabled and the host has closed the connections
+	// itself. Announcing there would only make a badge flicker.
+	defer func() {
+		if ctx.Err() == nil {
+			f.signal(h, watched, false)
+		}
+	}()
 
 	for {
 		select {
@@ -299,11 +312,21 @@ func bidMessage(lotID, auctionID string, ev pusherEvent) map[string]any {
 	return msg
 }
 
-// unavailable tells the watchers of every lot in a failed generation that the feed did
-// not come up, so a screen can say so instead of showing a live badge over stale data.
-func (f *liveFeed) unavailable(ctx context.Context, h host.Host, watched map[string]string) {
+// signal tells the watchers of every lot in a generation whether it is being fed.
+//
+// It goes through the host rather than as a payload of our own, because a screen must
+// not have to recognise a BidRL-shaped "not live" message to notice: the host says the
+// same thing for a topic whose Join failed, and one listener has to cover both.
+//
+// The context is deliberately not the generation's: this runs as a generation starts
+// or ends, and at the end its context is usually already cancelled.
+func (f *liveFeed) signal(h host.Host, watched map[string]string, live bool) {
 	for id := range watched {
-		_ = h.Push().Publish(ctx, lotTopic(id), map[string]any{"lotId": id, "live": false})
+		if live {
+			_ = h.Push().Available(context.Background(), lotTopic(id))
+			continue
+		}
+		_ = h.Push().Unavailable(context.Background(), lotTopic(id))
 	}
 }
 

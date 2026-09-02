@@ -394,3 +394,75 @@ func mustOpen(t *testing.T, h *harness, pluginID string, topics ...string) *Conn
 	t.Cleanup(c.Close)
 	return c
 }
+
+// A plugin whose upstream fails after Join succeeded has to be able to say so, or a
+// screen keeps claiming stale values are live. The hub says it the same way it reports
+// a failed Join, so a client needs one listener rather than a convention per plugin.
+func TestAvailabilitySignalsReachTheTopicsSubscribers(t *testing.T) {
+	h := newHarness(t, Options{})
+	watching, ignoring := mustOpen(t, h, "hello", "lot:1"), mustOpen(t, h, "hello", "lot:2")
+	drainReady(t, watching)
+	drainReady(t, ignoring)
+
+	if err := h.svc.Unavailable(h.ctx, "hello", "lot:1"); err != nil {
+		t.Fatal(err)
+	}
+	if msg := next(t, watching); msg.Event != "unavailable" || msg.Topic != "lot:1" {
+		t.Fatalf("frame = %+v", msg)
+	}
+	if err := h.svc.Available(h.ctx, "hello", "lot:1"); err != nil {
+		t.Fatal(err)
+	}
+	if msg := next(t, watching); msg.Event != "available" || msg.Topic != "lot:1" {
+		t.Fatalf("frame = %+v", msg)
+	}
+
+	select {
+	case stray := <-ignoring.Messages():
+		t.Fatalf("unrelated topic received %+v", stray)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// A client that reconnects mid-stream must learn the current state, or a reconnect is
+// indistinguishable from a topic that never came up.
+func TestOpenResyncsTopicsAlreadyBeingFed(t *testing.T) {
+	h := newHarness(t, Options{})
+	rec := newRecorder()
+	defer h.svc.SetWatcher("hello", rec)()
+
+	first := mustOpen(t, h, "hello", "lot:1")
+	waitFor(t, rec.joined, "lot:1")
+
+	// A second connection arrives after the topic is already joined, the way a
+	// reconnecting browser does while another tab holds the feed up.
+	second := mustOpen(t, h, "hello", "lot:1")
+	drainReady(t, second)
+	if msg := next(t, second); msg.Event != "available" || msg.Topic != "lot:1" {
+		t.Fatalf("frame = %+v, want available for lot:1", msg)
+	}
+
+	// The first connection was there before the join, so it is not told twice.
+	drainReady(t, first)
+	select {
+	case stray := <-first.Messages():
+		t.Fatalf("existing connection got a resync it did not need: %+v", stray)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestAvailabilitySignalsValidateLikeAPublish(t *testing.T) {
+	h := newHarness(t, Options{})
+	if err := h.svc.Unavailable(h.ctx, "", "lot:1"); !errors.Is(err, ErrNoPlugin) {
+		t.Errorf("no plugin = %v, want ErrNoPlugin", err)
+	}
+	if err := h.svc.Available(h.ctx, "hello", "lot 1"); !errors.Is(err, ErrInvalidTopic) {
+		t.Errorf("bad topic = %v, want ErrInvalidTopic", err)
+	}
+	if err := h.pol.Disable(h.ctx, "hello", "test", "kill switch"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.svc.Available(h.ctx, "hello", "lot:1"); !errors.Is(err, policy.ErrPluginDisabled) {
+		t.Errorf("disabled = %v, want ErrPluginDisabled", err)
+	}
+}

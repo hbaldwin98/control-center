@@ -242,18 +242,49 @@ function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveBids
       `/api/push/bidrl?topics=${encodeURIComponent(topics)}`,
       { withCredentials: true },
     );
-    const off = () => setStatus("off");
+    // Topics not yet known to be fed. Every topic starts dark: an open connection
+    // only means the host accepted it, and the plugin behind it may still be dialling
+    // or already broken. The host announces the ones it is feeding when the connection
+    // opens, so a reconnect resyncs rather than sitting dark until the next change.
+    //
+    // The badge is live only while the connection is up and nothing is dark, because
+    // "some of these prices are live" is not something one badge can honestly say.
+    let connected = false;
+    const dark = new Set(topics.split(","));
+    const settle = () => setStatus(connected && dark.size === 0 ? "live" : "off");
+    const off = () => {
+      connected = false;
+      settle();
+    };
     // "ready" is the host's own frame. EventSource fires a native "open" of its own,
     // which arrives first and means only that the response started, so the badge waits
     // for the frame that says the topics are registered.
-    source.addEventListener("ready", () => setStatus("live"));
+    source.addEventListener("ready", () => {
+      connected = true;
+      settle();
+    });
+    // A payload is itself proof the topic is being fed, whatever was said before.
+    source.addEventListener("message", (event) => {
+      const topic = topicOf(event);
+      if (topic) dark.delete(topic);
+      settle();
+    });
     source.addEventListener("message", (event) => {
       const bid = bidFromFrame(event);
       if (bid) setBids((current) => ({ ...current, [bid.lotId]: bid }));
     });
-    // The plugin could not feed one lot, or the host ended the connection. Either way
-    // the screen keeps working off its snapshot, which is why this is only a badge.
-    source.addEventListener("unavailable", off);
+    // The plugin could not feed a lot, or its feed came back. Either way the screen
+    // keeps working off its snapshot, which is why this only moves a badge.
+    source.addEventListener("unavailable", (event) => {
+      const topic = topicOf(event);
+      if (topic) dark.add(topic);
+      settle();
+    });
+    source.addEventListener("available", (event) => {
+      const topic = topicOf(event);
+      if (topic) dark.delete(topic);
+      settle();
+    });
     source.addEventListener("closed", off);
     // Do NOT close here. EventSource reconnects on its own, and closing on the first
     // error turns any transient drop into a permanent one -- the stream delivers a
@@ -270,6 +301,15 @@ function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveBids
     };
   }, [key, enabled]);
   return { status, bids };
+}
+
+/** Reads the topic a control frame is about. */
+function topicOf(event: MessageEvent): string {
+  try {
+    return (JSON.parse(event.data) as { topic?: string }).topic ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** Reads one bid out of a push frame. The host frames every message the same way --

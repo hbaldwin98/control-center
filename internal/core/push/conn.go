@@ -66,6 +66,24 @@ func (s *Service) Open(ctx context.Context, pluginID string, topics []string) (*
 	// defines an "open" event of its own, and a listener cannot tell the two apart.
 	c.deliver(Message{Event: "ready", Data: json.RawMessage(fmt.Sprintf(`{"topics":%d}`, len(wanted)))})
 
+	// Resync: a topic already being fed is announced to this connection alone, so a
+	// client that reconnects mid-stream learns the current state instead of waiting
+	// for the next change. Without it a reconnect looks exactly like a topic that
+	// never came up.
+	s.mu.Lock()
+	joined := make([]string, 0, len(wanted))
+	if st := s.plugins[pluginID]; st != nil {
+		for _, name := range wanted {
+			if t := st.topics[name]; t != nil && t.joined {
+				joined = append(joined, name)
+			}
+		}
+	}
+	s.mu.Unlock()
+	for _, name := range joined {
+		c.deliver(Message{Event: "available", Topic: name, Data: json.RawMessage(`{}`)})
+	}
+
 	for _, name := range wanted {
 		s.reconcile(ctx, pluginID, name)
 	}
@@ -187,7 +205,7 @@ func (s *Service) reconcile(ctx context.Context, pluginID, topic string) {
 		}
 		if err := watcher.Join(ctx, topic); err != nil {
 			s.opts.Log.Warn("push: topic join failed", "plugin", pluginID, "topic", topic, "err", err)
-			s.notifyUnavailable(pluginID, topic)
+			s.notify(pluginID, topic, "unavailable")
 			return
 		}
 		t.joined = true
@@ -209,8 +227,8 @@ func (s *Service) reconcile(ctx context.Context, pluginID, topic string) {
 	}
 }
 
-// notifyUnavailable tells everyone watching a topic that the plugin could not feed it.
-func (s *Service) notifyUnavailable(pluginID, topic string) {
+// notify delivers one control frame to everyone watching a topic.
+func (s *Service) notify(pluginID, topic, event string) {
 	s.mu.Lock()
 	var targets []*Conn
 	if st := s.plugins[pluginID]; st != nil {
@@ -223,6 +241,6 @@ func (s *Service) notifyUnavailable(pluginID, topic string) {
 	}
 	s.mu.Unlock()
 	for _, c := range targets {
-		c.deliver(Message{Event: "unavailable", Topic: topic, Data: json.RawMessage(`{}`)})
+		c.deliver(Message{Event: event, Topic: topic, Data: json.RawMessage(`{}`)})
 	}
 }

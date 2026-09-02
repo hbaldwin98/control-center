@@ -283,6 +283,10 @@ describe("bidrl screens", () => {
     expect(container.textContent).not.toContain("Live");
 
     act(() => live?.emit("ready"));
+    // The connection being up is not the feed being up: the host says which topics it
+    // is actually feeding, and the badge waits for that.
+    expect(container.textContent).not.toContain("Live");
+    act(() => live?.emit("available", "lot:1001"));
     expect(container.textContent).toContain("Live");
 
     act(() => live?.emit("closed"));
@@ -295,6 +299,7 @@ describe("bidrl screens", () => {
     await renderAt("/bidrl/lots");
     const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
     expect(live).toBeDefined();
+    act(() => live?.emit("ready"));
     const before = fetchMock.mock.calls.length;
 
     act(() =>
@@ -317,6 +322,7 @@ describe("bidrl screens", () => {
     const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
     expect(live).toBeDefined();
     act(() => live?.emit("ready"));
+    act(() => live?.emit("available", "lot:1001"));
     expect(container.textContent).toContain("Live");
 
     // readyState 0 is CONNECTING: the browser is retrying on its own.
@@ -326,6 +332,7 @@ describe("bidrl screens", () => {
 
     // And the badge comes back by itself when the retry succeeds.
     act(() => live?.emit("ready"));
+    act(() => live?.emit("available", "lot:1001"));
     expect(container.textContent).toContain("Live");
   });
 
@@ -335,6 +342,23 @@ describe("bidrl screens", () => {
     // readyState 2 is CLOSED: retrying is over, so holding the object open buys nothing.
     act(() => live?.fail(2));
     expect(live?.closed).toBe(true);
+  });
+
+  // The bug this pins: an upstream feed that failed after the connection was accepted
+  // left the badge lit over prices that had stopped moving.
+  it("drops the badge when the host says a topic is no longer fed", async () => {
+    await renderAt("/bidrl/lots");
+    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    act(() => live?.emit("ready"));
+    act(() => live?.emit("available", "lot:1001"));
+    expect(container.textContent).toContain("Live");
+
+    act(() => live?.emit("unavailable", "lot:1001"));
+    expect(container.textContent).not.toContain("Live");
+
+    // And it comes back when the plugin reconnects, without waiting for a bid.
+    act(() => live?.emit("available", "lot:1001"));
+    expect(container.textContent).toContain("Live");
   });
 
   it("closes the connection when the screen goes away", async () => {

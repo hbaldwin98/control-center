@@ -5,6 +5,8 @@ import "context"
 // Push is the capability surface pluginhost adapts to host/push.
 type Push interface {
 	Publish(ctx context.Context, topic string, payload any) error
+	Available(ctx context.Context, topic string) error
+	Unavailable(ctx context.Context, topic string) error
 	Subscribers(topic string) int
 	SetWatcher(w Watcher) func()
 }
@@ -23,6 +25,14 @@ type scoped struct {
 
 func (a *scoped) Publish(ctx context.Context, topic string, payload any) error {
 	return a.s.Publish(ctx, a.pluginID, topic, payload)
+}
+
+func (a *scoped) Available(ctx context.Context, topic string) error {
+	return a.s.Available(ctx, a.pluginID, topic)
+}
+
+func (a *scoped) Unavailable(ctx context.Context, topic string) error {
+	return a.s.Unavailable(ctx, a.pluginID, topic)
 }
 
 func (a *scoped) Subscribers(topic string) int {

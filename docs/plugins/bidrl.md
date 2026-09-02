@@ -156,9 +156,13 @@ for 250ms first, so opening a list view redials once for the screen instead of o
 row, and the redial is cheap precisely because the hub already collapsed every viewer of
 a lot into one `Join`.
 
-A screen renders two things from the connection. The **Live** badge appears once the
-host reports the connection is open and disappears the moment it is not, because a badge
-that lied would be worse than none. And each message — one lot, the values that
+A screen renders two things from the connection. The **Live** badge tracks whether the
+lots on screen are actually being fed — not merely whether the connection was accepted.
+The feed announces itself as available the moment its socket is up and unavailable the
+moment a generation ends on its own, so the badge is dark while the socket is dialling
+and goes dark again if the site drops it. A generation that is merely being *replaced*
+stays quiet, because its successor is already connecting and a flicker would say
+nothing true. A badge that lied would be worse than none. And each message — one lot, the values that
 changed — is folded into the row already on screen, instead of refetching a list to
 learn one number. That is what keeps a closing auction from turning every bid into a
 request.
