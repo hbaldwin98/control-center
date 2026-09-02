@@ -338,7 +338,7 @@ func (r *Registry) facadeFor(m host.Manifest, cfg *pluginConfig) host.Host {
 		ai:       aiHandle,
 		browser:  browserHandle,
 		search:   searchHandle,
-		jobs:     &jobsAdapter{inner: jobs.Scoped(r.opts.Jobs, id)},
+		jobs:     &jobsAdapter{inner: jobs.Scoped(r.opts.Jobs, id), gate: r.opts.Policy, pluginID: id},
 		events:   &gatedEvents{inner: events.Scoped(r.opts.Events, id), db: r.opts.DB, gate: r.opts.Policy, pluginID: id},
 		store:    &gatedStore{db: r.opts.DB, inner: storage.Prefixed(r.opts.DB, id), gate: r.opts.Policy, pluginID: id},
 		blobs: &blobAdapter{inner: storage.WithMutationAdmission(r.opts.Blobs.Scoped(id), func(ctx context.Context, tx storage.Tx) error {
@@ -522,9 +522,20 @@ func (b *blobAdapter) Delete(ctx context.Context, key string) error {
 
 func (b *blobAdapter) URL(key string) string { return b.inner.URL(key) }
 
-type jobsAdapter struct{ inner jobs.Jobs }
+type jobsAdapter struct {
+	inner    jobs.Jobs
+	gate     policy.Gate
+	pluginID string
+}
 
 func (a *jobsAdapter) Enqueue(ctx context.Context, name string, args any, opts ...hostjobs.Opt) (int64, error) {
+	// The gate comes first. A disabled plugin has its job definitions unmounted, so
+	// without this the queue reports the enqueue as an unknown definition -- an
+	// implementation detail that tells the plugin to fix its code when the real answer
+	// is that it is switched off.
+	if err := a.gate.CheckWork(ctx, a.pluginID); err != nil {
+		return 0, mapPolicyErr(err)
+	}
 	o := hostjobs.ApplyOpts(opts)
 	var jopts []jobs.Opt
 	if o.HasRunAt {
@@ -537,19 +548,49 @@ func (a *jobsAdapter) Enqueue(ctx context.Context, name string, args any, opts .
 		jopts = append(jopts, jobs.WithPriority(o.Priority))
 	}
 	id, err := a.inner.Enqueue(ctx, name, args, jopts...)
-	return id, mapPolicyErr(err)
+	return id, mapJobsErr(err)
 }
 
 func (a *jobsAdapter) Cancel(ctx context.Context, id int64) error {
-	return a.inner.Cancel(ctx, id)
+	return mapJobsErr(a.inner.Cancel(ctx, id))
 }
 
 func (a *jobsAdapter) Get(ctx context.Context, id int64) (*hostjobs.Job, error) {
 	j, err := a.inner.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, mapJobsErr(err)
 	}
 	return mapJob(j), nil
+}
+
+// jobSentinels pairs each core jobs error with the plugin-facing one that means the
+// same thing. The two sets are declared separately -- core's in internal/core/jobs,
+// the plugin's in host/jobs -- so a plugin's errors.Is check against the host sentinel
+// only works if the adapter joins them here.
+var jobSentinels = []struct{ inner, outer error }{
+	{jobs.ErrUnknownJob, hostjobs.ErrUnknownJob},
+	{jobs.ErrUnknownDef, hostjobs.ErrUnknownDef},
+	{jobs.ErrInvalidName, hostjobs.ErrInvalidName},
+	{jobs.ErrInvalidSchedule, hostjobs.ErrInvalidSchedule},
+	{jobs.ErrLostLease, hostjobs.ErrLostLease},
+	{jobs.ErrAlreadyTerminal, hostjobs.ErrAlreadyTerminal},
+	{jobs.ErrNotCancellable, hostjobs.ErrNotCancellable},
+	{jobs.ErrPluginMismatch, hostjobs.ErrPluginMismatch},
+}
+
+// mapJobsErr translates a queue error into the sentinel a plugin is documented to
+// check for, keeping the original as context. Policy errors are mapped too, so one
+// call covers everything that crosses this boundary.
+func mapJobsErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	for _, s := range jobSentinels {
+		if errors.Is(err, s.inner) {
+			return errors.Join(s.outer, err)
+		}
+	}
+	return mapPolicyErr(err)
 }
 
 func (a *jobsAdapter) List(ctx context.Context, f hostjobs.Filter) ([]hostjobs.Job, error) {

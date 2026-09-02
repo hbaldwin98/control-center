@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/hbaldwin98/control-center/host"
 	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
-	"github.com/hbaldwin98/control-center/plugins/hello"
 )
 
 // newAIAdminHarness gives the server a live ai service with no providers and no routes,
@@ -226,7 +226,9 @@ func TestAIAssignUsesPluginDeclaredCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterAll(hello.New()); err != nil {
+	if err := reg.RegisterAll(&modelPlugin{id: "fixture", models: []host.ModelNeed{{
+		Name: "cheap-chat", Capabilities: []string{"chat"}, Purpose: "assignment fixture",
+	}}}); err != nil {
 		t.Fatal(err)
 	}
 	h.server.deps.PluginHost = reg

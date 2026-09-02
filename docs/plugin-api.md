@@ -496,7 +496,53 @@ Every row of the enforcement matrix, tested by something that is not your real p
 
 ---
 
-## 9. Registration
+## 9. Testing your plugin
+
+Your plugin's tests live in your plugin's module. They never import the control center;
+they run against `host/hosttest`, a double for the whole `Host` surface.
+
+```go
+h := hosttest.New(t, pagewatch.New())
+h.Browser.Page("https://example.com/", examplePage)
+h.AI.Reply("cheap-chat", "The page describes an example domain.")
+h.Run(ctx)
+
+h.DecodeJSON(h.POST("/checks", nil), http.StatusAccepted, &posted)
+if err := h.RunJob(ctx, posted.JobID); err != nil { ... }
+```
+
+The double is deterministic. Nothing happens in the background: cron never fires, jobs
+run when you run them, subscriptions deliver before `Publish` returns, and the clock
+only moves when you move it. There is nothing to poll and nothing to wait for, so a
+test either passes or fails on the first run.
+
+| You want to | Call |
+|---|---|
+| Start the plugin | `h.Run(ctx)` — Migrate, then Init |
+| Drive a route | `h.GET(path)`, `h.POST(path, body)`, `h.Do(req)` |
+| Run work | `h.RunJobNow(ctx, name, args)`, `h.RunJob`, `h.Drain` |
+| Deliver an event to it | `h.Publish(ctx, source, type, subject, payload)` |
+| See what it published | `h.Events()` |
+| Change settings | `h.SetConfig(ctx, v)` |
+| Flip the kill switch | `h.Disable()`, `h.Enable()` |
+| Move time | `h.Clock.Advance(d)` |
+| Inspect its tables | `h.DB()` |
+| Program capabilities | `h.AI`, `h.Browser`, `h.Search` |
+
+The fakes refuse to guess. An AI route you did not program returns `ErrUnknownRoute`, a
+page you did not program fails to load, and a URL outside the session allowlist is
+denied — each the error the real host would give you, so the mistake surfaces in your
+test rather than in production.
+
+**What it cannot tell you.** Delivery here is synchronous and lossless, so it cannot
+prove your plugin survives a dropped live event; use a durable subscription, which the
+real host does guarantee. It has no renderer, so `WaitFor` and `Click` are approximate.
+And it enforces the table-prefix rule on the DDL you hand `Migrate` rather than through
+SQLite's authorizer, so it will not catch a prefix violation assembled at runtime.
+
+---
+
+## 10. Registration
 
 One file in the core app, and one line in it:
 

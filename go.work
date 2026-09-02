@@ -13,3 +13,5 @@ use ./plugins/pagewatch
 use ./plugins/tid
 
 use ./plugins/bidrl
+
+use ./host/hosttest

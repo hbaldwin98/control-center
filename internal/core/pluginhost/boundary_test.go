@@ -29,11 +29,15 @@ func TestPluginModulesDependOnlyOnHost(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(modDir, "go.mod")); err != nil {
 			continue
 		}
-		cmd := exec.Command("go", "list", "-deps")
+		// -test includes the test binary's own dependencies. A plugin's tests are the
+		// easiest place for the boundary to erode -- reaching into core for a fixture
+		// is a small, reasonable-looking step -- so they are held to the same rule.
+		// The one addition tests may use is host/hosttest.
+		cmd := exec.Command("go", "list", "-deps", "-test")
 		cmd.Dir = modDir
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("%s: go list -deps: %v\n%s", e.Name(), err, out)
+			t.Fatalf("%s: go list -deps -test: %v\n%s", e.Name(), err, out)
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
