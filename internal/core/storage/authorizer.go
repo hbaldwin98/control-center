@@ -174,11 +174,16 @@ func tableAllowed(prefix, name string) bool {
 	if name == "" {
 		return true
 	}
-	// SQLite may qualify as "main.table".
+	// SQLite may qualify as "main.table" or, while reparsing the schema, as
+	// "temp.sqlite_temp_master".
+	schema := "main"
 	if i := strings.LastIndexByte(name, '.'); i >= 0 {
-		db := name[:i]
+		schema = name[:i]
 		name = name[i+1:]
-		if db != "" && !strings.EqualFold(db, "main") {
+		if schema == "" {
+			schema = "main"
+		}
+		if !strings.EqualFold(schema, "main") && !strings.EqualFold(schema, "temp") {
 			return false
 		}
 	}
@@ -186,7 +191,19 @@ func tableAllowed(prefix, name string) bool {
 		lower := strings.ToLower(name)
 		// SQLite implements DDL by writing sqlite_master / sqlite_schema. Denying
 		// that would make CREATE TABLE impossible; other sqlite_* objects stay closed.
-		return lower == "sqlite_master" || lower == "sqlite_schema"
+		// ALTER TABLE ... RENAME reparses the schema and reads the temp equivalents,
+		// so those are readable too; temp objects themselves stay denied by action.
+		switch lower {
+		case "sqlite_master", "sqlite_schema":
+			return true
+		case "sqlite_temp_master", "sqlite_temp_schema":
+			// The schema name arrives out of band (arg3), so accept either form.
+			return true
+		}
+		return false
+	}
+	if !strings.EqualFold(schema, "main") {
+		return false
 	}
 	// ALTER TABLE ADD COLUMN on STRICT tables runs PRAGMA quick_check, which reads
 	// the eponymous virtual table.
