@@ -115,6 +115,12 @@ const routes = new Map<string, unknown>([
     automation: {
       enabled: true,
       locations: 2,
+      affiliateIds: ["19", "7"],
+      maxAuctionsPerSweep: 5,
+      maxNewLotsPerSweep: 400,
+      queuedAuctions: 3,
+      watchlists: 1,
+      enabledWatchlists: 1,
       sweepSchedule: "0 */6 * * *",
       matchSchedule: "30 */6 * * *",
       timeZone: "UTC",
@@ -241,12 +247,62 @@ describe("bidrl screens", () => {
     ["/bidrl/findings", "Findings"],
     ["/bidrl/watchlists", "Watchlists"],
     ["/bidrl/saved", "Saved"],
+    ["/bidrl/automation", "Automation"],
     ["/bidrl/intent", "Intent"],
     ["/bidrl/auction/42", "Test Warehouse"],
     ["/bidrl/lot/1001", "Keurig coffee maker"],
   ])("mounts %s", async (path, expected) => {
     await renderAt(path);
     expect(container.textContent).toContain(expected);
+  });
+
+  // The screen exists to answer "what happens next, and what happened last" without
+  // opening the job log, so both ticks have to be on it, named and dated.
+  it("reports both scheduled ticks and what they last did", async () => {
+    await renderAt("/bidrl/automation");
+    expect(container.textContent).toContain("Sweep");
+    expect(container.textContent).toContain("Match");
+    expect(container.textContent).toContain("collected 2 auctions, 140 lots");
+    expect(container.textContent).toContain("3 findings from 1 watchlists");
+    // The plan, not just the settings: three of nine queued, capped at five a tick.
+    expect(container.textContent).toContain("3 auctions next");
+    // Locations by name, because "2 locations" leaves the operator guessing which.
+    expect(container.textContent).toContain("SITES Turlock");
+  });
+
+  // A latch is the one thing on this screen that needs an answer, so it is the only
+  // state that offers a button — and clearing it is a person's decision, never a tick's.
+  it("shows no resume control while collection is running normally", async () => {
+    await renderAt("/bidrl/automation");
+    expect(container.textContent).not.toContain("Resume collection");
+  });
+
+  it("resumes a latched collection from the screen", async () => {
+    const before = routes.get("/api/plugins/bidrl/automation") as { automation: Record<string, unknown> };
+    routes.set("/api/plugins/bidrl/automation", {
+      ...before,
+      automation: { ...before.automation, throttled: true, throttledUntil: "2026-09-02T06:00:00Z" },
+    });
+    try {
+      await renderAt("/bidrl/automation");
+      expect(container.textContent).toContain("Resume collection");
+      const button = [...container.querySelectorAll("button")].find(
+        (b) => b.textContent === "Resume collection",
+      );
+      expect(button).toBeDefined();
+      await act(async () => {
+        button?.click();
+      });
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/api/plugins/bidrl/automation/resume" &&
+            (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+    } finally {
+      routes.set("/api/plugins/bidrl/automation", before);
+    }
   });
 
   // The saved and lots screens span auctions, so the connection is opened for what is
@@ -373,7 +429,15 @@ describe("bidrl screens", () => {
   it("shows every section tab on each screen, with the current one marked", async () => {
     await renderAt("/bidrl/lots");
     const tabs = [...container.querySelectorAll(".cc-tabs a")].map((a) => a.textContent);
-    expect(tabs).toEqual(["Overview", "Auctions", "Lots", "Findings", "Saved", "Intent"]);
+    expect(tabs).toEqual([
+      "Overview",
+      "Auctions",
+      "Lots",
+      "Findings",
+      "Saved",
+      "Intent",
+      "Automation",
+    ]);
     expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
   });
 

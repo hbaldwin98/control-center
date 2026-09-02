@@ -2,6 +2,8 @@ package bidrl
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -488,7 +490,10 @@ func (p *Plugin) handleCreateWatchlist(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = truncateRunes(query, maxWatchName)
 	}
-	id := "wl-" + newSearchID(h.Clock().Now())
+	// A millisecond stamp alone is not unique: two saves in the same millisecond — a
+	// double-click, a script — would collide on the primary key and read as an
+	// internal error. The suffix costs nothing and makes the id the row's own.
+	id := "wl-" + newSearchID(h.Clock().Now()) + "-" + randomSuffix()
 	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
 	if _, err := h.Store().Exec(r.Context(), `INSERT INTO bidrl_watchlists(id, name, query, enabled,
 		affiliate_ids, categories, max_bid_cents, min_score, created_at)
@@ -505,6 +510,16 @@ func (p *Plugin) handleCreateWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, wl)
+}
+
+// randomSuffix is four hex characters of entropy, enough to separate two watchlists
+// saved in the same millisecond. It is an identifier, not a secret.
+func randomSuffix() string {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "0000"
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func (p *Plugin) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {

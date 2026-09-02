@@ -50,18 +50,28 @@ func (c automationConfig) normalized() automationConfig {
 }
 
 type automationState struct {
-	Enabled        bool   `json:"enabled"`
-	Locations      int    `json:"locations"`
-	SweepSchedule  string `json:"sweepSchedule"`
-	MatchSchedule  string `json:"matchSchedule"`
-	TimeZone       string `json:"timeZone"`
-	LastSweepAt    string `json:"lastSweepAt"`
-	LastSweepNote  string `json:"lastSweepNote"`
-	LastMatchAt    string `json:"lastMatchAt"`
-	LastMatchNote  string `json:"lastMatchNote"`
-	ThrottledUntil string `json:"throttledUntil"`
-	Throttled      bool   `json:"throttled"`
-	NewFindings    int    `json:"newFindings"`
+	Enabled   bool `json:"enabled"`
+	Locations int  `json:"locations"`
+	// AffiliateIDs is what Locations counts, so the screen can name the places
+	// rather than say "2 locations" and leave the operator to guess which.
+	AffiliateIDs        []string `json:"affiliateIds"`
+	MaxAuctionsPerSweep int      `json:"maxAuctionsPerSweep"`
+	MaxNewLotsPerSweep  int      `json:"maxNewLotsPerSweep"`
+	SweepSchedule       string   `json:"sweepSchedule"`
+	MatchSchedule       string   `json:"matchSchedule"`
+	TimeZone            string   `json:"timeZone"`
+	LastSweepAt         string   `json:"lastSweepAt"`
+	LastSweepNote       string   `json:"lastSweepNote"`
+	LastMatchAt         string   `json:"lastMatchAt"`
+	LastMatchNote       string   `json:"lastMatchNote"`
+	ThrottledUntil      string   `json:"throttledUntil"`
+	Throttled           bool     `json:"throttled"`
+	NewFindings         int      `json:"newFindings"`
+	// What the next two ticks have to work with: auctions the sweep would collect
+	// and watchlists the match would run. Both are zero for reasons worth showing.
+	QueuedAuctions    int `json:"queuedAuctions"`
+	Watchlists        int `json:"watchlists"`
+	EnabledWatchlists int `json:"enabledWatchlists"`
 }
 
 // ------------------------------------------------------------------- the sweep
@@ -342,11 +352,32 @@ func (p *Plugin) handleGetAutomation(w http.ResponseWriter, r *http.Request) {
 	cfg := p.cfg().Automation
 	st.Enabled = cfg.Enabled
 	st.Locations = len(cfg.AffiliateIDs)
+	st.AffiliateIDs = cfg.AffiliateIDs
+	if st.AffiliateIDs == nil {
+		st.AffiliateIDs = []string{}
+	}
+	st.MaxAuctionsPerSweep = cfg.MaxAuctionsPerSweep
+	st.MaxNewLotsPerSweep = cfg.MaxNewLotsPerSweep
 	st.SweepSchedule = sweepSchedule
 	st.MatchSchedule = matchSchedule
 	st.TimeZone = cronTimeZone
 	st.Throttled = throttleHeld(st.ThrottledUntil, h.Clock().Now())
 	_ = h.Store().QueryRow(r.Context(), `SELECT COUNT(*) FROM bidrl_findings WHERE state = 'new'`).Scan(&st.NewFindings)
+	if len(cfg.AffiliateIDs) > 0 {
+		// The same query the tick itself runs, so the screen promises exactly what
+		// the next sweep would do rather than an approximation of it.
+		if targets, err := p.auctionsToSweep(r.Context(), h, cfg); err == nil {
+			st.QueuedAuctions = len(targets)
+		}
+	}
+	if lists, err := p.listWatchlists(r.Context(), h); err == nil {
+		st.Watchlists = len(lists)
+		for _, w := range lists {
+			if w.Enabled {
+				st.EnabledWatchlists++
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"automation": st, "latestEventId": latestEventID(r.Context(), h),
 	})

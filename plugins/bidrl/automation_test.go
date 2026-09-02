@@ -59,6 +59,13 @@ type automationView struct {
 		ThrottledUntil string `json:"throttledUntil"`
 		Throttled      bool   `json:"throttled"`
 		NewFindings    int    `json:"newFindings"`
+
+		AffiliateIDs        []string `json:"affiliateIds"`
+		MaxAuctionsPerSweep int      `json:"maxAuctionsPerSweep"`
+		MaxNewLotsPerSweep  int      `json:"maxNewLotsPerSweep"`
+		QueuedAuctions      int      `json:"queuedAuctions"`
+		Watchlists          int      `json:"watchlists"`
+		EnabledWatchlists   int      `json:"enabledWatchlists"`
 	} `json:"automation"`
 }
 
@@ -316,6 +323,46 @@ func TestGetAutomationReportsTheSchedule(t *testing.T) {
 	}
 	if got.SweepSchedule == "" || got.MatchSchedule == "" || got.TimeZone != "UTC" {
 		t.Fatalf("schedule not reported: %+v", got)
+	}
+}
+
+// The screen says what the next two ticks will do, not only what the settings are, so
+// the endpoint has to report the same work the ticks themselves would pick up.
+func TestGetAutomationReportsWhatTheNextTicksWouldDo(t *testing.T) {
+	ctx := context.Background()
+	h := newAutomationHarness(t, ctx, autoConfig{Enabled: true, AffiliateIDs: []string{"19"}, MaxAuctionsPerSweep: 2})
+
+	// Nothing is discovered yet, so there is honestly nothing queued.
+	if got := readAutomation(t, h).Automation; got.QueuedAuctions != 0 {
+		t.Fatalf("queued before any discovery = %d", got.QueuedAuctions)
+	}
+
+	if err := h.RunJobNow(ctx, "sweep", nil); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if err := h.Drain(ctx); err != nil {
+		t.Fatalf("follow-on job: %v", err)
+	}
+	id := createWatchlist(t, h, map[string]any{"name": "Coffee", "query": "keurig coffee maker"})
+	createWatchlist(t, h, map[string]any{"name": "Camping", "query": "tent"})
+	if rec := h.Do(patch(t, "/watchlists/"+id, map[string]any{"enabled": false})); rec.Code != http.StatusOK {
+		t.Fatalf("disable: %d %s", rec.Code, rec.Body.Bytes())
+	}
+
+	got := readAutomation(t, h).Automation
+	// The sweep collected what it found, so the same query the tick runs now has
+	// nothing left at that location.
+	if got.QueuedAuctions != 0 {
+		t.Fatalf("queued after a full sweep = %d", got.QueuedAuctions)
+	}
+	if len(got.AffiliateIDs) != 1 || got.AffiliateIDs[0] != "19" {
+		t.Fatalf("locations not named: %+v", got.AffiliateIDs)
+	}
+	if got.MaxAuctionsPerSweep != 2 || got.MaxNewLotsPerSweep != 400 {
+		t.Fatalf("caps not reported: %+v", got)
+	}
+	if got.Watchlists != 2 || got.EnabledWatchlists != 1 {
+		t.Fatalf("watchlist counts = %d/%d", got.EnabledWatchlists, got.Watchlists)
 	}
 }
 

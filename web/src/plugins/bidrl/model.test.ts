@@ -16,7 +16,10 @@ import {
   pct,
   groupSimilarLots,
   affiliateParam,
+  automationLocations,
   automationSummary,
+  matchPlan,
+  sweepPlan,
   groupFindings,
   locationLabel,
   locationLabelOrEmpty,
@@ -27,6 +30,7 @@ import {
   watchlistRules,
   overlayBid,
   overlayBids,
+  type Automation,
   type Lot,
 } from "./model";
 
@@ -458,9 +462,15 @@ describe("watchlists", () => {
 });
 
 describe("automationSummary", () => {
-  const base = {
+  const base: Automation = {
     enabled: false,
     locations: 0,
+    affiliateIds: [],
+    maxAuctionsPerSweep: 5,
+    maxNewLotsPerSweep: 400,
+    queuedAuctions: 0,
+    watchlists: 0,
+    enabledWatchlists: 0,
     sweepSchedule: "0 */6 * * *",
     matchSchedule: "30 */6 * * *",
     timeZone: "UTC",
@@ -487,6 +497,49 @@ describe("automationSummary", () => {
     expect(automationSummary({ ...base, enabled: true, locations: 3, throttled: true })).toBe(
       "Stopped: BidRL is refusing requests.",
     );
+  });
+
+  // The plan lines are what the Automation screen leads with, and every way a tick can
+  // come to nothing wants a different fix, so none of them may share a sentence.
+  it("says what the next sweep would do, and why it would not", () => {
+    expect(sweepPlan(base)).toContain("Automation is off");
+    expect(sweepPlan({ ...base, enabled: true })).toContain("No locations chosen");
+    expect(sweepPlan({ ...base, enabled: true, locations: 1 })).toContain("Nothing new");
+    expect(sweepPlan({ ...base, enabled: true, locations: 1, queuedAuctions: 9 })).toBe(
+      "5 auctions next, soonest to close first, stopping at 400 new lots.",
+    );
+    // Never promise more than the cap allows, however long the backlog is.
+    expect(sweepPlan({ ...base, enabled: true, locations: 1, queuedAuctions: 1 })).toContain(
+      "1 auction next",
+    );
+    // A latch outranks the backlog: the tick will not touch BidRL at all.
+    expect(sweepPlan({ ...base, enabled: true, locations: 1, queuedAuctions: 9, throttled: true })).toContain(
+      "Held until you resume it",
+    );
+  });
+
+  // The match tick runs even while a sweep is latched, so a latch is not one of its
+  // reasons for doing nothing — being off, or having nothing enabled to run, are.
+  it("says what the next match would run", () => {
+    expect(matchPlan(base)).toContain("Automation is off");
+    expect(matchPlan({ ...base, enabled: true })).toContain("No watchlists yet");
+    expect(matchPlan({ ...base, enabled: true, watchlists: 2 })).toBe(
+      "All 2 watchlists are paused, so nothing runs.",
+    );
+    expect(matchPlan({ ...base, enabled: true, watchlists: 2, enabledWatchlists: 1 })).toContain(
+      "1 of 2 watchlists",
+    );
+    expect(matchPlan({ ...base, enabled: true, watchlists: 2, enabledWatchlists: 1, throttled: true })).toContain(
+      "1 of 2 watchlists",
+    );
+  });
+
+  it("names the locations automation is scoped to, falling back to the raw id", () => {
+    const a = { ...base, enabled: true, locations: 2, affiliateIds: ["19", "7"] };
+    expect(automationLocations(a, new Map([["19", "SITES Turlock"]]))).toEqual([
+      "SITES Turlock",
+      "7",
+    ]);
   });
 });
 

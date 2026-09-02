@@ -72,6 +72,9 @@ export type FavoritesPage = {
 export type Automation = {
   enabled: boolean;
   locations: number;
+  affiliateIds: string[];
+  maxAuctionsPerSweep: number;
+  maxNewLotsPerSweep: number;
   sweepSchedule: string;
   matchSchedule: string;
   timeZone: string;
@@ -82,6 +85,9 @@ export type Automation = {
   throttledUntil: string;
   throttled: boolean;
   newFindings: number;
+  queuedAuctions: number;
+  watchlists: number;
+  enabledWatchlists: number;
 };
 
 export type AutomationPage = {
@@ -100,6 +106,35 @@ export function automationSummary(a: Automation): string {
   if (a.locations === 0) return "On, but no locations chosen — the sweep does nothing.";
   const where = `${a.locations} location${a.locations === 1 ? "" : "s"}`;
   return `On, sweeping ${where} every six hours.`;
+}
+
+/**
+ * What the next sweep would do, said as a plan rather than as settings. Every way it
+ * can come to nothing — off, unscoped, latched, nothing new at the chosen places — is
+ * its own sentence, because "nothing will happen" is the answer an operator most often
+ * needs and the four reasons want different fixes.
+ */
+export function sweepPlan(a: Automation): string {
+  if (a.throttled) return "Held until you resume it. No tick will touch BidRL.";
+  if (!a.enabled) return "Automation is off, so this tick returns without doing anything.";
+  if (a.locations === 0) return "No locations chosen. An unscoped scheduled crawl is not something this plugin does.";
+  if (a.queuedAuctions === 0) return "Nothing new at your locations. The next tick will find nothing to collect.";
+  const auctions = Math.min(a.queuedAuctions, a.maxAuctionsPerSweep);
+  return `${auctions} auction${auctions === 1 ? "" : "s"} next, soonest to close first, stopping at ${a.maxNewLotsPerSweep} new lots.`;
+}
+
+/** The same, for the match tick — which runs even while a sweep is latched. */
+export function matchPlan(a: Automation): string {
+  if (!a.enabled) return "Automation is off, so this tick returns without doing anything.";
+  if (a.watchlists === 0) return "No watchlists yet. Write one and the match tick has something to run.";
+  if (a.enabledWatchlists === 0) return `All ${a.watchlists} watchlists are paused, so nothing runs.`;
+  const n = a.enabledWatchlists;
+  return `${n} of ${a.watchlists} watchlist${a.watchlists === 1 ? "" : "s"} run against everything collected since they last looked.`;
+}
+
+/** Location names for the ids automation is scoped to, falling back to the raw id. */
+export function automationLocations(a: Automation, labels: Map<string, string>): string[] {
+  return a.affiliateIds.map((id) => labels.get(id) ?? id);
 }
 
 export type Watchlist = {

@@ -215,7 +215,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
 | Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
-| Automation UI | ⬜ | Backend automation (scheduled `sweep` / `match`, throttle latch, `GET /automation`, `POST /automation/resume`) exists; the UI for it needs building out — turning `automation.enabled` and locations on, watchlist management, both last ticks and what they did, the latch with a resume control, and the Findings backlog count. |
+| Automation UI | ✅ | An Automation screen: what each tick would do next and what it last did, the latch with a resume control, the Findings backlog, and the settings it runs on. Turning it on stays on the plugin's configuration screen — only the administration API writes config, so a plugin page reports its settings and links to them. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ## Milestone 13 — `push` ✅
