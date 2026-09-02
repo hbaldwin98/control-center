@@ -67,6 +67,10 @@ func (s *scopedSession) NewPage(ctx context.Context) (Page, error) {
 	return &scopedPage{inner: p, pluginID: s.pluginID}, nil
 }
 
+func (s *scopedSession) Subscribe(ctx context.Context, url string, opts SubscribeOptions) (Subscription, error) {
+	return s.inner.Subscribe(WithPlugin(ctx, s.pluginID), url, opts)
+}
+
 func (s *scopedSession) Close(ctx context.Context) error {
 	return s.inner.Close(WithPlugin(ctx, s.pluginID))
 }

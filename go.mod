@@ -3,6 +3,7 @@ module github.com/hbaldwin98/control-center
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.12
 	github.com/google/cel-go v0.26.1
 	github.com/hbaldwin98/control-center/host v0.0.0
 	github.com/hbaldwin98/control-center/plugins/bidrl v0.0.0

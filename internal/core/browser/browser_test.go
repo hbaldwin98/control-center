@@ -285,13 +285,17 @@ func TestInlineDataSubresourceIsAllowed(t *testing.T) {
 func TestSessionLimit(t *testing.T) {
 	h := newHarness(t, map[string]http.Handler{"hello.test": HTMLHandler(`<p>x</p>`)})
 	ctx := h.ctxHello()
-	sess, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}})
-	if err != nil {
-		t.Fatal(err)
+	// A plugin may hold a long-lived session (a realtime feed) and still open one for
+	// work, so the limit is more than one; what matters is that it is finite.
+	for i := 0; i < h.svc.opts.MaxSessionsPerPlugin; i++ {
+		sess, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}})
+		if err != nil {
+			t.Fatalf("session %d: %v", i, err)
+		}
+		defer sess.Close(ctx)
 	}
-	defer sess.Close(ctx)
 	if _, err := h.svc.Open(ctx, OpenOptions{AllowedHosts: []string{"hello.test"}}); !errors.Is(err, ErrLimit) {
-		t.Fatalf("second session: %v", err)
+		t.Fatalf("session past the limit: %v", err)
 	}
 }
 

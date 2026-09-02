@@ -115,6 +115,24 @@ func (s browserSessionAdapter) NewPage(ctx context.Context) (hostbrowser.Page, e
 	return browserPageAdapter{inner: p, creds: s.creds}, nil
 }
 
+func (s browserSessionAdapter) Subscribe(ctx context.Context, url string, opts hostbrowser.SubscribeOptions) (hostbrowser.Subscription, error) {
+	inner := browser.SubscribeOptions{
+		Handshake: make([][]byte, 0, len(opts.Handshake)),
+		KeepAlive: make([]browser.KeepAliveRule, 0, len(opts.KeepAlive)),
+	}
+	for _, frame := range opts.Handshake {
+		inner.Handshake = append(inner.Handshake, []byte(frame))
+	}
+	for _, rule := range opts.KeepAlive {
+		inner.KeepAlive = append(inner.KeepAlive, browser.KeepAliveRule{Event: rule.Event, Reply: []byte(rule.Reply)})
+	}
+	sub, err := s.inner.Subscribe(ctx, url, inner)
+	if err != nil {
+		return nil, mapBrowserErr(err)
+	}
+	return newSubscriptionAdapter(sub), nil
+}
+
 func (s browserSessionAdapter) Close(ctx context.Context) error {
 	return mapBrowserErr(s.inner.Close(ctx))
 }
@@ -192,6 +210,40 @@ func (p browserPageAdapter) FillCredential(ctx context.Context, selector, creden
 
 func (p browserPageAdapter) Close(ctx context.Context) error {
 	return mapBrowserErr(p.inner.Close(ctx))
+}
+
+// subscriptionAdapter republishes core frames on a plugin-facing channel. The pump
+// exists only to translate the frame type; it inherits the core channel's lifetime, so
+// the plugin sees the feed close exactly when the socket does. Its buffer matches the
+// core's and it drops rather than blocking, so a plugin that abandons a subscription
+// without closing it cannot wedge this goroutine.
+type subscriptionAdapter struct {
+	inner  browser.Subscription
+	frames chan hostbrowser.Frame
+}
+
+func newSubscriptionAdapter(inner browser.Subscription) *subscriptionAdapter {
+	a := &subscriptionAdapter{inner: inner, frames: make(chan hostbrowser.Frame, 256)}
+	go a.pump()
+	return a
+}
+
+func (a *subscriptionAdapter) pump() {
+	defer close(a.frames)
+	for f := range a.inner.Frames() {
+		select {
+		case a.frames <- hostbrowser.Frame{At: f.At, Data: f.Data}:
+		default:
+		}
+	}
+}
+
+func (a *subscriptionAdapter) Frames() <-chan hostbrowser.Frame { return a.frames }
+
+func (a *subscriptionAdapter) Err() error { return mapBrowserErr(a.inner.Err()) }
+
+func (a *subscriptionAdapter) Close(ctx context.Context) error {
+	return mapBrowserErr(a.inner.Close(ctx))
 }
 
 func mapBrowserErr(err error) error {

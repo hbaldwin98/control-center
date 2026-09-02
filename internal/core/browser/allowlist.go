@@ -125,10 +125,17 @@ func parsePageURL(raw string) (*url.URL, error) {
 }
 
 func checkURL(u *url.URL, al allowlist) error {
+	return checkURLScheme(u, al, "https")
+}
+
+// checkURLScheme is checkURL with the transport pinned by the caller. Everything past
+// the scheme -- userinfo, literal IPs, the port, the allowlist -- is identical, so a
+// wss:// subscription is gated exactly the way an https:// fetch is.
+func checkURLScheme(u *url.URL, al allowlist, scheme string) error {
 	if u == nil || u.Scheme == "" || u.Host == "" {
 		return deny("scheme", u)
 	}
-	if !strings.EqualFold(u.Scheme, "https") {
+	if !strings.EqualFold(u.Scheme, scheme) {
 		return deny("scheme", u)
 	}
 	if u.User != nil {

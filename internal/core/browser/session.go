@@ -24,6 +24,7 @@ type session struct {
 
 	mu     sync.Mutex
 	pages  []*page
+	subs   []*subscription
 	closed bool
 }
 
@@ -117,9 +118,14 @@ func (s *session) closeLocked(ctx context.Context) error {
 	s.cancel()
 	pages := s.pages
 	s.pages = nil
+	subs := s.subs
+	s.subs = nil
 	eng := s.engine
 	s.mu.Unlock()
 
+	for _, sub := range subs {
+		sub.finish(ErrClosed)
+	}
 	for _, p := range pages {
 		_ = p.closeEngine(ctx)
 	}

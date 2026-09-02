@@ -31,7 +31,7 @@ var (
 )
 
 const (
-	defaultSessionsPerPlugin = 1
+	defaultSessionsPerPlugin = 2
 	defaultPagesPerSession   = 4
 	defaultPagesHost         = 32
 	defaultMaxDocument       = 5 << 20
@@ -53,6 +53,13 @@ type Options struct {
 	MaxResourceBytes     int
 	NavigationTimeout    time.Duration
 	WaitForCap           time.Duration
+
+	MaxSubscriptionsPerSession int
+	MaxFrameBytes              int
+	SubscribeTimeout           time.Duration
+	// SubscribeClient overrides the websocket handshake client. The default dials only
+	// checked public addresses on 443; a test supplies its own to reach a local server.
+	SubscribeClient *http.Client
 }
 
 func (o *Options) applyDefaults() {
@@ -82,6 +89,15 @@ func (o *Options) applyDefaults() {
 	}
 	if o.WaitForCap <= 0 {
 		o.WaitForCap = defaultWaitCap
+	}
+	if o.MaxSubscriptionsPerSession <= 0 {
+		o.MaxSubscriptionsPerSession = defaultMaxSubscriptionsPerSession
+	}
+	if o.MaxFrameBytes <= 0 {
+		o.MaxFrameBytes = defaultMaxFrameBytes
+	}
+	if o.SubscribeTimeout <= 0 {
+		o.SubscribeTimeout = defaultSubscribeTimeout
 	}
 }
 

@@ -27,7 +27,34 @@ type OpenOptions struct {
 // Session is one isolated browser context.
 type Session interface {
 	NewPage(ctx context.Context) (Page, error)
+	Subscribe(ctx context.Context, url string, opts SubscribeOptions) (Subscription, error)
 	Close(ctx context.Context) error
+}
+
+// SubscribeOptions describes a read-only websocket. The plugin declares every frame
+// the host will send before the socket opens; there is no send channel afterwards.
+type SubscribeOptions struct {
+	Handshake [][]byte
+	KeepAlive []KeepAliveRule
+}
+
+// KeepAliveRule answers a server frame whose "event" field equals Event with Reply.
+type KeepAliveRule struct {
+	Event string
+	Reply []byte
+}
+
+// Subscription is one live websocket. Frames closes when the connection ends.
+type Subscription interface {
+	Frames() <-chan Frame
+	Err() error
+	Close(ctx context.Context) error
+}
+
+// Frame is one received text message, bounded by MaxFrameBytes.
+type Frame struct {
+	At   time.Time
+	Data []byte
 }
 
 // Page is one document.

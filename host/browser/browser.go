@@ -41,7 +41,47 @@ type OpenOptions struct {
 // Session is one isolated browser context: cookies, pages, and cache.
 type Session interface {
 	NewPage(ctx context.Context) (Page, error)
+	// Subscribe opens a read-only websocket to an allowlisted wss:// URL and streams
+	// the text frames the server sends. The plugin declares every frame the host will
+	// write -- the handshake, and the heartbeat replies -- before the socket opens;
+	// there is no send channel afterwards, for the same reason Post takes a form and
+	// not a body. The dial does not go through the engine and carries no cookies, so a
+	// subscription can only join channels that need no authenticated handshake.
+	Subscribe(ctx context.Context, url string, opts SubscribeOptions) (Subscription, error)
 	Close(ctx context.Context) error
+}
+
+// SubscribeOptions declares the whole write side of a subscription up front.
+type SubscribeOptions struct {
+	// Handshake frames are written once, in order, as soon as the socket opens. Each
+	// must be a JSON value under 4 KiB; the host does not interpret them.
+	Handshake []json.RawMessage
+	// KeepAlive answers a received frame whose top-level "event" field equals Event by
+	// writing Reply. It exists so an application-level heartbeat does not require the
+	// plugin to hold a send channel.
+	KeepAlive []KeepAliveRule
+}
+
+// KeepAliveRule is one declared heartbeat answer.
+type KeepAliveRule struct {
+	Event string
+	Reply json.RawMessage
+}
+
+// Subscription is one live feed. Frames is closed when the connection ends -- by
+// Close, by plugin disable, by session teardown, or by the server -- and Err then says
+// why. Drain Frames promptly: the host drops frames rather than growing its heap
+// behind a slow reader.
+type Subscription interface {
+	Frames() <-chan Frame
+	Err() error
+	Close(ctx context.Context) error
+}
+
+// Frame is one received text message and the time the host received it.
+type Frame struct {
+	At   time.Time
+	Data []byte
 }
 
 // Page is one document. Conversation and DOM state belong here.
