@@ -60,9 +60,11 @@ func (s *Service) Open(ctx context.Context, pluginID string, topics []string) (*
 	}
 	s.mu.Unlock()
 
-	// The client is connected before any plugin work runs, so a slow Join shows up as
-	// a topic that has not started rather than as a connection that never opened.
-	c.deliver(Message{Event: "open", Data: json.RawMessage(fmt.Sprintf(`{"topics":%d}`, len(wanted)))})
+	// The client is told it is connected before any plugin work runs, so a slow Join
+	// shows up as a topic that has not started rather than as a connection that never
+	// opened. The frame is "ready" rather than "open" because EventSource already
+	// defines an "open" event of its own, and a listener cannot tell the two apart.
+	c.deliver(Message{Event: "ready", Data: json.RawMessage(fmt.Sprintf(`{"topics":%d}`, len(wanted)))})
 
 	for _, name := range wanted {
 		s.reconcile(ctx, pluginID, name)

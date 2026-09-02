@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
@@ -56,6 +57,11 @@ type Options struct {
 	MaxTopicsPerConn  int
 	Buffer            int
 	MaxPayloadBytes   int
+
+	// Heartbeat and WriteTimeout belong to a transport. They are options so a test
+	// can drive a stream faster than a person would sit in front of one.
+	Heartbeat    time.Duration
+	WriteTimeout time.Duration
 }
 
 func (o *Options) applyDefaults() {
@@ -73,6 +79,12 @@ func (o *Options) applyDefaults() {
 	}
 	if o.MaxPayloadBytes <= 0 {
 		o.MaxPayloadBytes = defaultMaxPayloadBytes
+	}
+	if o.Heartbeat <= 0 {
+		o.Heartbeat = defaultHeartbeat
+	}
+	if o.WriteTimeout <= 0 {
+		o.WriteTimeout = defaultWriteTimeout
 	}
 }
 

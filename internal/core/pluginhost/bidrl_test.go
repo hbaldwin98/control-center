@@ -715,7 +715,7 @@ routes:
 	}
 	select {
 	case msg := <-conn.Messages():
-		if msg.Event != "open" {
+		if msg.Event != "ready" {
 			t.Fatalf("first push frame = %+v", msg)
 		}
 	case <-time.After(5 * time.Second):

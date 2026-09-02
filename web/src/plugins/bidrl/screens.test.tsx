@@ -151,6 +151,8 @@ class FakeEventSource {
   }
   url: string;
   closed = false;
+  /** 0 CONNECTING, 1 OPEN, 2 CLOSED -- the browser's own retry state. */
+  readyState = 1;
   onerror: ((ev: Event) => unknown) | null = null;
   #listeners = new Map<string, Set<(event: { data: string }) => void>>();
   constructor(url: string) {
@@ -173,6 +175,12 @@ class FakeEventSource {
   emit(type: string, topic = "", data: unknown = {}): void {
     const event = { data: JSON.stringify({ topic, data }) };
     for (const fn of this.#listeners.get(type) ?? []) fn(event);
+  }
+  /** Drops the connection with the readyState the browser would report: 0 while it
+   *  retries on its own, 2 once it has given up. */
+  fail(readyState: number): void {
+    this.readyState = readyState;
+    this.onerror?.(new Event("error"));
   }
 }
 
@@ -268,13 +276,13 @@ describe("bidrl screens", () => {
 
   // A badge that lies is worse than none, so it says nothing until the host reports
   // the connection is actually open.
-  it("shows the live badge only once the connection is open", async () => {
+  it("shows the live badge only once the host reports the topics are registered", async () => {
     await renderAt("/bidrl/lots");
     const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
     expect(live).toBeDefined();
     expect(container.textContent).not.toContain("Live");
 
-    act(() => live?.emit("open"));
+    act(() => live?.emit("ready"));
     expect(container.textContent).toContain("Live");
 
     act(() => live?.emit("closed"));
@@ -300,6 +308,33 @@ describe("bidrl screens", () => {
     expect(container.textContent).toContain("99");
     // No refetch: the message carried everything the row needed.
     expect(fetchMock.mock.calls.length).toBe(before);
+  });
+
+  // The bug this pins: closing on the first error turned any transient drop into a
+  // permanent one, so the feed delivered a message or two and then was gone for good.
+  it("lets a dropped connection retry instead of abandoning it", async () => {
+    await renderAt("/bidrl/lots");
+    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    expect(live).toBeDefined();
+    act(() => live?.emit("ready"));
+    expect(container.textContent).toContain("Live");
+
+    // readyState 0 is CONNECTING: the browser is retrying on its own.
+    act(() => live?.fail(0));
+    expect(live?.closed).toBe(false);
+    expect(container.textContent).not.toContain("Live");
+
+    // And the badge comes back by itself when the retry succeeds.
+    act(() => live?.emit("ready"));
+    expect(container.textContent).toContain("Live");
+  });
+
+  it("gives up only once the browser has", async () => {
+    await renderAt("/bidrl/lots");
+    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    // readyState 2 is CLOSED: retrying is over, so holding the object open buys nothing.
+    act(() => live?.fail(2));
+    expect(live?.closed).toBe(true);
   });
 
   it("closes the connection when the screen goes away", async () => {

@@ -243,20 +243,26 @@ function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveBids
       { withCredentials: true },
     );
     const off = () => setStatus("off");
-    source.addEventListener("open", () => setStatus("live"));
+    // "ready" is the host's own frame. EventSource fires a native "open" of its own,
+    // which arrives first and means only that the response started, so the badge waits
+    // for the frame that says the topics are registered.
+    source.addEventListener("ready", () => setStatus("live"));
     source.addEventListener("message", (event) => {
       const bid = bidFromFrame(event);
       if (bid) setBids((current) => ({ ...current, [bid.lotId]: bid }));
     });
-    // The plugin could not feed one lot, or the whole connection ended. Either way the
-    // screen keeps working off its snapshot, which is why this is only a badge.
+    // The plugin could not feed one lot, or the host ended the connection. Either way
+    // the screen keeps working off its snapshot, which is why this is only a badge.
     source.addEventListener("unavailable", off);
     source.addEventListener("closed", off);
-    // A live feed is an enhancement: if it cannot connect, close quietly rather than
-    // retrying in a loop against a host that just refused.
+    // Do NOT close here. EventSource reconnects on its own, and closing on the first
+    // error turns any transient drop into a permanent one -- the stream delivers a
+    // message or two and is then gone for good. readyState 2 means the browser has
+    // given up; anything else means it is still retrying, and the badge should come
+    // back by itself when it succeeds.
     source.onerror = () => {
       off();
-      source.close();
+      if (source.readyState === 2) source.close();
     };
     return () => {
       off();

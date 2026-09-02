@@ -110,11 +110,11 @@ func next(t *testing.T, c *Conn) Message {
 	return Message{}
 }
 
-// drainOpen consumes the ready frame every connection gets first.
-func drainOpen(t *testing.T, c *Conn) {
+// drainReady consumes the ready frame every connection gets first.
+func drainReady(t *testing.T, c *Conn) {
 	t.Helper()
-	if msg := next(t, c); msg.Event != "open" {
-		t.Fatalf("first frame = %q, want open", msg.Event)
+	if msg := next(t, c); msg.Event != "ready" {
+		t.Fatalf("first frame = %q, want ready", msg.Event)
 	}
 }
 
@@ -133,8 +133,8 @@ func waitFor(t *testing.T, ch chan string, want string) {
 func TestPublishReachesOnlyTheTopicsSubscribers(t *testing.T) {
 	h := newHarness(t, Options{})
 	watching, ignoring := mustOpen(t, h, "hello", "lot:1"), mustOpen(t, h, "hello", "lot:2")
-	drainOpen(t, watching)
-	drainOpen(t, ignoring)
+	drainReady(t, watching)
+	drainReady(t, ignoring)
 
 	if err := h.svc.Publish(h.ctx, "hello", "lot:1", map[string]any{"bid": 1500}); err != nil {
 		t.Fatal(err)
@@ -168,8 +168,8 @@ func TestPluginsDoNotShareTopicNames(t *testing.T) {
 	h := newHarness(t, Options{})
 	mine := mustOpen(t, h, "hello", "lot:1")
 	theirs := mustOpen(t, h, "other", "lot:1")
-	drainOpen(t, mine)
-	drainOpen(t, theirs)
+	drainReady(t, mine)
+	drainReady(t, theirs)
 
 	if err := h.svc.Publish(h.ctx, "hello", "lot:1", map[string]any{"n": 1}); err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestFailedJoinTellsSubscribersTheTopicIsUnavailable(t *testing.T) {
 	defer h.svc.SetWatcher("hello", rec)()
 
 	c := mustOpen(t, h, "hello", "lot:1")
-	drainOpen(t, c)
+	drainReady(t, c)
 
 	msg := next(t, c)
 	if msg.Event != "unavailable" || msg.Topic != "lot:1" {
@@ -250,7 +250,7 @@ func TestFailedJoinTellsSubscribersTheTopicIsUnavailable(t *testing.T) {
 func TestSlowConnectionIsDroppedRatherThanBlockingThePublisher(t *testing.T) {
 	h := newHarness(t, Options{Buffer: 2})
 	slow := mustOpen(t, h, "hello", "lot:1")
-	// Never drained: the open frame already occupies part of the buffer.
+	// Never drained: the ready frame already occupies part of the buffer.
 	for i := 0; i < 20; i++ {
 		if err := h.svc.Publish(h.ctx, "hello", "lot:1", map[string]any{"n": i}); err != nil {
 			t.Fatal(err)
@@ -373,7 +373,7 @@ func TestDuplicateTopicsCollapseToOneSubscription(t *testing.T) {
 	if got := c.Topics(); len(got) != 2 {
 		t.Fatalf("topics = %v, want two", got)
 	}
-	drainOpen(t, c)
+	drainReady(t, c)
 	if err := h.svc.Publish(h.ctx, "hello", "lot:1", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}

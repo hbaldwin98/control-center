@@ -2,6 +2,7 @@ package push
 
 import (
 	"bufio"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,7 +72,7 @@ func TestServeSSEFramesTheTopicAndPayload(t *testing.T) {
 	h := newHarness(t, Options{})
 	client := openSSE(t, h, "hello", "topics=lot:1,lot:2")
 
-	if got := client.frame(); !strings.Contains(got, "event: open") {
+	if got := client.frame(); !strings.Contains(got, "event: ready") {
 		t.Fatalf("first frame = %q", got)
 	}
 
@@ -162,4 +163,38 @@ func waitSubscribers(t *testing.T, h *harness, pluginID, topic string, want int)
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("subscribers of %q never reached %d", topic, want)
+}
+
+// The bug this pins: a stream delivered its first message and then died. A screen is
+// idle far longer than one write takes, so the interesting moment is the second
+// message -- after a heartbeat, and after the previous write deadline has long passed.
+func TestServeSSEKeepsDeliveringAcrossIdleGaps(t *testing.T) {
+	h := newHarness(t, Options{Heartbeat: 60 * time.Millisecond, WriteTimeout: 30 * time.Millisecond})
+	client := openSSE(t, h, "hello", "topics=lot:1")
+	if got := client.frame(); !strings.Contains(got, "event: ready") {
+		t.Fatalf("first frame = %q", got)
+	}
+	waitSubscribers(t, h, "hello", "lot:1", 1)
+
+	for i := 0; i < 3; i++ {
+		// Idle past both the write deadline and a heartbeat, the way a real screen does.
+		time.Sleep(90 * time.Millisecond)
+		if err := h.svc.Publish(h.ctx, "hello", "lot:1", map[string]any{"n": i}); err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf(`"n":%d`, i)
+		// Heartbeats are comment frames and arrive in between; skip past them.
+		for attempt := 0; ; attempt++ {
+			got := client.frame()
+			if strings.Contains(got, want) {
+				break
+			}
+			if !strings.HasPrefix(got, ":") {
+				t.Fatalf("message %d: frame = %q, want %s", i, got, want)
+			}
+			if attempt > 10 {
+				t.Fatalf("message %d never arrived", i)
+			}
+		}
+	}
 }

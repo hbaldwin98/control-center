@@ -16,12 +16,12 @@ import (
 // second transport -- a websocket, when a client needs to send as well as receive --
 // is another file this size and no change a plugin can observe.
 const (
-	// sseHeartbeat keeps intermediaries from reaping an idle stream and lets the
+	// defaultHeartbeat keeps intermediaries from reaping an idle stream and lets the
 	// client notice a connection that has silently died.
-	sseHeartbeat = 20 * time.Second
-	// sseWriteTimeout bounds one write. A client that cannot drain is closed; the
+	defaultHeartbeat = 20 * time.Second
+	// defaultWriteTimeout bounds one write. A client that cannot drain is closed; the
 	// hub's own buffer already absorbs a brief stall.
-	sseWriteTimeout = 10 * time.Second
+	defaultWriteTimeout = 10 * time.Second
 )
 
 // ServeSSE streams a plugin's topics to one client over Server-Sent Events. The
@@ -52,7 +52,7 @@ func (s *Service) ServeSSE(w http.ResponseWriter, r *http.Request, pluginID stri
 
 	rc := http.NewResponseController(w)
 	send := func(chunk string) bool {
-		if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil {
+		if err := rc.SetWriteDeadline(time.Now().Add(s.opts.WriteTimeout)); err != nil {
 			// Without a deadline one stuck client would pin this goroutine forever.
 			return false
 		}
@@ -63,7 +63,7 @@ func (s *Service) ServeSSE(w http.ResponseWriter, r *http.Request, pluginID stri
 		return true
 	}
 
-	beat := time.NewTicker(sseHeartbeat)
+	beat := time.NewTicker(s.opts.Heartbeat)
 	defer beat.Stop()
 
 	for {

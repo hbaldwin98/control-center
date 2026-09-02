@@ -109,7 +109,7 @@ route, and `topics` accepts both a repeated parameter and one comma-separated va
 Frames look like:
 
 ```
-event: open
+event: ready
 data: {"topic":"","data":{"topics":2}}
 
 event: message
@@ -123,7 +123,15 @@ data: {"topic":"","data":{}}
 ```
 
 The topic rides in the body rather than the event name, so a client registers one
-listener per kind instead of one per row on screen.
+listener per kind instead of one per row on screen. The ready frame is not called
+`open`, because `EventSource` defines an `open` event of its own and a listener could
+not tell the server's frame from the browser's.
+
+**A client must not close the stream on an error.** `EventSource` reconnects by itself,
+and calling `close()` in an error handler turns one transient drop into a permanent
+one — the connection delivers a message or two and then is gone for good. Read
+`readyState` instead: `2` means the browser has given up, anything else means it is
+retrying.
 
 A **websocket** transport is another file this size, and the right time to add it is
 when a client needs to *send* as well as receive — change its watched set mid-stream,
