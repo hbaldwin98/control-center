@@ -79,7 +79,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | `Watch` cancellation of admitted contexts | ✅ | `AfterCommit` fires watchers after a caller-owned disable (kill switch, `ExceedDisable`, accounting invariant). |
 | Accounting-invariant violation handling | ✅ | Truthful charge is recorded; plugin disabled; AI route reads `accountingFailed`. |
 | Orphaned reservations at startup | ✅ | Settled at reserved maximum so a crash cannot silently undercount. |
-| Plugins screen: kill switch, budgets, health, schema-backed config | ✅ | `/api/admin/plugins`; disabled plugins stay listed. |
+| Plugins screen: kill switch, budgets, health, schema-backed config | ✅ | `/api/admin/plugins`; disabled plugins stay listed. The config form draws nested objects as titled groups and string arrays as one comma-separated field, and writes over the stored document so a key it cannot draw is not erased. |
 
 ## Milestone 4 — `jobs` ✅
 

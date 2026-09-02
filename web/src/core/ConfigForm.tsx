@@ -1,7 +1,7 @@
 /**
  * Schema-backed plugin config. The host validates the same subset on PUT.
  */
-import { useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { ApiError, Button, Checkbox, Field, Input, Row, Select, api } from "@cc/ui";
 import { documentFromDraft, draftFromConfig, fieldsFromSchema } from "./configSchema";
 
@@ -34,7 +34,7 @@ export function ConfigForm({
     setBusy(true);
     onError(null);
     try {
-      const body = documentFromDraft(fields, draft);
+      const body = documentFromDraft(fields, draft, value);
       await api.put(`/api/admin/plugins/${encodeURIComponent(pluginId)}/config`, body);
       onSaved();
     } catch (err) {
@@ -53,12 +53,27 @@ export function ConfigForm({
       }}
     >
       <div className="cc-group__title">Config</div>
-      {fields.map((f) => {
-        const hint = [f.description, f.maxLength ? `max ${f.maxLength}` : ""].filter(Boolean).join(" · ");
+      {fields.map((f, i) => {
+        const hint = [
+          f.description,
+          f.maxLength ? `max ${f.maxLength}` : "",
+          f.type === "strings" ? `separate with commas${f.maxItems ? `, at most ${f.maxItems}` : ""}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const raw = draft[f.name];
         const text = typeof raw === "string" ? raw : "";
+        // A nested object's title heads its own fields, so a group of them does not
+        // read as one flat list of unrelated switches.
+        const heading = f.group && f.group !== fields[i - 1]?.group ? f.group : null;
+        const head = heading ? (
+          <div key={`${f.name}-group`} className="cc-group__title">
+            {heading}
+          </div>
+        ) : null;
+        const wrap = (control: ReactNode) => (head ? <Fragment key={f.name}>{head}{control}</Fragment> : control);
         if (f.type === "boolean") {
-          return (
+          return wrap(
             <Checkbox
               key={f.name}
               label={f.title}
@@ -66,11 +81,11 @@ export function ConfigForm({
               checked={draft[f.name] === true}
               onChange={(e) => set(f.name, e.target.checked)}
               disabled={disabled || busy}
-            />
+            />,
           );
         }
         if (f.enumValues) {
-          return (
+          return wrap(
             <Field key={f.name} label={f.title} hint={hint || undefined}>
               <Select
                 value={text}
@@ -85,20 +100,20 @@ export function ConfigForm({
                   </option>
                 ))}
               </Select>
-            </Field>
+            </Field>,
           );
         }
-        return (
+        return wrap(
           <Field key={f.name} label={f.title} hint={hint || undefined}>
             <Input
               value={text}
               onChange={(e) => set(f.name, e.target.value)}
               maxLength={f.maxLength}
-              inputMode={f.type === "string" ? undefined : "decimal"}
+              inputMode={f.type === "string" || f.type === "strings" ? undefined : "decimal"}
               disabled={disabled || busy}
               aria-label={f.title}
             />
-          </Field>
+          </Field>,
         );
       })}
       <Row>
