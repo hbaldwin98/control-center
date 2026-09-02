@@ -133,8 +133,9 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | `host/browser` SDK: Open, Session, Page, allowlist, sentinels | ✅ | Plugins never import Playwright/chromedp/rod. |
 | Fake engine | ✅ | In-process `http.Handler` per DNS name; no sockets, no Chromium. |
 | Playwright engine | ✅ | `browser.engine: playwright`; Chromium + connect-time SSRF proxy. |
-| URL policy | ✅ | HTTPS only; plugin allowlist; no userinfo/IPs/ports; fail-closed. |
-| Limits | ✅ | 1 session/plugin, 4 pages/session, 5 MiB document, 10 MiB resource. |
+| URL policy | ✅ | HTTPS only, or `wss` for `Subscribe`; plugin allowlist; no userinfo/IPs/ports; fail-closed. A fetch scheme is not a feed scheme. |
+| Limits | ✅ | 2 sessions/plugin, 4 pages/session, 4 subscriptions/session, 5 MiB document, 10 MiB resource, 1 MiB frame. |
+| Realtime feeds | ✅ | `Subscribe` streams an allowlisted `wss://` read-only; handshake frames and heartbeat replies are declared before connect, so there is no send channel. Dial bypasses the engine and reuses the connect-time private-address checks. |
 | Kill switch | ✅ | Disable rejects new I/O and closes admitted sessions; in-flight Goto fails. |
 | `core.browser.denied` | ✅ | Audit row on allowlist/private-network denial. |
 
@@ -213,6 +214,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
 | Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
+| Automation UI | ⬜ | Backend automation (scheduled `sweep` / `match`, throttle latch, `GET /automation`, `POST /automation/resume`) exists; the UI for it needs building out — turning `automation.enabled` and locations on, watchlist management, both last ticks and what they did, the latch with a resume control, and the Findings backlog count. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ---

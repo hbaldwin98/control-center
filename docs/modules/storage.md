@@ -100,7 +100,11 @@ migration rolls back completely and is not recorded.
 
 Plugin migration and runtime SQL execute with a SQLite authorizer that rejects reads and
 writes outside the plugin's table prefix, plus `ATTACH`, `DETACH`, temporary objects,
-unsafe pragmas, and triggers or views that reference another namespace. Identifiers are
+unsafe pragmas, and triggers or views that reference another namespace. Reads of
+`sqlite_master` / `sqlite_schema` and their `temp` equivalents are the one exception:
+SQLite implements DDL by writing the schema table, and `ALTER TABLE ... RENAME` reparses
+the schema through the temp ones, so denying them would make ordinary migrations
+impossible. Creating a temp object is still denied by action. Identifiers are
 validated after SQLite parsing rather than by scanning SQL text. The scoped blob handle
 applies the same ownership rule. These are guardrails against mistakes; plugins remain
 trusted code.
