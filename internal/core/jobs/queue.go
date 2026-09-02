@@ -24,7 +24,9 @@ type Options struct {
 	CancelGrace    time.Duration
 	ProgressMinGap time.Duration
 	Owner          string
-	Now            func() time.Time
+	// Retention is the minimum age before a finished job may be deleted.
+	Retention time.Duration
+	Now       func() time.Time
 }
 
 func (o *Options) applyDefaults() {
@@ -39,6 +41,11 @@ func (o *Options) applyDefaults() {
 	}
 	if o.CancelGrace <= 0 {
 		o.CancelGrace = 10 * time.Second
+	}
+	if o.Retention <= 0 {
+		// Long enough that a person can still read why last week's run failed, short
+		// enough that the table does not grow without bound.
+		o.Retention = 14 * 24 * time.Hour
 	}
 	if o.ProgressMinGap <= 0 {
 		o.ProgressMinGap = time.Second

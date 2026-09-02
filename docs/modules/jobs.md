@@ -168,6 +168,19 @@ zone.
 
 ---
 
+## Retention
+
+Jobs are durable so a crash cannot lose work, which makes every finished job a row
+nobody will read again — and every enqueue adds one. `RunRetentionDaily` sweeps them the
+way the event log is swept: a pass at startup and once a day, deleting terminal jobs
+(`succeeded`, `failed`, `dead`, `cancelled`) older than `Retention`, default 14 days,
+along with their log lines.
+
+Only terminal jobs are eligible. A pending, running, retrying, or cancel-requested job
+is still work the queue owes someone, whatever its age — a job scheduled a year out is
+not garbage. Age is measured from `finished_at`, falling back to `created_at` so a row
+written before that column was set cannot outlive every sweep.
+
 ## Tables
 
 ```

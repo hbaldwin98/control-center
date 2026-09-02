@@ -126,6 +126,8 @@ func run() error {
 	}
 	jq.Start(ctx)
 	defer jq.Stop()
+	// Finished jobs are rows nobody reads again; sweep them the way events are swept.
+	go jq.RunRetentionDaily(ctx)
 
 	engine, err := newBrowserEngine(cfg)
 	if err != nil {

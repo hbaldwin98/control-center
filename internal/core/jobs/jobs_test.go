@@ -690,3 +690,61 @@ func TestListFilters(t *testing.T) {
 		t.Fatalf("args %s", all[0].Args)
 	}
 }
+
+// Every enqueue leaves a durable row, so without a sweep the table only ever grows. A
+// finished job is eligible once it is old enough; work still owed to someone never is,
+// whatever its age.
+func TestRetentionDeletesOnlyOldFinishedJobs(t *testing.T) {
+	f := newFixture(t)
+	f.enable("hello")
+	if err := f.q.Register("hello", Def{
+		Name:    "work",
+		Handler: func(jc Context) error { return jc.Logf("ok") },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.start()
+
+	done, err := f.q.Enqueue(context.Background(), "hello", "work", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.waitState(done, StateSucceeded, 2*time.Second)
+
+	// A job that has not run yet: still the queue's to deliver, however long it waits.
+	pending, err := f.q.Enqueue(context.Background(), "hello", "work", nil,
+		WithRunAt(f.clock().Add(365*24*time.Hour)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Not yet old enough.
+	rep, err := f.q.RunRetention(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Jobs != 0 {
+		t.Fatalf("swept %d jobs before the age limit", rep.Jobs)
+	}
+	if _, err := f.q.Get(context.Background(), done); err != nil {
+		t.Fatalf("finished job disappeared early: %v", err)
+	}
+
+	f.advance(15 * 24 * time.Hour)
+	rep, err = f.q.RunRetention(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Jobs != 1 {
+		t.Fatalf("swept %d jobs, want 1", rep.Jobs)
+	}
+	if rep.Logs != 1 {
+		t.Fatalf("swept %d log lines, want 1", rep.Logs)
+	}
+	if _, err := f.q.Get(context.Background(), done); err == nil {
+		t.Fatal("finished job survived the sweep")
+	}
+	if _, err := f.q.Get(context.Background(), pending); err != nil {
+		t.Fatalf("pending job was swept: %v", err)
+	}
+}
