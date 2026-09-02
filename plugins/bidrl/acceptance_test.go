@@ -55,9 +55,6 @@ func TestCollectsAnalyzesAndPrices(t *testing.T) {
 		if err := h.RunJob(ctx, id); err != nil {
 			t.Fatalf("job %d failed: %v", id, err)
 		}
-		for _, l := range h.Job(ctx, id).Logs {
-			t.Logf("JOBLOG %d: %s", id, l.Line)
-		}
 		if err := h.Drain(ctx); err != nil {
 			t.Fatalf("follow-on job failed: %v", err)
 		}
