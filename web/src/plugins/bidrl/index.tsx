@@ -5,7 +5,16 @@
  * this module never imports the shell router. One sidebar item; Feed / Auctions / Lots
  * are in-plugin tabs.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ActionsHeader,
   Badge,
@@ -43,6 +52,7 @@ import {
   useNow,
   useQueryState,
   useRouteParams,
+  useSearch,
   useSnapshot,
 } from "@cc/ui";
 import type { PluginModule, PluginSurfaceProps, UseSnapshotResult } from "@cc/ui";
@@ -111,6 +121,105 @@ import {
 import "./index.css";
 
 const api = pluginApi("bidrl");
+
+/**
+ * Where you were on each list screen.
+ *
+ * Filters live in the query string, so the browser's own back button already restores
+ * them. What it cannot restore is a tab click or a crumb: those are fresh navigations to
+ * a bare path, and they used to land on a reset list at the top. So every list screen
+ * records the query string it is showing and how far down it is scrolled, and the links
+ * that lead back to it carry that query string.
+ *
+ * sessionStorage rather than a module variable: a reload of the shell is still the same
+ * visit, and it costs nothing to survive one.
+ */
+type Place = { search: string; scroll: number };
+
+const PLACES_KEY = "bidrl.places";
+
+function readPlaces(): Record<string, Place> {
+  try {
+    const raw = sessionStorage.getItem(PLACES_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, Place>;
+  } catch {
+    return {};
+  }
+}
+
+function writePlace(path: string, patch: Partial<Place>) {
+  const all = readPlaces();
+  all[path] = { search: "", scroll: 0, ...all[path], ...patch };
+  try {
+    sessionStorage.setItem(PLACES_KEY, JSON.stringify(all));
+  } catch {
+    // Storage refused (private mode, quota). Losing the place is not worth an error.
+  }
+}
+
+/** A path with the filters it was last left with, for a link that means "back to that list". */
+function remembered(path: string): string {
+  return `${path}${readPlaces()[path]?.search ?? ""}`;
+}
+
+/** The shell's scrolling element. Screens scroll inside it, not on the document. */
+function scroller(): HTMLElement | null {
+  const el = document.querySelector(".cc-main");
+  return el instanceof HTMLElement ? el : null;
+}
+
+/**
+ * Records this screen's filters and scroll offset, and restores the offset once there is
+ * something to scroll. `ready` is what says the rows are on the page: restoring before
+ * the list renders would scroll a short document and land at the top.
+ */
+function usePlace(path: string, ready: boolean) {
+  const search = useSearch();
+
+  useEffect(() => {
+    writePlace(path, { search });
+  }, [path, search]);
+
+  const restored = useRef(false);
+  useEffect(() => {
+    if (!ready || restored.current) return;
+    restored.current = true;
+    const top = readPlaces()[path]?.scroll ?? 0;
+    if (top <= 0) return;
+    // After paint, so the list has its full height and the offset is reachable.
+    const frame = requestAnimationFrame(() => scroller()?.scrollTo({ top }));
+    return () => cancelAnimationFrame(frame);
+  }, [path, ready]);
+
+  useEffect(() => {
+    const el = scroller();
+    if (!el) return;
+    // Coalesced to one write per frame: scrolling fires far faster than storage wants.
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        writePlace(path, { scroll: el.scrollTop });
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", onScroll);
+      writePlace(path, { scroll: el.scrollTop });
+    };
+  }, [path]);
+}
+
+/**
+ * Announced when a star is toggled. Saving is a direct write with no event behind it, so
+ * a screen whose whole list is defined by saving — Saved — has to be told, or the row it
+ * no longer belongs on sits there until a reload.
+ */
+const FavoriteChanged = createContext<() => void>(() => {});
 
 function useFeed(filter: string, q: string): UseSnapshotResult<FeedPage> {
   const load = useCallback(async (signal: AbortSignal) => {
@@ -674,7 +783,11 @@ function BidrlTabs() {
   return (
     <Tabs label="BIDRL sections">
       {BIDRL_TABS.map((item) => (
-        <Link key={item.to} to={item.to} aria-current={item.owns(path) ? "page" : undefined}>
+        <Link
+          key={item.to}
+          to={remembered(item.to)}
+          aria-current={item.owns(path) ? "page" : undefined}
+        >
           {item.label}
         </Link>
       ))}
@@ -690,6 +803,7 @@ function BidrlTabs() {
 function FavoriteStar({ lot }: { lot: Lot }) {
   const [saved, setSaved] = useState(lot.favorite);
   const [busy, setBusy] = useState(false);
+  const changed = useContext(FavoriteChanged);
   useEffect(() => setSaved(lot.favorite), [lot.favorite, lot.id]);
 
   const toggle = async () => {
@@ -700,6 +814,7 @@ function FavoriteStar({ lot }: { lot: Lot }) {
       const path = `/lots/${encodeURIComponent(lot.id)}/favorite`;
       if (next) await api.post(path);
       else await api.del(path);
+      changed();
     } catch {
       setSaved(!next);
     } finally {
@@ -1898,6 +2013,7 @@ function Findings() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const disabled = snap.error instanceof PluginDisabledError;
+  usePlace("/bidrl/findings", snap.status === "ready");
 
   const decide = async (id: string, next: "accepted" | "rejected") => {
     setBusy(id);
@@ -2233,6 +2349,7 @@ function SavedLots() {
   const live = useLiveBids(snap.status === "ready" ? snap.data.lots : undefined, !disabled);
   const selected = parseAffiliateParam(affiliate);
   const narrowed = Boolean(q || affiliate) || category !== "all";
+  usePlace("/bidrl/saved", snap.status === "ready");
 
   useEffect(() => setDraft(q), [q]);
 
@@ -2332,18 +2449,22 @@ function SavedLots() {
             <Callout tone="danger">{snap.error.message}</Callout>
           ) : null}
           {snap.status === "ready" ? (
-            <LotBrowser
-              lots={overlayBids(snap.data.lots, live.bids)}
-              empty={
-                narrowed
-                  ? "No saved lot matches these filters."
-                  : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
-              }
-              view={view}
-              // Every row here was chosen on purpose, so two similar lots must both
-              // show rather than collapsing into "1 similar".
-              groupSimilar={false}
-            />
+            // Unstarring a row takes it off this list, so the list reloads the moment a
+            // star changes rather than waiting for a refresh to notice.
+            <FavoriteChanged.Provider value={snap.reload}>
+              <LotBrowser
+                lots={overlayBids(snap.data.lots, live.bids)}
+                empty={
+                  narrowed
+                    ? "No saved lot matches these filters."
+                    : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
+                }
+                view={view}
+                // Every row here was chosen on purpose, so two similar lots must both
+                // show rather than collapsing into "1 similar".
+                groupSimilar={false}
+              />
+            </FavoriteChanged.Provider>
           ) : null}
         </Card>
       </Stack>
@@ -2372,6 +2493,7 @@ function LotsCatalog() {
   const selected = parseAffiliateParam(affiliate);
   const narrowed =
     Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
+  usePlace("/bidrl/lots", snap.status === "ready");
 
   const toggleLocation = (id: string) => {
     setAffiliate(
@@ -2746,7 +2868,7 @@ function LotView() {
         <BidrlTabs />
         {lot ? (
           <div className="bidrl-crumbs">
-            <Link to="/bidrl/lots">Lots</Link>
+            <Link to={remembered("/bidrl/lots")}>Lots</Link>
             <span aria-hidden="true">/</span>
             <Link to={`/bidrl/auction/${encodeURIComponent(lot.auctionId)}`}>
               {siblings.title || "Auction"}

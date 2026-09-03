@@ -37,6 +37,15 @@ export function usePath(): string {
 }
 
 /**
+ * The current query string, leading "?" included, or "" when there is none. Pairs with
+ * `usePath` for a screen that has to remember the whole place it is at, not just which
+ * one it is.
+ */
+export function useSearch(): string {
+  return useLocation().search;
+}
+
+/**
  * Navigate from code, for the cases a link cannot express: after deleting the record the
  * current screen is showing, say. Prefer `Link` everywhere a person is choosing to go.
  */

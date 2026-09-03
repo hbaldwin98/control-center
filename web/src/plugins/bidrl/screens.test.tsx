@@ -104,6 +104,7 @@ const routes = new Map<string, unknown>([
   ["/api/plugins/bidrl/intent", { search: null, lots: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/sites/auctions", { auctions: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/lots/1001/favorite", { lotId: "1001", favorite: true, note: "" }],
+  ["/api/plugins/bidrl/lots/2002/favorite", { lotId: "2002", favorite: false }],
   ["/api/plugins/bidrl/findings", {
     findings: [finding()],
     watchlists: [WATCHLIST],
@@ -210,6 +211,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  // The place memory is per visit, not per test.
+  sessionStorage.clear();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -237,6 +240,19 @@ async function renderAt(path: string) {
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+/**
+ * A second visit: the router only reads `initialEntries` when it mounts, so leaving one
+ * screen for another the way a person would means tearing the tree down first.
+ */
+async function revisit(path: string) {
+  act(() => root.unmount());
+  container.remove();
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await renderAt(path);
 }
 
 describe("bidrl screens", () => {
@@ -601,6 +617,67 @@ describe("bidrl screens", () => {
     );
     expect(targets).toContain("/bidrl/lots?filter=deals");
     expect(targets).toContain("/bidrl/lots?ending=soon");
+  });
+
+  // Filters live in the query string, so back restores them -- but a tab click is a
+  // fresh navigation, and it used to land on a reset list.
+  it("carries the filters a list was left with into its tab link", async () => {
+    await renderAt("/bidrl/lots?filter=deals&bucket=priced");
+    await revisit("/bidrl/saved");
+    const lotsTab = [...container.querySelectorAll<HTMLAnchorElement>(".cc-tabs a")].find(
+      (a) => a.textContent === "Lots",
+    );
+    expect(lotsTab?.getAttribute("href")).toBe("/bidrl/lots?filter=deals&bucket=priced");
+  });
+
+  it("returns a list to the offset it was scrolled to", async () => {
+    // The shell's scroller, which is what a screen scrolls inside.
+    const main = document.createElement("div");
+    main.className = "cc-main";
+    Object.defineProperty(main, "scrollTop", { get: () => 640, configurable: true });
+    main.scrollTo = vi.fn();
+    document.body.appendChild(main);
+    try {
+      await renderAt("/bidrl/lots");
+      await act(async () => {
+        main.dispatchEvent(new Event("scroll"));
+        await new Promise((done) => requestAnimationFrame(() => done(null)));
+      });
+      await revisit("/bidrl/lot/1001");
+      await revisit("/bidrl/lots");
+      await act(async () => {
+        await new Promise((done) => requestAnimationFrame(() => done(null)));
+      });
+      expect(main.scrollTo).toHaveBeenCalledWith({ top: 640 });
+    } finally {
+      main.remove();
+    }
+  });
+
+  // Saving has no event behind it, so the one list defined by saving has to be told.
+  it("drops a lot from Saved the moment it is unstarred, without a reload", async () => {
+    await renderAt("/bidrl/saved");
+    expect(container.textContent).toContain("Coleman two-burner stove");
+    const before = routes.get("/api/plugins/bidrl/favorites");
+    routes.set("/api/plugins/bidrl/favorites", { lots: [], latestEventId: 2 });
+    try {
+      const star = container.querySelector<HTMLButtonElement>(".bidrl-star");
+      await act(async () => {
+        star?.click();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const calls = fetchMock.mock.calls.map(
+        (c) => ({ url: String(c[0]), method: (c[1] as RequestInit | undefined)?.method }),
+      );
+      expect(
+        calls.some((c) => c.url.endsWith("/lots/2002/favorite") && c.method === "DELETE"),
+      ).toBe(true);
+      expect(container.textContent).not.toContain("Coleman two-burner stove");
+    } finally {
+      routes.set("/api/plugins/bidrl/favorites", before);
+    }
   });
 
   it("routes in-plugin links instead of reloading the document", async () => {

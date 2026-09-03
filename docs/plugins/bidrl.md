@@ -529,6 +529,17 @@ starting a BidRL search. The catalog's whole state — preset, text, bucket, cat
 ending — lives in the query string, so a filtered list can be linked to and pasted, and
 opening a lot and coming back returns the list rather than resetting it.
 
+**A list keeps the place you left it at.** The query string covers the back button, but a
+tab click is a fresh navigation to a bare path, and it used to land on a reset list at the
+top of the page. So Lots, Saved, and Findings each record the filters they are showing and
+how far down they are scrolled in `sessionStorage`, the section tabs and the lot page's
+"Lots" crumb link to the remembered filters, and the list scrolls back to where it was once
+its rows are on the page. "Clear filters" is still how you start over.
+
+Unstarring a lot on `/bidrl/saved` takes the row off the list immediately. Saving is a
+direct write with no event behind it, so nothing would otherwise tell that screen its list
+changed; the star announces the change and the screen reloads its snapshot.
+
 Every button on these screens queues a job rather than doing the work, so every button says
 what it queued and links to the job — they used to post and say nothing, which reads as a
 dead button. `GET /auctions/{id}/index` lists an auction's lot ids in screen order and
