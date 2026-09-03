@@ -3,6 +3,7 @@ package tid
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/hbaldwin98/control-center/host"
@@ -25,7 +26,30 @@ type synced struct {
 	Day    string  `json:"day,omitempty"`
 	KWh    float64 `json:"kwh,omitempty"`
 	Body   string  `json:"body"`
+
+	// Named days so a notification rule can pick the one it wants. TID does not
+	// fill in a day until the day after it ends, so "latest" is usually an empty
+	// or partial today; "settled" is the newest day that actually has usage on
+	// it, and is what the default body reports.
+	Latest    *dayPayload  `json:"latest,omitempty"`
+	Settled   *dayPayload  `json:"settled,omitempty"`
+	Today     *dayPayload  `json:"today,omitempty"`
+	Yesterday *dayPayload  `json:"yesterday,omitempty"`
+	Recent    []dayPayload `json:"recent"`
 }
+
+// dayPayload is one daily reading as published on an event.
+type dayPayload struct {
+	Day        string   `json:"day"`
+	KWh        float64  `json:"kwh"`
+	CostCents  *int64   `json:"cost_cents,omitempty"`
+	OnPeakKWh  *float64 `json:"on_peak_kwh,omitempty"`
+	OffPeakKWh *float64 `json:"off_peak_kwh,omitempty"`
+	Body       string   `json:"body"`
+}
+
+// recentDays is how many trailing days the synced event carries.
+const recentDays = 7
 
 func (p *Plugin) sync(jc hostjobs.Context) error {
 	h, ok := p.host()
@@ -66,12 +90,7 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	if err := p.recordSync(jc, h, "ok", n, source, ""); err != nil {
 		return err
 	}
-	payload := synced{At: now, Rows: n, Source: source, Body: "TID synced, no daily reading yet"}
-	if latest, ok := latestReading(result.Readings); ok {
-		payload.Day = latest.Day
-		payload.KWh = latest.KWh
-		payload.Body = formatReading(latest)
-	}
+	payload := syncedPayload(result.Readings, h.Clock().Now(), now, n, source)
 	if err := h.Events().Publish(jc, "synced", now, payload); err != nil {
 		return err
 	}
@@ -80,10 +99,7 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 		if body == "" {
 			body = fmt.Sprintf("%d new daily reading%s", inserted, plural(inserted))
 		}
-		if err := h.Events().Publish(jc, "alert", body, map[string]any{
-			"title": "New TID usage", "body": body, "rows": inserted, "source": source,
-			"day": payload.Day, "kwh": payload.KWh,
-		}); err != nil {
+		if err := h.Events().Publish(jc, "alert", body, alertPayload(payload, body, inserted)); err != nil {
 			return err
 		}
 	}
@@ -166,19 +182,87 @@ func plural(n int) string {
 	return "s"
 }
 
-func latestReading(readings []Reading) (Reading, bool) {
-	var latest Reading
-	found := false
+// syncedPayload expands the collected readings into the days a notification
+// rule may want to name.
+func syncedPayload(readings []Reading, clock time.Time, at string, rows int, source string) synced {
+	payload := synced{At: at, Rows: rows, Source: source, Recent: []dayPayload{}}
+
+	byDay := map[string]Reading{}
+	days := make([]string, 0, len(readings))
 	for _, r := range readings {
 		if r.Day == "" {
 			continue
 		}
-		if !found || r.Day > latest.Day {
-			latest = r
-			found = true
+		if _, seen := byDay[r.Day]; !seen {
+			days = append(days, r.Day)
+		}
+		byDay[r.Day] = r
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(days)))
+
+	local := clock.In(localZone())
+	payload.Today = dayFrom(byDay, local.Format("2006-01-02"))
+	payload.Yesterday = dayFrom(byDay, local.AddDate(0, 0, -1).Format("2006-01-02"))
+	for i, day := range days {
+		reading := byDay[day]
+		if i == 0 {
+			payload.Latest = readingPayload(reading)
+		}
+		if payload.Settled == nil && reading.KWh > 0 {
+			payload.Settled = readingPayload(reading)
+		}
+		if i < recentDays {
+			payload.Recent = append(payload.Recent, *readingPayload(reading))
 		}
 	}
-	return latest, found
+
+	// Day/KWh stay on the newest day for compatibility; the body reports the
+	// newest day that has usage, because the newest day usually does not yet.
+	if payload.Latest != nil {
+		payload.Day = payload.Latest.Day
+		payload.KWh = payload.Latest.KWh
+	}
+	switch {
+	case payload.Settled != nil:
+		payload.Body = payload.Settled.Body
+	case payload.Latest != nil:
+		payload.Body = payload.Latest.Body
+	default:
+		payload.Body = "TID synced, no daily reading yet"
+	}
+	return payload
+}
+
+func dayFrom(byDay map[string]Reading, day string) *dayPayload {
+	reading, ok := byDay[day]
+	if !ok {
+		return nil
+	}
+	return readingPayload(reading)
+}
+
+func readingPayload(r Reading) *dayPayload {
+	return &dayPayload{
+		Day: r.Day, KWh: r.KWh, CostCents: r.CostCents,
+		OnPeakKWh: r.OnPeakKWh, OffPeakKWh: r.OffPeakKWh,
+		Body: formatReading(r),
+	}
+}
+
+// alertPayload mirrors the synced day fields so one rule template works on both.
+func alertPayload(s synced, body string, inserted int) map[string]any {
+	out := map[string]any{
+		"title": "New TID usage", "body": body, "rows": inserted, "source": s.Source,
+		"day": s.Day, "kwh": s.KWh, "recent": s.Recent,
+	}
+	for key, day := range map[string]*dayPayload{
+		"latest": s.Latest, "settled": s.Settled, "today": s.Today, "yesterday": s.Yesterday,
+	} {
+		if day != nil {
+			out[key] = day
+		}
+	}
+	return out
 }
 
 func formatReading(r Reading) string {

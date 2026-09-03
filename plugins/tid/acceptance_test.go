@@ -302,6 +302,22 @@ func TestSyncPublishesLatestReadingAndInsight(t *testing.T) {
 		t.Fatalf("synced body = %q, want the day's reading", body)
 	}
 
+	yesterday, _ := syncPay["yesterday"].(map[string]any)
+	if yesterday == nil || yesterday["day"] != p.d2 || yesterday["kwh"] != 8.0 {
+		t.Fatalf("synced yesterday = %#v, want %s at 8 kWh", syncPay["yesterday"], p.d2)
+	}
+	settled, _ := syncPay["settled"].(map[string]any)
+	if settled == nil || settled["day"] != p.d2 {
+		t.Fatalf("synced settled = %#v, want %s", syncPay["settled"], p.d2)
+	}
+	recent, _ := syncPay["recent"].([]any)
+	if len(recent) != 3 {
+		t.Fatalf("synced recent = %#v, want the 3 portal days newest first", syncPay["recent"])
+	}
+	if first, _ := recent[0].(map[string]any); first == nil || first["day"] != p.d2 {
+		t.Fatalf("synced recent[0] = %#v, want %s", recent[0], p.d2)
+	}
+
 	insightPay := payloadOf(t, h, "tid.insight")
 	if insightPay["summary"] != "Usage is steady across the week." {
 		t.Fatalf("insight summary = %v", insightPay["summary"])
