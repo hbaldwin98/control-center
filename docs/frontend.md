@@ -14,15 +14,38 @@ web/src/
   ui/               shared design system — the ONLY thing plugins import
   core/             dashboard, jobs, events, costs, settings, plugin admin
   plugins/
-    hello/index.tsx
-    pagewatch/index.tsx
-    tid/index.tsx
+    hello/          one directory per plugin (see below)
+    pagewatch/
+    tid/
+    bidrl/
   plugins.ts        ← the only file importing plugin modules
 ```
 
 This mirrors the backend deliberately: one registration file, plugins isolated behind a
 declared entry point. `web/src/plugins/<id>` is the canonical source of plugin UI metadata
 and code; backend manifests contain no routes, navigation, icons, or frontend entry paths.
+
+### Inside a plugin directory
+
+`index.tsx` is the manifest and nothing else. Everything it names lives in a module of
+its own, so no file has to be read whole to change one screen:
+
+```
+plugins/bidrl/
+  index.tsx         the PluginModule: id, nav, routes, dashboard. No components.
+  model.ts          shapes and pure functions — no React, no requests. Unit-tested.
+  api.ts            pluginApi("<id>"). Every request goes through it.
+  data.ts           one hook per endpoint, each returning a snapshot.
+  screens/          one file per route, exporting the screen component.
+  dashboard.tsx     the tile and the detail panel.
+  index.css         styles, imported by index.tsx.
+```
+
+Anything two screens share gets a named module beside these — `lots.tsx` (a lot,
+rendered), `chrome.tsx` (tabs and layout), `live.tsx` (the bid feed), `sorting.tsx`,
+`actions.tsx`, `place.ts`. A plugin with one screen has fewer of these; a plugin with
+ten has more. What does not change is the direction: `screens/` may reach for any of
+them, none of them reaches back into `screens/`.
 
 ---
 
