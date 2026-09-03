@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import {
   ActionsHeader,
   Badge,
@@ -11,6 +11,7 @@ import {
   Hint,
   Input,
   Loading,
+  LogBlock,
   Page,
   PageHeader,
   Row,
@@ -90,6 +91,14 @@ export function Events() {
     return all.reverse();
   }, [history.data, live, pattern]);
 
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
   const apply = (next: string) => {
     setDraft(next);
     setPattern(next);
@@ -165,24 +174,46 @@ export function Events() {
                 </>
               }
             >
-              {rows.map((e) => (
-                <tr key={e.id}>
-                  <td className="cc-num">{e.id}</td>
-                  <td>
-                    <code>{e.type}</code>
-                  </td>
-                  <td>{e.source || <Dash />}</td>
-                  <td>{e.subject || <Dash />}</td>
-                  <td>
-                    <Time iso={e.createdAt} timeOnly />
-                  </td>
-                  <td>
-                    <code className="cc-truncate" title={JSON.stringify(e.payload)}>
-                      {JSON.stringify(e.payload)}
-                    </code>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((e) => {
+                const json = JSON.stringify(e.payload);
+                const open = expanded.has(e.id);
+                return (
+                  <Fragment key={e.id}>
+                    <tr>
+                      <td className="cc-num">{e.id}</td>
+                      <td>
+                        <code>{e.type}</code>
+                      </td>
+                      <td>{e.source || <Dash />}</td>
+                      <td>{e.subject || <Dash />}</td>
+                      <td>
+                        <Time iso={e.createdAt} timeOnly />
+                      </td>
+                      <td>
+                        {json === undefined || json === "null" ? (
+                          <Dash />
+                        ) : (
+                          <button
+                            type="button"
+                            className="cc-disclose"
+                            aria-expanded={open}
+                            onClick={() => toggle(e.id)}
+                          >
+                            <code className="cc-truncate">{json}</code>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {open ? (
+                      <tr className="cc-table__detail">
+                        <td colSpan={6}>
+                          <LogBlock>{JSON.stringify(e.payload, null, 2)}</LogBlock>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
             </Table>
           </Card>
         )}

@@ -928,6 +928,28 @@ kbd {
   color: var(--text-muted);
 }
 
+/* A payload cell that opens a full-width detail row. Reads as text, behaves as a button. */
+.cc-disclose {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cc-disclose:hover .cc-truncate {
+  color: var(--text);
+}
+
+/* The open payload spans the row, so it is not squeezed into one column's width. */
+.cc-table__detail > td {
+  padding-top: 0;
+}
+
 /* ---- dashboard ---- */
 
 /* Named densities, so no screen has to pass column pixels of its own. */

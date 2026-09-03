@@ -443,6 +443,31 @@ describe("NotificationSettings", () => {
     expect(h.text()).toContain("Muted rule");
   });
 
+  it("edits an existing rule in place instead of recreating it", async () => {
+    serve({ rules: [rule({ id: "rule-1", title: "A job failed", throttleSeconds: 60 })] });
+    await h.render(<NotificationSettings />);
+    expect(await h.clickIn("rule-1", "Edit")).toBe(true);
+    const id = h.container.querySelector<HTMLInputElement>("input[disabled]");
+    expect(id?.value).toBe("rule-1");
+    expect(await h.clickIn("Edit rule rule-1", "Save rule")).toBe(true);
+    const put = h.calls.find((c) => c.method === "PUT" && c.path.endsWith("/rules/rule-1"));
+    expect(put?.body).toMatchObject({ title: "A job failed", throttleSeconds: 60, enabled: true });
+    expect(h.calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  it("edits an existing channel in place instead of recreating it", async () => {
+    serve({
+      rules: [],
+      channels: [channel({ id: "ntfy-main", kind: "ntfy", settings: { topic: "alerts" } })],
+    });
+    await h.render(<NotificationSettings />);
+    expect(await h.clickIn("ntfy-main", "Edit")).toBe(true);
+    expect(await h.clickIn("Edit channel ntfy-main", "Save channel")).toBe(true);
+    const put = h.calls.find((c) => c.method === "PUT" && c.path.endsWith("/channels/ntfy-main"));
+    expect(put?.body).toMatchObject({ kind: "ntfy", settings: { topic: "alerts" } });
+    expect(h.calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
   it("survives every endpoint failing", async () => {
     serve();
     for (const p of [

@@ -104,13 +104,23 @@ function formatErr(err: unknown): string {
   return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
 }
 
-function ChannelForm({ onChanged }: { onChanged: () => void }) {
-  const [id, setId] = useState("");
-  const [kind, setKind] = useState("ntfy");
-  const [topic, setTopic] = useState("");
-  const [server, setServer] = useState("");
-  const [endpoint, setEndpoint] = useState("");
-  const [credentialId, setCredentialId] = useState("");
+function ChannelForm({
+  initial,
+  onChanged,
+  onCancel,
+}: {
+  initial?: Channel | undefined;
+  onChanged: () => void;
+  onCancel?: (() => void) | undefined;
+}) {
+  const editing = initial !== undefined;
+  const [id, setId] = useState(initial?.id ?? "");
+  const [kind, setKind] = useState(initial?.kind ?? "ntfy");
+  const [topic, setTopic] = useState(initial?.settings?.topic ?? "");
+  const [server, setServer] = useState(initial?.settings?.server ?? "");
+  const [endpoint, setEndpoint] = useState(initial?.settings?.endpoint ?? "");
+  const [credentialId, setCredentialId] = useState(initial?.credentialId ?? "");
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
 
   const submit = (e: FormEvent) => {
@@ -125,28 +135,36 @@ function ChannelForm({ onChanged }: { onChanged: () => void }) {
     void api
       .put(`/api/admin/notifications/channels/${encodeURIComponent(id)}`, {
         kind,
-        enabled: true,
+        enabled,
         credentialId,
         settings,
       })
       .then(() => {
-        setId("");
-        setTopic("");
-        setServer("");
-        setEndpoint("");
-        setCredentialId("");
+        if (!editing) {
+          setId("");
+          setTopic("");
+          setServer("");
+          setEndpoint("");
+          setCredentialId("");
+        }
         onChanged();
       })
       .catch((err) => setError(formatErr(err)));
   };
 
   return (
-    <Card title="Add channel">
+    <Card title={editing ? `Edit channel ${initial.id}` : "Add channel"}>
       <form onSubmit={submit}>
         <Stack>
           {error ? <Callout tone="danger">{error}</Callout> : null}
           <Field label="Id">
-            <Input value={id} onChange={(e) => setId(e.target.value)} required pattern="[a-z][a-z0-9_.]*" />
+            <Input
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+              required
+              pattern="[a-z][a-z0-9_.]*"
+              disabled={editing}
+            />
           </Field>
           <Field label="Kind">
             <Select value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -171,7 +189,15 @@ function ChannelForm({ onChanged }: { onChanged: () => void }) {
           <Field label="Credential id" hint="Optional API key for the channel.">
             <Input value={credentialId} onChange={(e) => setCredentialId(e.target.value)} />
           </Field>
-          <Button type="submit">Save channel</Button>
+          <Checkbox label="Enabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <Row>
+            <Button type="submit">Save channel</Button>
+            {onCancel ? (
+              <Button type="button" onClick={onCancel}>
+                Cancel
+              </Button>
+            ) : null}
+          </Row>
         </Stack>
       </form>
     </Card>
@@ -188,6 +214,21 @@ function ChannelCard({
   onChanged: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <ChannelForm
+        initial={channel}
+        onChanged={() => {
+          setEditing(false);
+          onChanged();
+        }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+
   return (
     <Card
       title={channel.id}
@@ -204,17 +245,22 @@ function ChannelCard({
         {health?.lastError ? <Callout tone="danger">{health.lastError}</Callout> : null}
         {error ? <Callout tone="danger">{error}</Callout> : null}
         {channel.id !== "inbox" ? (
-          <Button
-            size="sm"
-            onClick={() => {
-              void api
-                .del(`/api/admin/notifications/channels/${encodeURIComponent(channel.id)}`)
-                .then(onChanged)
-                .catch((err) => setError(formatErr(err)));
-            }}
-          >
-            Delete
-          </Button>
+          <Row>
+            <Button size="sm" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                void api
+                  .del(`/api/admin/notifications/channels/${encodeURIComponent(channel.id)}`)
+                  .then(onChanged)
+                  .catch((err) => setError(formatErr(err)));
+              }}
+            >
+              Delete
+            </Button>
+          </Row>
         ) : (
           <Hint>Built-in inbox channel.</Hint>
         )}
@@ -223,12 +269,25 @@ function ChannelCard({
   );
 }
 
-function RuleForm({ onChanged }: { onChanged: () => void }) {
-  const [id, setId] = useState("");
-  const [match, setMatch] = useState("*.alert");
-  const [title, setTitle] = useState("{event.type}");
-  const [body, setBody] = useState("{event.subject}");
-  const [channels, setChannels] = useState("inbox");
+function RuleForm({
+  initial,
+  onChanged,
+  onCancel,
+}: {
+  initial?: Rule | undefined;
+  onChanged: () => void;
+  onCancel?: (() => void) | undefined;
+}) {
+  const editing = initial !== undefined;
+  const [id, setId] = useState(initial?.id ?? "");
+  const [match, setMatch] = useState(initial?.match ?? "*.alert");
+  const [where, setWhere] = useState(initial?.where ?? "");
+  const [title, setTitle] = useState(initial?.title ?? "{event.type}");
+  const [body, setBody] = useState(initial?.body ?? "{event.subject}");
+  const [url, setUrl] = useState(initial?.url ?? "");
+  const [channels, setChannels] = useState(initial ? initial.channels.join(", ") : "inbox");
+  const [throttle, setThrottle] = useState(String(initial?.throttleSeconds ?? 0));
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
   const catalog = useSnapshot<EventCatalog>(
     useCallback((signal) => api.snapshot<EventCatalog>("/api/admin/notifications/catalog", { signal }), []),
@@ -248,17 +307,17 @@ function RuleForm({ onChanged }: { onChanged: () => void }) {
     setError(null);
     void api
       .put(`/api/admin/notifications/rules/${encodeURIComponent(id)}`, {
-        enabled: true,
+        enabled,
         match,
-        where: "",
+        where,
         channels: channels.split(",").map((s) => s.trim()).filter(Boolean),
         title,
         body,
-        url: "",
-        throttleSeconds: 0,
+        url,
+        throttleSeconds: Number(throttle) || 0,
       })
       .then(() => {
-        setId("");
+        if (!editing) setId("");
         onChanged();
       })
       .catch((err) => setError(formatErr(err)));
@@ -266,16 +325,21 @@ function RuleForm({ onChanged }: { onChanged: () => void }) {
 
   return (
     <Stack>
-      <CatalogCard catalog={catalog} onUseMatch={setMatch} onInsertPath={insertPath} />
-      <Card title="Add rule">
+      {!editing ? (
+        <CatalogCard catalog={catalog} onUseMatch={setMatch} onInsertPath={insertPath} />
+      ) : null}
+      <Card title={editing ? `Edit rule ${initial.id}` : "Add rule"}>
         <form onSubmit={submit}>
           <Stack>
             {error ? <Callout tone="danger">{error}</Callout> : null}
             <Field label="Id">
-              <Input value={id} onChange={(e) => setId(e.target.value)} required />
+              <Input value={id} onChange={(e) => setId(e.target.value)} required disabled={editing} />
             </Field>
             <Field label="Match">
               <Input value={match} onChange={(e) => setMatch(e.target.value)} required />
+            </Field>
+            <Field label="Where" hint="Optional filter expression.">
+              <Input value={where} onChange={(e) => setWhere(e.target.value)} />
             </Field>
             <Field label="Title">
               <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
@@ -283,10 +347,24 @@ function RuleForm({ onChanged }: { onChanged: () => void }) {
             <Field label="Body">
               <Textarea value={body} onChange={(e) => setBody(e.target.value)} />
             </Field>
+            <Field label="Url" hint="Optional application-relative path.">
+              <Input value={url} onChange={(e) => setUrl(e.target.value)} />
+            </Field>
             <Field label="Channels" hint="Comma-separated channel ids.">
               <Input value={channels} onChange={(e) => setChannels(e.target.value)} required />
             </Field>
-            <Button type="submit">Save rule</Button>
+            <Field label="Throttle seconds">
+              <Input type="number" min="0" value={throttle} onChange={(e) => setThrottle(e.target.value)} />
+            </Field>
+            <Checkbox label="Enabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <Row>
+              <Button type="submit">Save rule</Button>
+              {onCancel ? (
+                <Button type="button" onClick={onCancel}>
+                  Cancel
+                </Button>
+              ) : null}
+            </Row>
           </Stack>
         </form>
       </Card>
@@ -399,6 +477,21 @@ function CatalogEventRow({
 function RuleCard({ rule, onChanged }: { rule: Rule; onChanged: () => void }) {
   const [enabled, setEnabled] = useState(rule.enabled);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <RuleForm
+        initial={rule}
+        onChanged={() => {
+          setEditing(false);
+          onChanged();
+        }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+
   return (
     <Card
       title={rule.id}
@@ -434,6 +527,9 @@ function RuleCard({ rule, onChanged }: { rule: Rule; onChanged: () => void }) {
                 });
             }}
           />
+          <Button size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
           <Button
             size="sm"
             onClick={() => {
