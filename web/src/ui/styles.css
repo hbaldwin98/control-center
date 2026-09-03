@@ -929,6 +929,58 @@ kbd {
 }
 
 /* A payload cell that opens a full-width detail row. Reads as text, behaves as a button. */
+/* ---- disclosure ---- */
+
+/* A reference list that stays one line until asked to open. */
+.cc-disclosure {
+  border-top: 1px solid var(--border);
+}
+
+.cc-disclosure:first-child {
+  border-top: none;
+}
+
+.cc-disclosure__summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cc-disclosure__caret {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.cc-disclosure__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cc-disclosure__detail {
+  margin-left: auto;
+  padding-left: var(--space-2);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.cc-disclosure__summary:hover .cc-disclosure__label {
+  color: var(--text);
+}
+
+.cc-disclosure__body {
+  padding: 2px 0 10px var(--space-4);
+}
+
 .cc-disclose {
   display: block;
   max-width: 100%;

@@ -270,7 +270,10 @@ describe("PluginDetail", () => {
       }),
     ]);
     await atSettings("hello");
+    // The match names the event; its payload fields stay folded until asked for.
     expect(h.text()).toContain("hello.ticked");
+    expect(h.text()).not.toContain("{event.payload.note}");
+    expect(await h.click("hello.ticked")).toBe(true);
     expect(h.text()).toContain("{event.payload.note}");
   });
 
@@ -414,15 +417,52 @@ describe("NotificationSettings", () => {
   it("lists declared events and their payload paths", async () => {
     serve();
     await h.render(<NotificationSettings />);
+    // The catalog is reference material: a source names itself, and its events and
+    // their payload paths come out a level at a time rather than all at once.
+    expect(h.text()).not.toContain("tid.synced");
+    expect(await h.click("TID")).toBe(true);
     expect(h.text()).toContain("tid.synced");
+    expect(await h.click("tid.synced")).toBe(true);
     expect(h.text()).toContain("{event.payload.body}");
     expect(h.text()).toContain("A collection finished.");
+  });
+
+  it("shows only the events a search matches", async () => {
+    serve({
+      catalog: eventCatalog({
+        events: [
+          {
+            source: "tid",
+            name: "TID",
+            type: "tid.synced",
+            match: "tid.synced",
+            purpose: "A collection finished.",
+            fields: [],
+          },
+          {
+            source: "bidrl",
+            name: "BidRL",
+            type: "bidrl.collected",
+            match: "bidrl.collected",
+            purpose: "An auction was collected.",
+            fields: [],
+          },
+        ],
+      }),
+    });
+    await h.render(<NotificationSettings />);
+    await fill(h.container, "input[aria-label='Search events']", "bidrl");
+    // A search opens what it found and drops what it did not.
+    expect(h.text()).toContain("bidrl.collected");
+    expect(h.text()).not.toContain("TID");
   });
 
   it("fills match from a catalog event", async () => {
     serve();
     await h.render(<NotificationSettings />);
+    expect(await h.click("TID")).toBe(true);
     expect(await h.click("tid.synced")).toBe(true);
+    expect(await h.click(/use this match/i)).toBe(true);
     const values = [...h.container.querySelectorAll("input")].map((el) => (el as HTMLInputElement).value);
     expect(values).toContain("tid.synced");
   });

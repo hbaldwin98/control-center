@@ -7,6 +7,7 @@ import {
   Callout,
   Card,
   Checkbox,
+  Disclosure,
   Field,
   Hint,
   Input,
@@ -381,6 +382,9 @@ function CatalogCard({
   onUseMatch: (match: string) => void;
   onInsertPath: (path: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const filtering = query.trim().length > 0;
+
   return (
     <Card title="Event catalog">
       <Stack>
@@ -390,40 +394,70 @@ function CatalogCard({
           such as <code>{"{event.payload.body}"}</code>.
         </Hint>
         <Async state={catalog} loading="Loading events…" empty="No events declared." isEmpty={(c) => c.events.length === 0}>
-          {(cat) => (
-            <Stack>
-              <Hint>
-                Every event also has{" "}
-                {cat.envelope.map((f, i) => (
-                  <span key={f.path}>
-                    {i > 0 ? ", " : ""}
-                    <Button type="button" size="sm" onClick={() => onInsertPath(f.path)}>
-                      {`{${f.path}}`}
-                    </Button>
-                  </span>
-                ))}
-                .
-              </Hint>
-              {groupedEvents(cat.events).map((g) => (
-                <Card key={g.source} muted title={g.name} actions={<code className="cc-hint">{g.source}</code>}>
-                  <Stack>
-                    {g.events.map((ev) => (
-                      <CatalogEventRow
-                        key={ev.type}
-                        event={ev}
-                        onUseMatch={onUseMatch}
-                        onInsertPath={onInsertPath}
-                      />
+          {(cat) => {
+            const groups = groupedEvents(matching(cat.events, query));
+            return (
+              <Stack>
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search events…"
+                  aria-label="Search events"
+                  spellCheck={false}
+                />
+                <Disclosure summary="Envelope fields" detail={`${cat.envelope.length} on every event`}>
+                  <Row>
+                    {cat.envelope.map((f) => (
+                      <Button key={f.path} type="button" size="sm" onClick={() => onInsertPath(f.path)}>
+                        {`{${f.path}}`}
+                      </Button>
                     ))}
-                  </Stack>
-                </Card>
-              ))}
-            </Stack>
-          )}
+                  </Row>
+                </Disclosure>
+                {groups.length === 0 ? (
+                  <Hint>No event matches “{query}”.</Hint>
+                ) : (
+                  <div>
+                    {groups.map((g) => (
+                      <Disclosure
+                        // Keyed by the filter too, so toggling a search remounts the group
+                        // and its default reapplies: a search opens what it found.
+                        key={`${g.source}:${filtering}`}
+                        summary={g.name}
+                        detail={`${g.events.length} event${g.events.length === 1 ? "" : "s"}`}
+                        defaultOpen={filtering}
+                      >
+                        <div>
+                          {g.events.map((ev) => (
+                            <CatalogEventRow
+                              key={ev.type}
+                              event={ev}
+                              onUseMatch={onUseMatch}
+                              onInsertPath={onInsertPath}
+                            />
+                          ))}
+                        </div>
+                      </Disclosure>
+                    ))}
+                  </div>
+                )}
+              </Stack>
+            );
+          }}
         </Async>
       </Stack>
     </Card>
   );
+}
+
+/** Free-text search over what an operator would look for: the match, purpose, or a path. */
+function matching(events: CatalogEvent[], query: string): CatalogEvent[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return events;
+  return events.filter((ev) => {
+    if (`${ev.match} ${ev.type} ${ev.name} ${ev.purpose}`.toLowerCase().includes(q)) return true;
+    return (ev.fields ?? []).some((f) => `${f.path} ${f.purpose}`.toLowerCase().includes(q));
+  });
 }
 
 function groupedEvents(events: CatalogEvent[]) {
@@ -454,23 +488,29 @@ function CatalogEventRow({
   onUseMatch: (match: string) => void;
   onInsertPath: (path: string) => void;
 }) {
+  const fields = event.fields ?? [];
   return (
-    <Stack>
-      <Row>
-        <Button type="button" size="sm" onClick={() => onUseMatch(event.match)}>
-          {event.match}
-        </Button>
-        <Hint>{event.purpose}</Hint>
-      </Row>
-      {event.fields?.map((f) => (
-        <Hint key={f.name}>
-          <Button type="button" size="sm" onClick={() => onInsertPath(f.path)}>
-            {`{${f.path}}`}
+    <Disclosure
+      summary={<code>{event.match}</code>}
+      detail={fields.length === 0 ? "no fields" : `${fields.length} field${fields.length === 1 ? "" : "s"}`}
+    >
+      <Stack>
+        <Row>
+          <Button type="button" size="sm" onClick={() => onUseMatch(event.match)}>
+            Use this match
           </Button>
-          {` · ${f.type} · ${f.purpose}`}
-        </Hint>
-      ))}
-    </Stack>
+          <Hint>{event.purpose}</Hint>
+        </Row>
+        {fields.map((f) => (
+          <Hint key={f.name}>
+            <Button type="button" size="sm" onClick={() => onInsertPath(f.path)}>
+              {`{${f.path}}`}
+            </Button>
+            {` · ${f.type} · ${f.purpose}`}
+          </Hint>
+        ))}
+      </Stack>
+    </Disclosure>
   );
 }
 

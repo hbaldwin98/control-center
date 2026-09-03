@@ -30,7 +30,7 @@ export type { StreamBuffer, StreamStatus } from "./stream";
 
 export { isValidPattern, matchesPattern } from "./pattern";
 
-export { Link, useNavigate, usePath, useQueryState, useRouteParams } from "./nav";
+export { Link, useNavigate, usePath, useQueryState, useRouteParams, useSearch } from "./nav";
 
 export { useActivity, useEvents, useNow, useSnapshot, useStreamEpoch, useStreamStatus } from "./hooks";
 export type {
@@ -54,6 +54,7 @@ export {
   Card,
   Checkbox,
   Dash,
+  Disclosure,
   EmptyState,
   Field,
   Grid,

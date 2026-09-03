@@ -7,6 +7,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
+import { useState } from "react";
 import { formatDateTime, formatRelative, formatRemaining, formatTime, formatUSD, parseInstant } from "./format";
 import { useNow } from "./hooks";
 
@@ -64,6 +65,52 @@ export function Card({
       ) : null}
       {children}
     </section>
+  );
+}
+
+/**
+ * A collapsed section that opens on click. Long reference lists (event catalogs,
+ * payload fields) live behind one of these so a screen shows what it is about
+ * before it shows every detail it holds.
+ */
+export function Disclosure({
+  summary,
+  detail,
+  open,
+  defaultOpen,
+  onToggle,
+  children,
+}: {
+  summary: ReactNode;
+  /** Shown beside the summary while closed, so the row is still informative. */
+  detail?: ReactNode | undefined;
+  /** Pass with `onToggle` to drive the section from outside, e.g. from a filter. */
+  open?: boolean | undefined;
+  defaultOpen?: boolean | undefined;
+  onToggle?: ((open: boolean) => void) | undefined;
+  children: ReactNode;
+}) {
+  const [uncontrolled, setUncontrolled] = useState(defaultOpen ?? false);
+  const isOpen = open ?? uncontrolled;
+  return (
+    <div className="cc-disclosure">
+      <button
+        type="button"
+        className="cc-disclosure__summary"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (open === undefined) setUncontrolled(!isOpen);
+          onToggle?.(!isOpen);
+        }}
+      >
+        <span className="cc-disclosure__caret" aria-hidden="true">
+          {isOpen ? "▾" : "▸"}
+        </span>
+        <span className="cc-disclosure__label">{summary}</span>
+        {detail ? <span className="cc-disclosure__detail">{detail}</span> : null}
+      </button>
+      {isOpen ? <div className="cc-disclosure__body">{children}</div> : null}
+    </div>
   );
 }
 
