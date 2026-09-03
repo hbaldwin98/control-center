@@ -114,6 +114,8 @@ var knownEventFieldTypes = map[string]struct{}{
 	"number":   {},
 	"boolean":  {},
 	"string[]": {},
+	"object":   {},
+	"object[]": {},
 }
 
 func validateEventSpecs(pluginID string, specs []host.EventSpec) error {
@@ -166,8 +168,24 @@ func validEventType(s string) bool {
 }
 
 // validFieldName is a JSON object key: lowercase start, then letters or digits.
+// validFieldName is a payload path: one or more segments joined by dots, so a
+// nested field can be declared as the path a rule actually writes. A segment
+// starts with a lowercase letter and may carry digits, letters, and underscores,
+// because a payload key is whatever the plugin's JSON tag says it is.
 func validFieldName(s string) bool {
 	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, seg := range strings.Split(s, ".") {
+		if !validFieldSegment(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+func validFieldSegment(s string) bool {
+	if s == "" {
 		return false
 	}
 	if s[0] < 'a' || s[0] > 'z' {
@@ -175,7 +193,7 @@ func validFieldName(s string) bool {
 	}
 	for i := 1; i < len(s); i++ {
 		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
 			continue
 		}
 		return false

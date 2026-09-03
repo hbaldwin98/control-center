@@ -41,14 +41,7 @@ func (p *Plugin) Manifest() host.Manifest {
 			{
 				Type:    "synced",
 				Purpose: "A portal collection finished. Fires even when no new days were inserted.",
-				Fields: []host.EventField{
-					{Name: "at", Type: "string", Purpose: "RFC3339Nano time of the sync."},
-					{Name: "rows", Type: "number", Purpose: "Readings written this run."},
-					{Name: "source", Type: "string", Purpose: "Where the readings came from."},
-					{Name: "day", Type: "string", Purpose: "Latest calendar day in the collection, if any."},
-					{Name: "kwh", Type: "number", Purpose: "kWh on that latest day."},
-					{Name: "body", Type: "string", Purpose: "One-line reading for a notification, such as 2026-09-02: 8.0 kWh ($2.00)."},
-				},
+				Fields:  append(syncedFields("Readings written this run."), host.EventField{Name: "body", Type: "string", Purpose: "One-line reading for a notification, such as 2026-09-02: 8.0 kWh ($2.00)."}),
 			},
 			{
 				Type:    "insight",
@@ -64,14 +57,10 @@ func (p *Plugin) Manifest() host.Manifest {
 			{
 				Type:    "alert",
 				Purpose: "New calendar days were inserted. Matched by the default plugin-alert rule.",
-				Fields: []host.EventField{
+				Fields: append([]host.EventField{
 					{Name: "title", Type: "string", Purpose: "Short headline."},
 					{Name: "body", Type: "string", Purpose: "The latest reading, or a count of new days."},
-					{Name: "rows", Type: "number", Purpose: "How many new days were inserted."},
-					{Name: "source", Type: "string", Purpose: "Where the readings came from."},
-					{Name: "day", Type: "string", Purpose: "Latest calendar day, if any."},
-					{Name: "kwh", Type: "number", Purpose: "kWh on that latest day."},
-				},
+				}, syncedFields("How many new days were inserted.")...),
 			},
 		},
 		Config: host.ConfigSpec{

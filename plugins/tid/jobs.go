@@ -51,6 +51,45 @@ type dayPayload struct {
 	Body       string   `json:"body"`
 }
 
+// syncedFields declares the day payloads that synced and alert both carry, so the
+// event catalog in the UI offers the same paths a rule can actually template. It
+// lives next to the structs above: change one and this has to change with it.
+func syncedFields(rowsPurpose string) []host.EventField {
+	out := []host.EventField{
+		{Name: "at", Type: "string", Purpose: "RFC3339Nano time of the sync."},
+		{Name: "rows", Type: "number", Purpose: rowsPurpose},
+		{Name: "source", Type: "string", Purpose: "Where the readings came from."},
+		{Name: "day", Type: "string", Purpose: "Newest calendar day in the collection, if any."},
+		{Name: "kwh", Type: "number", Purpose: "kWh on that newest day."},
+	}
+	for _, d := range []struct{ name, purpose string }{
+		{"settled", "Newest day that actually has usage on it. This is what the default body reports."},
+		{"latest", "Newest day in the collection, which is often an empty or partial today."},
+		{"today", "Today in local time, if TID has filled it in yet."},
+		{"yesterday", "Yesterday in local time."},
+	} {
+		out = append(out, host.EventField{Name: d.name, Type: "object", Purpose: d.purpose})
+		out = append(out, dayFields(d.name)...)
+	}
+	return append(out, host.EventField{Name: "recent", Type: "object[]", Purpose: fmt.Sprintf("The trailing %d days, newest first, each shaped like the named days.", recentDays)})
+}
+
+// dayFields declares the leaves of one named day, so the catalog can offer them
+// as click-to-insert paths rather than an opaque object.
+func dayFields(prefix string) []host.EventField {
+	return []host.EventField{
+		{Name: prefix + ".day", Type: "string", Purpose: "Calendar day, as YYYY-MM-DD."},
+		{Name: prefix + ".kwh", Type: "number", Purpose: "kWh used that day."},
+		{Name: prefix + ".cost_cents", Type: "number", Purpose: "What that day cost, in cents, when TID reports it."},
+		{Name: prefix + ".on_peak_kwh", Type: "number", Purpose: "On-peak kWh, when TID reports it."},
+		{Name: prefix + ".off_peak_kwh", Type: "number", Purpose: "Off-peak kWh, when TID reports it."},
+		{Name: prefix + ".high_temp_f", Type: "number", Purpose: "High temperature that day, when TID reports it."},
+		{Name: prefix + ".low_temp_f", Type: "number", Purpose: "Low temperature that day, when TID reports it."},
+		{Name: prefix + ".avg_temp_f", Type: "number", Purpose: "Average temperature that day, when TID reports it."},
+		{Name: prefix + ".body", Type: "string", Purpose: "That day as a one-line reading, ready to send."},
+	}
+}
+
 // recentDays is how many trailing days the synced event carries.
 const recentDays = 7
 
