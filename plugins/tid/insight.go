@@ -134,8 +134,13 @@ func insightPrompt(now time.Time, recent, history []dayView, months []monthStat,
 			"list empty if nothing stands out.\n" +
 			"- recommendation: one concrete action for this household, tied to a pattern in the data " +
 			"(on-peak share, a recurring weekday, a persistent overnight baseline, a seasonal trend).\n\n" +
-			"Rules: use only the data below. Do not invent appliances, occupancy, rates, or weather. Where a " +
-			"partial month or a missing temperature limits a comparison, say so plainly.\n\n")
+			"Rules: use only the data below. Do not invent appliances, occupancy, rates, or weather.\n" +
+			"Never refuse or hedge a comparison because the current month is incomplete. Every comparison you " +
+			"need is already computed on a like-for-like basis: months carry a kWh/day rate, the month-to-date " +
+			"block covers the same day range in each month, and the windows are equal-length. Compare rates and " +
+			"equal ranges, never a partial total against a full one, and do not spend a sentence on the fact " +
+			"that the month is still running. Only say a comparison is unavailable when a line below " +
+			"literally reads \"no data\".\n\n")
 
 	fmt.Fprintf(&b, "Today is %s.", now.Format("Monday 2006-01-02"))
 	if cfg.CentsPerKWh > 0 {
@@ -145,6 +150,7 @@ func insightPrompt(now time.Time, recent, history []dayView, months []monthStat,
 
 	writeMonthlyHistory(&b, months, now)
 	writeTemperatureBands(&b, history)
+	writeMonthToDate(&b, history, now)
 	writeWindows(&b, history, now)
 	writeRecentDays(&b, recent, history)
 	return b.String()
@@ -155,9 +161,15 @@ func writeMonthlyHistory(b *strings.Builder, months []monthStat, now time.Time) 
 		return
 	}
 	thisMonth := now.Format("2006-01")
-	b.WriteString("MONTHLY HISTORY (oldest first; kWh, cost when every day is billed, avg daily high, days of data)\n")
+	b.WriteString("MONTHLY HISTORY (oldest first; total kWh, kWh/day, cost when every day is billed, avg daily high, days of data)\n" +
+		"Compare months with the kWh/day rate, which holds whether or not the month is complete.\n")
 	for _, m := range months {
 		fmt.Fprintf(b, "%s  %7.1f kWh", m.Month, m.KWh)
+		if m.Days > 0 {
+			fmt.Fprintf(b, "  %5.1f/day", m.KWh/float64(m.Days))
+		} else {
+			b.WriteString("           ")
+		}
 		if m.CostCents != nil {
 			fmt.Fprintf(b, "  $%7.2f", float64(*m.CostCents)/100)
 		} else {
@@ -170,7 +182,7 @@ func writeMonthlyHistory(b *strings.Builder, months []monthStat, now time.Time) 
 		}
 		fmt.Fprintf(b, "  %2d days", m.Days)
 		if m.Month == thisMonth {
-			b.WriteString("  (month in progress)")
+			fmt.Fprintf(b, "  (month in progress: %d days so far, so read the kWh/day column)", m.Days)
 		}
 		b.WriteByte('\n')
 	}
@@ -212,7 +224,9 @@ func (t tempBand) label() string {
 	}
 }
 
-var bandEdges = []int{60, 70, 80, 90, 100}
+// bandEdges are tighter through the range Turlock actually spends its summer
+// in, so a 105F day is not averaged in with a 100F one.
+var bandEdges = []int{50, 60, 70, 80, 85, 90, 95, 100, 105}
 
 func temperatureBands(history []dayView) []tempBand {
 	bands := make([]tempBand, 0, len(bandEdges)+1)
@@ -258,6 +272,7 @@ func writeTemperatureBands(b *strings.Builder, history []dayView) {
 }
 
 func writeWindows(b *strings.Builder, history []dayView, now time.Time) {
+	bands := temperatureBands(history)
 	windows := []struct {
 		name       string
 		start, end time.Time
@@ -268,7 +283,7 @@ func writeWindows(b *strings.Builder, history []dayView, now time.Time) {
 	}
 	b.WriteString("WINDOW COMPARISON\n")
 	for _, w := range windows {
-		stats := windowStats(history, w.start.Format("2006-01-02"), w.end.Format("2006-01-02"))
+		stats := windowStats(history, w.start.Format("2006-01-02"), w.end.Format("2006-01-02"), bands)
 		if stats.days == 0 {
 			fmt.Fprintf(b, "%-27s no data\n", w.name+":")
 			continue
@@ -279,6 +294,9 @@ func writeWindows(b *strings.Builder, history []dayView, now time.Time) {
 		}
 		if stats.onPeak > 0 && stats.kwh > 0 {
 			fmt.Fprintf(b, ", %.0f%% on-peak", 100*stats.onPeak/stats.kwh)
+		}
+		if stats.expectedDays > 0 {
+			fmt.Fprintf(b, ", %+.0f%% versus what those temperatures predict", percentChange(stats.expected, stats.matchedKWh))
 		}
 		b.WriteByte('\n')
 	}
@@ -291,9 +309,14 @@ type window struct {
 	onPeak   float64
 	temp     float64
 	tempDays int
+	// expected sums the temperature-matched baseline over the days that had
+	// one; matchedKWh is the actual usage on those same days.
+	expected     float64
+	matchedKWh   float64
+	expectedDays int
 }
 
-func windowStats(days []dayView, from, to string) window {
+func windowStats(days []dayView, from, to string, bands []tempBand) window {
 	var w window
 	for _, d := range days {
 		if d.Day < from || d.Day > to {
@@ -304,9 +327,15 @@ func windowStats(days []dayView, from, to string) window {
 		if d.OnPeakKWh != nil {
 			w.onPeak += *d.OnPeakKWh
 		}
-		if temp := dayTemp(d); temp != nil {
+		temp := dayTemp(d)
+		if temp != nil {
 			w.temp += *temp
 			w.tempDays++
+		}
+		if expected, ok := expectedKWh(bands, temp); ok && d.KWh > 0 {
+			w.expected += expected
+			w.matchedKWh += d.KWh
+			w.expectedDays++
 		}
 	}
 	return w
@@ -392,4 +421,107 @@ func percentChange(from, to float64) float64 {
 		return 0
 	}
 	return 100 * (to - from) / from
+}
+
+// writeMonthToDate compares the current month against the previous month and
+// the same month last year over the *same* range of day numbers, so a month
+// still in progress is still directly comparable and needs no caveat.
+func writeMonthToDate(b *strings.Builder, history []dayView, now time.Time) {
+	month := now.Format("2006-01")
+	through := 0
+	for _, d := range history {
+		if strings.HasPrefix(d.Day, month) {
+			if n := dayOfMonth(d.Day); n > through {
+				through = n
+			}
+		}
+	}
+	if through == 0 {
+		return
+	}
+	bands := temperatureBands(history)
+	fmt.Fprintf(b, "MONTH TO DATE (days 1-%d of each month, the same range in every row)\n", through)
+	rows := []struct {
+		name  string
+		month time.Time
+	}{
+		{"this month", now},
+		{"previous month", now.AddDate(0, -1, 0)},
+		{"same month last year", now.AddDate(-1, 0, 0)},
+	}
+	var current partialMonth
+	for i, r := range rows {
+		p := partialMonthStats(history, r.month.Format("2006-01"), through, bands)
+		if p.days == 0 {
+			fmt.Fprintf(b, "%-22s no data\n", r.name+":")
+			continue
+		}
+		if i == 0 {
+			current = p
+		}
+		fmt.Fprintf(b, "%-22s %6.1f kWh total, %5.1f kWh/day over %2d days", r.name+":", p.kwh, p.kwh/float64(p.days), p.days)
+		if p.tempDays > 0 {
+			fmt.Fprintf(b, ", avg high %.0fF", p.temp/float64(p.tempDays))
+		}
+		if p.kwh > 0 && p.onPeak > 0 {
+			fmt.Fprintf(b, ", %.0f%% on-peak", 100*p.onPeak/p.kwh)
+		}
+		if i > 0 && current.days > 0 {
+			fmt.Fprintf(b, "  (this month is %+.0f%% per day)", percentChange(p.kwh/float64(p.days), current.kwh/float64(current.days)))
+		}
+		if p.expectedDays > 0 {
+			matched := p.matchedKWh / float64(p.expectedDays)
+			fmt.Fprintf(b, "\n%-22s %5.1f kWh/day actual versus %5.1f expected for those temperatures (%+.0f%%), %d days matched\n",
+				"", matched, p.expected/float64(p.expectedDays), percentChange(p.expected, p.matchedKWh), p.expectedDays)
+			continue
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+}
+
+// partialMonth is one month truncated to its first `through` days, with the
+// temperature-matched expectation for the days that have a usable baseline.
+type partialMonth struct {
+	days         int
+	kwh          float64
+	onPeak       float64
+	temp         float64
+	tempDays     int
+	expected     float64 // sum of expectations over expectedDays
+	matchedKWh   float64 // actual kWh over those same days
+	expectedDays int
+}
+
+func partialMonthStats(history []dayView, month string, through int, bands []tempBand) partialMonth {
+	var p partialMonth
+	for _, d := range history {
+		if !strings.HasPrefix(d.Day, month) || dayOfMonth(d.Day) > through {
+			continue
+		}
+		p.days++
+		p.kwh += d.KWh
+		if d.OnPeakKWh != nil {
+			p.onPeak += *d.OnPeakKWh
+		}
+		temp := dayTemp(d)
+		if temp != nil {
+			p.temp += *temp
+			p.tempDays++
+		}
+		if expected, ok := expectedKWh(bands, temp); ok && d.KWh > 0 {
+			p.expected += expected
+			p.matchedKWh += d.KWh
+			p.expectedDays++
+		}
+	}
+	return p
+}
+
+func dayOfMonth(day string) int {
+	t, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		return 0
+	}
+	return t.Day()
 }
