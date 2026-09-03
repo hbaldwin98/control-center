@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -215,7 +216,14 @@ func (s *Service) finalizeConservative(ctx context.Context, callID, resID string
 		if resID == "" {
 			return nil
 		}
-		return s.gate.SettleSpendTx(ctx, tx, resID, max)
+		// The reservation can already be gone: a crash leaves both an unfinalized call
+		// and its reservation behind, and the orphan sweep runs first at boot, charging
+		// exactly the maximum this would charge. Finalizing the call still has to
+		// happen, or every later boot rediscovers it and fails the same way.
+		if err := s.gate.SettleSpendTx(ctx, tx, resID, max); err != nil && !errors.Is(err, policy.ErrUnknownReservation) {
+			return err
+		}
+		return nil
 	})
 }
 

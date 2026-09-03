@@ -328,3 +328,84 @@ func cosine(a, b []float64) float64 {
 	}
 	return sum
 }
+
+// TestRecoverAfterOrphanSweep reproduces the boot order in cmd/controlcenter: the
+// policy orphan sweep settles every reservation a crash left behind, and only then
+// does the AI service recover the calls those reservations belonged to. The
+// reservation is gone by that point, which must not stop the call being finalized —
+// otherwise the same unfinalized row fails every subsequent boot and the process
+// never starts again.
+func TestRecoverAfterOrphanSweep(t *testing.T) {
+	ctx := context.Background()
+	st, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "ai.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	bus, err := events.New(st, st, events.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, err := policy.New(st, st, bus, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pol.Register(ctx, "hello", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := pol.Enable(ctx, "hello", "test", "setup"); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	creds, err := credentials.New(st, st, bus, credentials.Options{Keys: map[int][]byte{1: key}, Active: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := creds.CreateAPIKey(credentials.WithActor(ctx, "admin"), credentials.APIKeyInput{
+		ID: "fake-key", Provider: "fake", Secret: credentials.SecretInput{Value: "test-token"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The first boot runs the AI migrations; everything after it is the crash.
+	if _, err := New(st, st, bus, pol, creds, Options{Seed: cheapChatSeed(), Refs: creds}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A call that was in flight when the process died, with its reservation still open.
+	var resID string
+	if err := st.Tx(ctx, func(tx storage.Tx) error {
+		res, err := pol.ReserveSpendTx(ctx, tx, "hello", policy.MicroUSD(5000))
+		if err != nil {
+			return err
+		}
+		resID = res.ID
+		_, err = tx.Exec(ctx, `INSERT INTO core_ai_calls(id, plugin_id, operation, logical_model, status, reservation_id, reserved_micro_usd, started_at)
+			VALUES ('call-1', 'hello', 'chat', 'cheap-chat', 'dispatching', ?, 5000, ?)`,
+			resID, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := pol.SettleOrphanedReservations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("settled %d reservations, want 1", n)
+	}
+
+	if _, err := New(st, st, bus, pol, creds, Options{Seed: cheapChatSeed(), Refs: creds}); err != nil {
+		t.Fatalf("boot after orphan sweep: %v", err)
+	}
+
+	var finalized any
+	if err := st.QueryRow(ctx, `SELECT finalized_at FROM core_ai_calls WHERE id = 'call-1'`).Scan(&finalized); err != nil {
+		t.Fatal(err)
+	}
+	if finalized == nil {
+		t.Fatal("call was left unfinalized, so the next boot fails the same way")
+	}
+}
