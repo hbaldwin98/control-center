@@ -20,6 +20,11 @@ type Reading struct {
 	CostCents  *int64
 	OnPeakKWh  *float64
 	OffPeakKWh *float64
+	// Weather TID reports alongside the day, in Fahrenheit. Any of these may be
+	// absent; older days often carry none.
+	HighTempF *float64
+	LowTempF  *float64
+	AvgTempF  *float64
 }
 
 var (
@@ -260,7 +265,37 @@ func readingFromMap(m map[string]any) (Reading, bool) {
 	if value, ok := jsonNumber(m["offPeakKwh"]); ok {
 		reading.OffPeakKWh = &value
 	}
+	reading.HighTempF, reading.LowTempF, reading.AvgTempF = temperatures(m)
 	return reading, true
+}
+
+// temperatures pulls whatever daily weather the payload carries. TID has moved
+// the key around (temperature, highTemp, maxTemperature), so match on shape
+// rather than on one exact name.
+func temperatures(m map[string]any) (high, low, avg *float64) {
+	for key, value := range m {
+		lk := strings.ToLower(key)
+		if !strings.Contains(lk, "temp") {
+			continue
+		}
+		n, ok := jsonNumber(value)
+		if !ok || n < -80 || n > 160 {
+			continue
+		}
+		switch {
+		case strings.Contains(lk, "high") || strings.Contains(lk, "max"):
+			high = &n
+		case strings.Contains(lk, "low") || strings.Contains(lk, "min"):
+			low = &n
+		case avg == nil:
+			avg = &n
+		}
+	}
+	if avg == nil && high != nil && low != nil {
+		mean := (*high + *low) / 2
+		avg = &mean
+	}
+	return high, low, avg
 }
 
 func jsonNumber(v any) (float64, bool) {
@@ -433,10 +468,13 @@ func cell(row []string, i int) string {
 
 func mergeDays(in []Reading) []Reading {
 	type acc struct {
-		kwh     float64
-		cents   *int64
-		onPeak  *float64
-		offPeak *float64
+		kwh      float64
+		cents    *int64
+		onPeak   *float64
+		offPeak  *float64
+		highTemp *float64
+		lowTemp  *float64
+		avgTemp  *float64
 	}
 	order := make([]string, 0, len(in))
 	seen := map[string]*acc{}
@@ -461,13 +499,30 @@ func mergeDays(in []Reading) []Reading {
 		}
 		addFloat(&a.onPeak, r.OnPeakKWh)
 		addFloat(&a.offPeak, r.OffPeakKWh)
+		keepFloat(&a.highTemp, r.HighTempF)
+		keepFloat(&a.lowTemp, r.LowTempF)
+		keepFloat(&a.avgTemp, r.AvgTempF)
 	}
 	out := make([]Reading, 0, len(order))
 	for _, day := range order {
 		a := seen[day]
-		out = append(out, Reading{Day: day, KWh: a.kwh, CostCents: a.cents, OnPeakKWh: a.onPeak, OffPeakKWh: a.offPeak})
+		out = append(out, Reading{
+			Day: day, KWh: a.kwh, CostCents: a.cents,
+			OnPeakKWh: a.onPeak, OffPeakKWh: a.offPeak,
+			HighTempF: a.highTemp, LowTempF: a.lowTemp, AvgTempF: a.avgTemp,
+		})
 	}
 	return out
+}
+
+// keepFloat records a per-day fact once; unlike addFloat it does not sum,
+// because two service agreements on the same day share one temperature.
+func keepFloat(current **float64, value *float64) {
+	if value == nil || *current != nil {
+		return
+	}
+	v := *value
+	*current = &v
 }
 
 func addFloat(total **float64, value *float64) {

@@ -45,6 +45,9 @@ type dayPayload struct {
 	CostCents  *int64   `json:"cost_cents,omitempty"`
 	OnPeakKWh  *float64 `json:"on_peak_kwh,omitempty"`
 	OffPeakKWh *float64 `json:"off_peak_kwh,omitempty"`
+	HighTempF  *float64 `json:"high_temp_f,omitempty"`
+	LowTempF   *float64 `json:"low_temp_f,omitempty"`
+	AvgTempF   *float64 `json:"avg_temp_f,omitempty"`
 	Body       string   `json:"body"`
 }
 
@@ -128,16 +131,19 @@ func (p *Plugin) upsertReadings(ctx hostjobs.Context, h host.Host, result collec
 				cost = *r.CostCents
 			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO tid_readings(day, kwh, cost_cents, on_peak_kwh, off_peak_kwh, source, collected_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
+				INSERT INTO tid_readings(day, kwh, cost_cents, on_peak_kwh, off_peak_kwh, high_temp_f, low_temp_f, avg_temp_f, source, collected_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(day) DO UPDATE SET
 					kwh = excluded.kwh,
 					cost_cents = COALESCE(excluded.cost_cents, tid_readings.cost_cents),
 					on_peak_kwh = COALESCE(excluded.on_peak_kwh, tid_readings.on_peak_kwh),
 					off_peak_kwh = COALESCE(excluded.off_peak_kwh, tid_readings.off_peak_kwh),
+					high_temp_f = COALESCE(excluded.high_temp_f, tid_readings.high_temp_f),
+					low_temp_f = COALESCE(excluded.low_temp_f, tid_readings.low_temp_f),
+					avg_temp_f = COALESCE(excluded.avg_temp_f, tid_readings.avg_temp_f),
 					source = excluded.source,
 					collected_at = excluded.collected_at`,
-				r.Day, r.KWh, cost, r.OnPeakKWh, r.OffPeakKWh, source, at); err != nil {
+				r.Day, r.KWh, cost, r.OnPeakKWh, r.OffPeakKWh, r.HighTempF, r.LowTempF, r.AvgTempF, source, at); err != nil {
 				return err
 			}
 			n++
@@ -160,12 +166,16 @@ func (p *Plugin) upsertReadings(ctx hostjobs.Context, h host.Host, result collec
 			}
 			for _, r := range period.Readings {
 				if _, err := tx.Exec(ctx, `
-					INSERT INTO tid_period_readings(period_start, period_end, day, kwh, cost_cents, on_peak_kwh, off_peak_kwh)
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+					INSERT INTO tid_period_readings(period_start, period_end, day, kwh, cost_cents, on_peak_kwh, off_peak_kwh, high_temp_f, low_temp_f, avg_temp_f)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(period_start, period_end, day) DO UPDATE SET
 						kwh = excluded.kwh, cost_cents = excluded.cost_cents,
-						on_peak_kwh = excluded.on_peak_kwh, off_peak_kwh = excluded.off_peak_kwh`,
-					period.Start, period.End, r.Day, r.KWh, r.CostCents, r.OnPeakKWh, r.OffPeakKWh); err != nil {
+						on_peak_kwh = excluded.on_peak_kwh, off_peak_kwh = excluded.off_peak_kwh,
+						high_temp_f = COALESCE(excluded.high_temp_f, tid_period_readings.high_temp_f),
+						low_temp_f = COALESCE(excluded.low_temp_f, tid_period_readings.low_temp_f),
+						avg_temp_f = COALESCE(excluded.avg_temp_f, tid_period_readings.avg_temp_f)`,
+					period.Start, period.End, r.Day, r.KWh, r.CostCents, r.OnPeakKWh, r.OffPeakKWh,
+					r.HighTempF, r.LowTempF, r.AvgTempF); err != nil {
 					return err
 				}
 			}
@@ -245,6 +255,7 @@ func readingPayload(r Reading) *dayPayload {
 	return &dayPayload{
 		Day: r.Day, KWh: r.KWh, CostCents: r.CostCents,
 		OnPeakKWh: r.OnPeakKWh, OffPeakKWh: r.OffPeakKWh,
+		HighTempF: r.HighTempF, LowTempF: r.LowTempF, AvgTempF: r.AvgTempF,
 		Body: formatReading(r),
 	}
 }
@@ -269,6 +280,9 @@ func formatReading(r Reading) string {
 	s := fmt.Sprintf("%s: %.1f kWh", r.Day, r.KWh)
 	if r.CostCents != nil {
 		s += fmt.Sprintf(" ($%.2f)", float64(*r.CostCents)/100)
+	}
+	if r.HighTempF != nil {
+		s += fmt.Sprintf(", high %.0f°F", *r.HighTempF)
 	}
 	return s
 }

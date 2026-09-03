@@ -14,6 +14,9 @@ type dayView struct {
 	CostCents  *int64   `json:"costCents"`
 	OnPeakKWh  *float64 `json:"onPeakKwh"`
 	OffPeakKWh *float64 `json:"offPeakKwh"`
+	HighTempF  *float64 `json:"highTempF"`
+	LowTempF   *float64 `json:"lowTempF"`
+	AvgTempF   *float64 `json:"avgTempF"`
 }
 
 type billingPeriodView struct {

@@ -98,5 +98,16 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			ALTER TABLE tid_period_readings_normalized RENAME TO tid_period_readings;
 			CREATE INDEX tid_period_readings_day ON tid_period_readings(day);
 		`,
+	}, {
+		Version: 4,
+		Name:    "daily_temperature",
+		Up: `
+			ALTER TABLE tid_readings ADD COLUMN high_temp_f REAL;
+			ALTER TABLE tid_readings ADD COLUMN low_temp_f REAL;
+			ALTER TABLE tid_readings ADD COLUMN avg_temp_f REAL;
+			ALTER TABLE tid_period_readings ADD COLUMN high_temp_f REAL;
+			ALTER TABLE tid_period_readings ADD COLUMN low_temp_f REAL;
+			ALTER TABLE tid_period_readings ADD COLUMN avg_temp_f REAL;
+		`,
 	}})
 }

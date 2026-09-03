@@ -105,7 +105,8 @@ func sumKWh(ctx context.Context, h host.Host, from, to string) (float64, error) 
 
 func listDays(ctx context.Context, h host.Host, from, to string) ([]dayView, error) {
 	rows, err := h.Store().Query(ctx, `
-		SELECT day, kwh, cost_cents, on_peak_kwh, off_peak_kwh FROM tid_readings
+		SELECT day, kwh, cost_cents, on_peak_kwh, off_peak_kwh, high_temp_f, low_temp_f, avg_temp_f
+		  FROM tid_readings
 		 WHERE day >= ? AND day <= ?
 		 ORDER BY day DESC`, from, to)
 	if err != nil {
@@ -115,10 +116,64 @@ func listDays(ctx context.Context, h host.Host, from, to string) ([]dayView, err
 	out := []dayView{}
 	for rows.Next() {
 		var d dayView
-		if err := rows.Scan(&d.Day, &d.KWh, &d.CostCents, &d.OnPeakKWh, &d.OffPeakKWh); err != nil {
+		if err := rows.Scan(&d.Day, &d.KWh, &d.CostCents, &d.OnPeakKWh, &d.OffPeakKWh,
+			&d.HighTempF, &d.LowTempF, &d.AvgTempF); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// monthStat is one calendar month rolled up, used as the historical baseline
+// the insight reasons over.
+type monthStat struct {
+	Month     string // YYYY-MM
+	KWh       float64
+	CostCents *int64
+	Days      int
+	AvgHighF  *float64
+	PeakKWh   float64
+}
+
+// monthlyStats returns the most recent months of usage, oldest first, ending
+// with the month containing through. Partial months (the current one, and the
+// first month ever synced) are included with their day count so the caller can
+// say so.
+func monthlyStats(ctx context.Context, h host.Host, months int, through time.Time) ([]monthStat, error) {
+	loc := localZone()
+	end := time.Date(through.Year(), through.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, 0)
+	start := end.AddDate(0, -months, 0)
+	rows, err := h.Store().Query(ctx, `
+		SELECT substr(day, 1, 7) AS month,
+		       SUM(kwh), SUM(cost_cents), COUNT(*), AVG(high_temp_f), MAX(kwh),
+		       COUNT(cost_cents)
+		  FROM tid_readings
+		 WHERE day >= ? AND day < ?
+		 GROUP BY month
+		 ORDER BY month`, start.Format("2006-01-02"), end.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []monthStat{}
+	for rows.Next() {
+		var m monthStat
+		var cost sql.NullFloat64
+		var avgHigh sql.NullFloat64
+		var costDays int
+		if err := rows.Scan(&m.Month, &m.KWh, &cost, &m.Days, &avgHigh, &m.PeakKWh, &costDays); err != nil {
+			return nil, err
+		}
+		if cost.Valid && costDays == m.Days {
+			cents := int64(cost.Float64 + 0.5)
+			m.CostCents = &cents
+		}
+		if avgHigh.Valid {
+			v := avgHigh.Float64
+			m.AvgHighF = &v
+		}
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }
@@ -158,7 +213,7 @@ func (p *Plugin) history(ctx context.Context, h host.Host, limit int) (historyPa
 			Days: []dayView{},
 		}
 		dayRows, err := h.Store().Query(ctx, `
-			SELECT day, kwh, cost_cents, on_peak_kwh, off_peak_kwh
+			SELECT day, kwh, cost_cents, on_peak_kwh, off_peak_kwh, high_temp_f, low_temp_f, avg_temp_f
 			  FROM tid_period_readings
 			 WHERE period_start = ? AND period_end = ? ORDER BY day DESC`, storedPeriod.start, storedPeriod.end)
 		if err != nil {
@@ -170,7 +225,8 @@ func (p *Plugin) history(ctx context.Context, h host.Host, limit int) (historyPa
 		var hasOnPeak, hasOffPeak bool
 		for dayRows.Next() {
 			var day dayView
-			if err := dayRows.Scan(&day.Day, &day.KWh, &day.CostCents, &day.OnPeakKWh, &day.OffPeakKWh); err != nil {
+			if err := dayRows.Scan(&day.Day, &day.KWh, &day.CostCents, &day.OnPeakKWh, &day.OffPeakKWh,
+				&day.HighTempF, &day.LowTempF, &day.AvgTempF); err != nil {
 				dayRows.Close()
 				return historyPage{}, err
 			}

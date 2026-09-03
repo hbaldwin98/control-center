@@ -160,7 +160,7 @@ func (p *portal) handler() http.Handler {
 			return
 		}
 		if p.usageCall == 1 {
-			fmt.Fprintf(w, `{"status":"OK","data":{"usageList":[{"costDate":"%s","usage":"12.5","dailyCost":3.25,"onPeakKwh":5.5,"offPeakKwh":7},{"costDate":"%s","usage":"8","dailyCost":2,"onPeakKwh":3,"offPeakKwh":5}],"demandInfo":{"peakDemandDate":"%s","peakDemandKw":7.92}}}`,
+			fmt.Fprintf(w, `{"status":"OK","data":{"usageList":[{"costDate":"%s","usage":"12.5","dailyCost":3.25,"onPeakKwh":5.5,"offPeakKwh":7,"highTemperature":101,"lowTemperature":68},{"costDate":"%s","usage":"8","dailyCost":2,"onPeakKwh":3,"offPeakKwh":5,"highTemperature":88,"lowTemperature":61}],"demandInfo":{"peakDemandDate":"%s","peakDemandKw":7.92}}}`,
 				p.d1, p.d2, p.d2)
 			return
 		}
@@ -199,8 +199,10 @@ func TestCollectsUsageFromPortal(t *testing.T) {
 	// The daily summary carries one row per day the portal reported.
 	var page struct {
 		Days []struct {
-			Day string  `json:"day"`
-			KWh float64 `json:"kwh"`
+			Day       string   `json:"day"`
+			KWh       float64  `json:"kwh"`
+			HighTempF *float64 `json:"highTempF"`
+			LowTempF  *float64 `json:"lowTempF"`
 		} `json:"days"`
 	}
 	h.DecodeJSON(h.GET("/summary"), http.StatusOK, &page)
@@ -213,6 +215,15 @@ func TestCollectsUsageFromPortal(t *testing.T) {
 	}
 	if byDay[p.d0] != 9 || byDay[p.d1] != 12.5 || byDay[p.d2] != 8 {
 		t.Fatalf("summary days = %+v", page.Days)
+	}
+	// The portal reports the day's weather; the insight leans on it, so it has
+	// to survive the round trip through storage.
+	for _, d := range page.Days {
+		if d.Day == p.d1 {
+			if d.HighTempF == nil || *d.HighTempF != 101 || d.LowTempF == nil || *d.LowTempF != 68 {
+				t.Fatalf("summary day %s temperatures = %v/%v, want 101/68", d.Day, d.HighTempF, d.LowTempF)
+			}
+		}
 	}
 
 	// History groups those days into billing periods and keeps the peak demand.
@@ -305,6 +316,9 @@ func TestSyncPublishesLatestReadingAndInsight(t *testing.T) {
 	yesterday, _ := syncPay["yesterday"].(map[string]any)
 	if yesterday == nil || yesterday["day"] != p.d2 || yesterday["kwh"] != 8.0 {
 		t.Fatalf("synced yesterday = %#v, want %s at 8 kWh", syncPay["yesterday"], p.d2)
+	}
+	if yesterday["high_temp_f"] != 88.0 {
+		t.Fatalf("synced yesterday high_temp_f = %v, want 88", yesterday["high_temp_f"])
 	}
 	settled, _ := syncPay["settled"].(map[string]any)
 	if settled == nil || settled["day"] != p.d2 {

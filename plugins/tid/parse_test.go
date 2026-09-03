@@ -64,3 +64,30 @@ func TestParseEmpty(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestParseJSONReadsTemperature(t *testing.T) {
+	in := `{"data":{"usageList":[
+		{"costDate":"2026-08-10","usage":"44.4","dailyCost":4.91,"highTemperature":101,"lowTemperature":"68"},
+		{"costDate":"2026-08-11","usage":"30.0","temperature":72},
+		{"costDate":"2026-08-12","usage":"12.0"}
+	]}}`
+	got := Parse([]byte(in), "application/json")
+	if len(got) != 3 {
+		t.Fatalf("want 3 readings, got %d", len(got))
+	}
+	if got[0].HighTempF == nil || *got[0].HighTempF != 101 {
+		t.Fatalf("high temp: %v", got[0].HighTempF)
+	}
+	if got[0].LowTempF == nil || *got[0].LowTempF != 68 {
+		t.Fatalf("low temp: %v", got[0].LowTempF)
+	}
+	if got[0].AvgTempF == nil || *got[0].AvgTempF != 84.5 {
+		t.Fatalf("avg temp should fall back to the midpoint: %v", got[0].AvgTempF)
+	}
+	if got[1].AvgTempF == nil || *got[1].AvgTempF != 72 {
+		t.Fatalf("bare temperature key: %v", got[1].AvgTempF)
+	}
+	if got[2].HighTempF != nil || got[2].AvgTempF != nil {
+		t.Fatalf("day without weather should carry no temperature")
+	}
+}
