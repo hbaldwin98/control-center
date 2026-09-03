@@ -38,6 +38,7 @@ import type { Activity, PluginModule, UseSnapshotResult } from "@cc/ui";
 import { ConfigForm } from "./ConfigForm";
 import { fieldsFromSchema } from "./configSchema";
 import { PluginAI } from "./PluginAI";
+import { PluginEvents } from "./PluginEvents";
 import { PluginSurface } from "./PluginSurface";
 import {
   BudgetForm,
@@ -324,6 +325,7 @@ function SettingsPane({
   return (
     <>
       <PluginAI state={state} onChanged={onSaved} />
+      <PluginEvents state={state} />
 
       <Card title="Spend">
         <SpendWindows state={state} />

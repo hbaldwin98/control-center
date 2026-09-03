@@ -128,6 +128,9 @@ func TestPluginContract(t *testing.T) {
 	if len(subs) != 1 || subs[0].Pattern != "pagewatch.check.completed" || subs[0].Durable == nil {
 		t.Fatalf("subscriptions = %#v", subs)
 	}
+	if len(manifest.Events) != 2 || manifest.Events[0].Type != "check.completed" || manifest.Events[1].Type != "alert" {
+		t.Fatalf("events = %#v", manifest.Events)
+	}
 
 	m := &captureMigrator{}
 	if err := p.Migrate(m); err != nil {

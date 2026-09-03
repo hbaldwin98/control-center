@@ -211,6 +211,84 @@ func TestRegisterAllRejectsInvalidModelNeeds(t *testing.T) {
 	}
 }
 
+type badEvent struct {
+	*probe
+	events []host.EventSpec
+}
+
+func (p *badEvent) Manifest() host.Manifest {
+	m := p.probe.Manifest()
+	m.Events = p.events
+	return m
+}
+
+func TestRegisterAllRejectsInvalidEventSpecs(t *testing.T) {
+	cases := []struct {
+		name string
+		spec host.EventSpec
+	}{
+		{name: "uppercase type", spec: host.EventSpec{Type: "Ticked", Purpose: "a tick"}},
+		{name: "wildcard type", spec: host.EventSpec{Type: "*.alert", Purpose: "any alert"}},
+		{name: "empty purpose", spec: host.EventSpec{Type: "ticked"}},
+		{name: "unknown field type", spec: host.EventSpec{
+			Type: "ticked", Purpose: "a tick",
+			Fields: []host.EventField{{Name: "at", Type: "datetime", Purpose: "when"}},
+		}},
+		{name: "uppercase field name", spec: host.EventSpec{
+			Type: "ticked", Purpose: "a tick",
+			Fields: []host.EventField{{Name: "At", Type: "string", Purpose: "when"}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "cc.db")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			reg, err := New(ctx, store, Options{DB: store})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := &badEvent{probe: newProbe(), events: []host.EventSpec{tc.spec}}
+			if err := reg.RegisterAll(p); err == nil {
+				t.Fatal("expected invalid event spec rejection")
+			}
+		})
+	}
+}
+
+func TestRegisterAllAcceptsDeclaredEvents(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.Open(ctx, storage.Options{Path: filepath.Join(t.TempDir(), "cc.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	reg, err := New(ctx, store, Options{DB: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &badEvent{probe: newProbe(), events: []host.EventSpec{{
+		Type: "finding.created", Purpose: "A watchlist produced new lots.",
+		Fields: []host.EventField{
+			{Name: "watchlistId", Type: "string", Purpose: "The watchlist that matched."},
+			{Name: "count", Type: "number", Purpose: "How many new findings."},
+		},
+	}}}
+	if err := reg.RegisterAll(p); err != nil {
+		t.Fatal(err)
+	}
+	d, err := reg.Describe("probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Manifest.Events) != 1 || d.Manifest.Events[0].Type != "finding.created" {
+		t.Fatalf("events = %#v", d.Manifest.Events)
+	}
+}
+
 func TestDisabledPluginEnforcementMatrix(t *testing.T) {
 	p := newProbe()
 	f := newFixture(t, p)

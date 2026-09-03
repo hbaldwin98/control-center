@@ -110,7 +110,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | Feature | State | Notes |
 |---|---|---|
 | `host` module: Plugin, Host, Manifest, and capability packages | ✅ | Plugins depend on `host` only; core adapts. |
-| Registration validates all plugins before any migrate or Init | ✅ | Invalid or colliding declarations reject `RegisterAll` as a whole. |
+| Registration validates all plugins before any migrate or Init | ✅ | Invalid or colliding declarations reject `RegisterAll` as a whole. Event specs are validated like model needs. |
 | Scoped facade: identity stamp + L4 admission wrappers | ✅ | `events.Scoped`, `jobs.Scoped`, `ai.Scoped`, `storage.Prefixed` + authorizer. |
 | SQLite authorizer on plugin SQL and migrations | ✅ | Catalog writes for DDL; `core_*` and other namespaces denied. |
 | Lifecycle: migrate while disabled; Init only when enabled | ✅ | Disabled plugins stay behind host 503 / durable discard-ack. |
@@ -124,7 +124,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | Feature | State | Notes |
 |---|---|---|
 | Separate `plugins/hello` module depending only on `host` | ✅ | Registered from `cmd/controlcenter/plugins.go` alone. |
-| Cron tick, AI chat, event, durable handler, SQL, blob, config, browser | ✅ | `hello.ticked` writes `hello_ticks`; UI lists history live. |
+| Cron tick, AI chat, event, durable handler, SQL, blob, config, browser | ✅ | `hello.ticked` writes `hello_ticks`; UI lists history live. Manifest declares the event and payload. |
 | Kill-switch acceptance | ✅ | Cancel running job, skip cron, 503, Chat denied, admitted Chat settles, reads remain. |
 | One-command Docker image | ✅ | `docker compose up --build` — TLS, data volume, generated secrets under `/data`. |
 
@@ -186,7 +186,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Throttle windows collapse same subject; ready after window close | ✅ | Structured uniqueness keys (JSON) |
 | External ntfy / webpush sends with leases, 8 attempts, credential tokens | ✅ | Inbox write never calls out |
 | Creating an ntfy/webpush channel attaches it to `plugin-alert` | ✅ | Deleting the channel removes it from rules. |
-| Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen |
+| Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen. Event catalog lists declared plugin events and default-rule host events. |
 
 ## Milestone 10 — `tid` ✅
 

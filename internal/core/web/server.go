@@ -222,6 +222,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/admin/notifications/channels/{id}", s.authenticated(s.handleNotifChannelPut))
 	s.mux.HandleFunc("DELETE /api/admin/notifications/channels/{id}", s.authenticated(s.handleNotifChannelDelete))
 	s.mux.HandleFunc("GET /api/admin/notifications/health", s.authenticated(s.handleNotifHealth))
+	s.mux.HandleFunc("GET /api/admin/notifications/catalog", s.authenticated(s.handleNotifCatalog))
 
 	s.mux.HandleFunc("/", s.serveStatic)
 }

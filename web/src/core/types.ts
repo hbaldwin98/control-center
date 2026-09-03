@@ -38,6 +38,39 @@ export type PluginState = {
   config?: Record<string, unknown>;
   configSchema?: unknown;
   models?: ModelNeed[];
+  events?: EventSpec[];
+};
+
+export type EventField = {
+  name: string;
+  type: string;
+  purpose: string;
+  path: string;
+};
+
+/** One published event a plugin declared. Type and match are already prefixed. */
+export type EventSpec = {
+  type: string;
+  match: string;
+  purpose: string;
+  fields: EventField[];
+};
+
+export type CatalogEvent = EventSpec & {
+  source: string;
+  name: string;
+};
+
+export type EnvelopeField = {
+  path: string;
+  type: string;
+  purpose: string;
+};
+
+/** `/api/admin/notifications/catalog` — what a rule can match and interpolate. */
+export type EventCatalog = {
+  envelope: EnvelopeField[];
+  events: CatalogEvent[];
 };
 
 export type ModelNeedStatus = "missing" | "ready" | "unhealthy" | "capability_mismatch";

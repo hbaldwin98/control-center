@@ -65,6 +65,9 @@ before migrating or initializing any of them:
 - config schemas use the supported JSON Schema subset and validate their defaults
 - declared AI model names are valid route names, unique per plugin, have a purpose, and
   use only known capabilities (`chat`, `vision`, `grounding`, `embed`)
+- declared event types are unprefixed segment names (`ticked`, `finding.created`), unique
+  per plugin, have a purpose, and name payload fields with a closed type set (`string`,
+  `number`, `boolean`, `string[]`)
 - route, job, and subscription declarations do not collide
 
 Declarations must be readable before `Init`; handlers are not invoked during

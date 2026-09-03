@@ -216,6 +216,19 @@ func TestPluginContract(t *testing.T) {
 	if len(m.Models) != 5 || m.Models[4].Name != "watch-judge" || m.Models[2].Name != "intent-expand" || m.Models[2].Capabilities[0] != "chat" || m.Models[3].Name != "intent-match" || m.Models[3].Capabilities[0] != "embed" {
 		t.Fatalf("models = %#v", m.Models)
 	}
+	if len(m.Events) == 0 {
+		t.Fatal("manifest declares no events")
+	}
+	var alert bool
+	for _, e := range m.Events {
+		if e.Type == "alert" {
+			alert = true
+			break
+		}
+	}
+	if !alert {
+		t.Fatalf("events = %#v, want alert", m.Events)
+	}
 }
 
 type captureMigrator struct{ migrations []host.Migration }

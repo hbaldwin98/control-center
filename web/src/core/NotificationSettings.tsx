@@ -16,7 +16,9 @@ import {
   Textarea,
   api,
   useSnapshot,
+  type UseSnapshotResult,
 } from "@cc/ui";
+import type { CatalogEvent, EventCatalog } from "./types";
 
 type Rule = {
   id: string;
@@ -228,6 +230,18 @@ function RuleForm({ onChanged }: { onChanged: () => void }) {
   const [body, setBody] = useState("{event.subject}");
   const [channels, setChannels] = useState("inbox");
   const [error, setError] = useState<string | null>(null);
+  const catalog = useSnapshot<EventCatalog>(
+    useCallback((signal) => api.snapshot<EventCatalog>("/api/admin/notifications/catalog", { signal }), []),
+  );
+
+  const insertPath = (path: string) => {
+    setBody((cur) => {
+      const token = `{${path}}`;
+      if (!cur.trim()) return token;
+      if (cur.includes(token)) return cur;
+      return `${cur} ${token}`;
+    });
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -251,29 +265,134 @@ function RuleForm({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
-    <Card title="Add rule">
-      <form onSubmit={submit}>
-        <Stack>
-          {error ? <Callout tone="danger">{error}</Callout> : null}
-          <Field label="Id">
-            <Input value={id} onChange={(e) => setId(e.target.value)} required />
-          </Field>
-          <Field label="Match">
-            <Input value={match} onChange={(e) => setMatch(e.target.value)} required />
-          </Field>
-          <Field label="Title">
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
-          </Field>
-          <Field label="Body">
-            <Textarea value={body} onChange={(e) => setBody(e.target.value)} />
-          </Field>
-          <Field label="Channels" hint="Comma-separated channel ids.">
-            <Input value={channels} onChange={(e) => setChannels(e.target.value)} required />
-          </Field>
-          <Button type="submit">Save rule</Button>
-        </Stack>
-      </form>
+    <Stack>
+      <CatalogCard catalog={catalog} onUseMatch={setMatch} onInsertPath={insertPath} />
+      <Card title="Add rule">
+        <form onSubmit={submit}>
+          <Stack>
+            {error ? <Callout tone="danger">{error}</Callout> : null}
+            <Field label="Id">
+              <Input value={id} onChange={(e) => setId(e.target.value)} required />
+            </Field>
+            <Field label="Match">
+              <Input value={match} onChange={(e) => setMatch(e.target.value)} required />
+            </Field>
+            <Field label="Title">
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+            </Field>
+            <Field label="Body">
+              <Textarea value={body} onChange={(e) => setBody(e.target.value)} />
+            </Field>
+            <Field label="Channels" hint="Comma-separated channel ids.">
+              <Input value={channels} onChange={(e) => setChannels(e.target.value)} required />
+            </Field>
+            <Button type="submit">Save rule</Button>
+          </Stack>
+        </form>
+      </Card>
+    </Stack>
+  );
+}
+
+function CatalogCard({
+  catalog,
+  onUseMatch,
+  onInsertPath,
+}: {
+  catalog: UseSnapshotResult<EventCatalog>;
+  onUseMatch: (match: string) => void;
+  onInsertPath: (path: string) => void;
+}) {
+  return (
+    <Card title="Event catalog">
+      <Stack>
+        <Hint>
+          Plugins declare the events they publish. Match is what a rule's Match field
+          accepts. Insert a payload path into Body — templates only interpolate flat keys
+          such as <code>{"{event.payload.body}"}</code>.
+        </Hint>
+        <Async state={catalog} loading="Loading events…" empty="No events declared." isEmpty={(c) => c.events.length === 0}>
+          {(cat) => (
+            <Stack>
+              <Hint>
+                Every event also has{" "}
+                {cat.envelope.map((f, i) => (
+                  <span key={f.path}>
+                    {i > 0 ? ", " : ""}
+                    <Button type="button" size="sm" onClick={() => onInsertPath(f.path)}>
+                      {`{${f.path}}`}
+                    </Button>
+                  </span>
+                ))}
+                .
+              </Hint>
+              {groupedEvents(cat.events).map((g) => (
+                <Card key={g.source} muted title={g.name} actions={<code className="cc-hint">{g.source}</code>}>
+                  <Stack>
+                    {g.events.map((ev) => (
+                      <CatalogEventRow
+                        key={ev.type}
+                        event={ev}
+                        onUseMatch={onUseMatch}
+                        onInsertPath={onInsertPath}
+                      />
+                    ))}
+                  </Stack>
+                </Card>
+              ))}
+            </Stack>
+          )}
+        </Async>
+      </Stack>
     </Card>
+  );
+}
+
+function groupedEvents(events: CatalogEvent[]) {
+  const order: string[] = [];
+  const by = new Map<string, CatalogEvent[]>();
+  for (const ev of events) {
+    const list = by.get(ev.source);
+    if (!list) {
+      order.push(ev.source);
+      by.set(ev.source, [ev]);
+    } else {
+      list.push(ev);
+    }
+  }
+  return order.map((source) => ({
+    source,
+    name: by.get(source)?.[0]?.name ?? source,
+    events: by.get(source) ?? [],
+  }));
+}
+
+function CatalogEventRow({
+  event,
+  onUseMatch,
+  onInsertPath,
+}: {
+  event: CatalogEvent;
+  onUseMatch: (match: string) => void;
+  onInsertPath: (path: string) => void;
+}) {
+  return (
+    <Stack>
+      <Row>
+        <Button type="button" size="sm" onClick={() => onUseMatch(event.match)}>
+          {event.match}
+        </Button>
+        <Hint>{event.purpose}</Hint>
+      </Row>
+      {event.fields?.map((f) => (
+        <Hint key={f.name}>
+          <Button type="button" size="sm" onClick={() => onInsertPath(f.path)}>
+            {`{${f.path}}`}
+          </Button>
+          {` · ${f.type} · ${f.purpose}`}
+        </Hint>
+      ))}
+    </Stack>
   );
 }
 

@@ -109,6 +109,80 @@ func validateModelNeeds(pluginID string, needs []host.ModelNeed) error {
 	return nil
 }
 
+var knownEventFieldTypes = map[string]struct{}{
+	"string":   {},
+	"number":   {},
+	"boolean":  {},
+	"string[]": {},
+}
+
+func validateEventSpecs(pluginID string, specs []host.EventSpec) error {
+	seen := map[string]struct{}{}
+	for i, s := range specs {
+		if !validEventType(s.Type) {
+			return fmt.Errorf("%w: %s events[%d] type %q", ErrInvalidPlugin, pluginID, i, s.Type)
+		}
+		if _, dup := seen[s.Type]; dup {
+			return fmt.Errorf("%w: %s duplicate event %q", ErrInvalidPlugin, pluginID, s.Type)
+		}
+		seen[s.Type] = struct{}{}
+		purpose := strings.TrimSpace(s.Purpose)
+		if purpose == "" || len(purpose) > 200 {
+			return fmt.Errorf("%w: %s event %q needs a purpose of 1..200 characters", ErrInvalidPlugin, pluginID, s.Type)
+		}
+		seenField := map[string]struct{}{}
+		for j, f := range s.Fields {
+			if !validFieldName(f.Name) {
+				return fmt.Errorf("%w: %s event %q fields[%d] name %q", ErrInvalidPlugin, pluginID, s.Type, j, f.Name)
+			}
+			if _, dup := seenField[f.Name]; dup {
+				return fmt.Errorf("%w: %s event %q duplicate field %q", ErrInvalidPlugin, pluginID, s.Type, f.Name)
+			}
+			seenField[f.Name] = struct{}{}
+			if _, ok := knownEventFieldTypes[f.Type]; !ok {
+				return fmt.Errorf("%w: %s event %q field %q type %q", ErrInvalidPlugin, pluginID, s.Type, f.Name, f.Type)
+			}
+			fieldPurpose := strings.TrimSpace(f.Purpose)
+			if fieldPurpose == "" || len(fieldPurpose) > 200 {
+				return fmt.Errorf("%w: %s event %q field %q needs a purpose of 1..200 characters", ErrInvalidPlugin, pluginID, s.Type, f.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// validEventType is one or more [a-z][a-z0-9_]* segments joined by dots, unprefixed.
+// "ticked" and "finding.created" are valid; wildcards and uppercase are not.
+func validEventType(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, seg := range strings.Split(s, ".") {
+		if !validName(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+// validFieldName is a JSON object key: lowercase start, then letters or digits.
+func validFieldName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	if s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func parseRoutePattern(pattern string) (method, path string, err error) {
 	pattern = strings.TrimSpace(pattern)
 	method, path, ok := strings.Cut(pattern, " ")

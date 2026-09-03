@@ -83,6 +83,7 @@ func (p *Plugin) Manifest() host.Manifest {
 				Purpose:      "Decide whether a ranked candidate is really the thing a watchlist asked for, from its text alone.",
 			},
 		},
+		Events: publishedEvents(),
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
 				"type":"object",

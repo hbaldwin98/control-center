@@ -57,6 +57,13 @@ type Manifest struct {
 	// them is how the UI knows what to ask for instead of hoping the names match.
 	Models []ModelNeed
 
+	// Events are the types this plugin publishes. Type is unprefixed ("synced",
+	// "finding.created"); the host stamps the plugin ID on publish, so the match
+	// string is "<id>.<type>". Declaring them is how the operator UI lists what
+	// can be subscribed to and which payload fields a notification template can
+	// interpolate. Publish does not require a declaration.
+	Events []EventSpec
+
 	Config ConfigSpec
 }
 
@@ -67,6 +74,22 @@ type ModelNeed struct {
 	Name         string
 	Capabilities []string
 	Purpose      string
+}
+
+// EventSpec is one published event type. Fields describe the JSON object payload
+// so a notification rule can use {event.payload.<name>} without guessing.
+type EventSpec struct {
+	Type    string
+	Purpose string
+	Fields  []EventField
+}
+
+// EventField is one key on a published payload. Type is a closed set: string,
+// number, boolean, string[].
+type EventField struct {
+	Name    string
+	Type    string
+	Purpose string
 }
 
 // ConfigSpec is the closed JSON Schema 2020-12 subset the host validates and renders.

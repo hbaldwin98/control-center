@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/hbaldwin98/control-center/host"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
 	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
 
@@ -152,5 +154,51 @@ func TestBootstrapDoesNotListPolicyPlugins(t *testing.T) {
 	// Policy registration is not pluginhost registration.
 	if len(snap.Data.Plugins) != 0 {
 		t.Fatalf("bootstrap plugins = %+v, want empty until pluginhost", snap.Data.Plugins)
+	}
+}
+
+func TestPluginListIncludesDeclaredEvents(t *testing.T) {
+	h, _ := newPolicyHarness(t)
+	h.bootstrapAdmin()
+
+	reg, err := pluginhost.New(context.Background(), h.store, pluginhost.Options{
+		DB: h.store, Policy: h.server.deps.Policy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterAll(&modelPlugin{
+		id: "fixture",
+		events: []host.EventSpec{{
+			Type: "synced", Purpose: "A collection finished.",
+			Fields: []host.EventField{
+				{Name: "day", Type: "string", Purpose: "Latest calendar day."},
+				{Name: "body", Type: "string", Purpose: "One-line reading."},
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.server.deps.PluginHost = reg
+
+	rec := h.do(http.MethodGet, "/api/admin/plugins", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body)
+	}
+	var snap struct {
+		Data []pluginView `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Data) != 1 || len(snap.Data[0].Events) != 1 {
+		t.Fatalf("plugins = %+v", snap.Data)
+	}
+	ev := snap.Data[0].Events[0]
+	if ev.Type != "fixture.synced" || ev.Match != "fixture.synced" || ev.Purpose == "" {
+		t.Fatalf("event = %+v", ev)
+	}
+	if len(ev.Fields) != 2 || ev.Fields[0].Path != "event.payload.day" || ev.Fields[1].Name != "body" {
+		t.Fatalf("fields = %+v", ev.Fields)
 	}
 }

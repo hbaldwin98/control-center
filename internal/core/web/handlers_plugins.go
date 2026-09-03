@@ -23,6 +23,7 @@ type pluginView struct {
 	Config       json.RawMessage   `json:"config,omitempty"`
 	ConfigSchema json.RawMessage   `json:"configSchema,omitempty"`
 	Models       []modelNeedView   `json:"models,omitempty"`
+	Events       []eventSpecView   `json:"events,omitempty"`
 }
 
 // handlePluginList returns every registered plugin's state, budget, live spend, and
@@ -45,6 +46,7 @@ func (s *Server) handlePluginList(w http.ResponseWriter, r *http.Request) {
 				State: d.State, Name: d.Manifest.Name, Description: d.Manifest.Description,
 				Health: d.Health, Jobs: d.Jobs, ConfigSchema: d.Manifest.Config.Schema,
 				Models: bindModelNeeds(d.Manifest.Models, routes),
+				Events: bindEventSpecs(d.Manifest.ID, d.Manifest.Events),
 			}
 			if raw, err := s.deps.PluginHost.GetConfig(r.Context(), d.Manifest.ID); err == nil {
 				v.Config = raw

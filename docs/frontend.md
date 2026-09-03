@@ -202,14 +202,14 @@ affected resource rather than reconstructing it from partial event payloads.
 | Screen | Shows |
 |---|---|
 | Dashboard | one live tile per plugin in a grid, plus totals, running jobs, and recent alerts |
-| Plugin detail | one plugin: overview (status, its surface, jobs) and a settings tab for AI, budget, config, kill switch |
+| Plugin detail | one plugin: overview (status, its surface, jobs) and a settings tab for AI, declared events, budget, config, kill switch |
 | Plugins | a card per plugin; click through to that plugin's overview |
 | Jobs | queue, history, per-job progress and logs, cancel; filterable by plugin from the URL |
 | Events | live event log, filterable by pattern, shortcuts for plugin/job/AI/browser/alerts |
 | Costs | spend by plugin → job → logical model, over time |
 | Models | connect a provider, then pick a model for each name plugins declared; advanced fallbacks below |
 | Inbox | rule-matched notifications, mark-read, links into the rest of the shell |
-| Settings | credentials (with re-auth), API keys, OAuth logins, notification rules and channels. Keys are not enough: connect them as a provider under Models. |
+| Settings | credentials (with re-auth), API keys, OAuth logins, notification rules, channels, and the event catalog (match strings and payload paths plugins declared). Keys are not enough: connect them as a provider under Models. |
 
 The dashboard is a grid of plugin tiles. Each tile carries the plugin's current state
 (running beats leftover failed jobs), what it has spent today against its daily budget,
@@ -218,7 +218,7 @@ contributed. Tiles are clipped to the grid so long plugin output cannot shove th
 sideways. Clicking one opens `/plugins/<id>`.
 
 `/plugins/<id>` is the overview: status, the plugin's own surface, recent jobs. Administration
-— AI setup, spend, budgets, schema-backed config, and the kill switch — lives on
+— AI setup, declared events, spend, budgets, schema-backed config, and the kill switch — lives on
 `/plugins/<id>/settings`, so an operator who drilled in from a tile sees the plugin first
 and can still turn it off without navigating back to a list.
 

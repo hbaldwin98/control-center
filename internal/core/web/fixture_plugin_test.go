@@ -16,6 +16,7 @@ import (
 type modelPlugin struct {
 	id     string
 	models []host.ModelNeed
+	events []host.EventSpec
 }
 
 func (p *modelPlugin) Manifest() host.Manifest {
@@ -23,6 +24,7 @@ func (p *modelPlugin) Manifest() host.Manifest {
 		ID:     p.id,
 		Name:   "Fixture",
 		Models: p.models,
+		Events: p.events,
 	}
 }
 

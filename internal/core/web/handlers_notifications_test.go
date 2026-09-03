@@ -3,11 +3,15 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/hbaldwin98/control-center/host"
 	"github.com/hbaldwin98/control-center/internal/core/events"
 	"github.com/hbaldwin98/control-center/internal/core/notifications"
+	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
+	"github.com/hbaldwin98/control-center/internal/core/policy"
 )
 
 func TestInboxListsDefaultRuleMatch(t *testing.T) {
@@ -61,4 +65,61 @@ func TestInboxListsDefaultRuleMatch(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("inbox never populated")
+}
+
+func TestNotificationCatalogListsCoreAndPluginEvents(t *testing.T) {
+	h := newHarness(t)
+	h.bootstrapAdmin()
+
+	pol, err := policy.New(h.store, h.store, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := pluginhost.New(context.Background(), h.store, pluginhost.Options{
+		DB: h.store, Policy: pol,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterAll(&modelPlugin{
+		id: "fixture",
+		events: []host.EventSpec{{
+			Type: "synced", Purpose: "A collection finished.",
+			Fields: []host.EventField{{Name: "body", Type: "string", Purpose: "One-line reading."}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.server.deps.PluginHost = reg
+
+	rec := h.do(http.MethodGet, "/api/admin/notifications/catalog", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("catalog: %d %s", rec.Code, rec.Body)
+	}
+	var snap struct {
+		Data eventCatalog `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Data.Envelope) == 0 {
+		t.Fatal("catalog is missing envelope paths")
+	}
+	var sawAlert, sawDead, sawPlugin bool
+	for _, ev := range snap.Data.Events {
+		switch ev.Match {
+		case "*.alert":
+			sawAlert = true
+		case events.TypeJobDead:
+			sawDead = true
+		case "fixture.synced":
+			sawPlugin = ev.Source == "fixture" && ev.Name == "Fixture"
+			if len(ev.Fields) != 1 || ev.Fields[0].Path != "event.payload.body" {
+				t.Fatalf("plugin fields = %+v", ev.Fields)
+			}
+		}
+	}
+	if !sawAlert || !sawDead || !sawPlugin {
+		t.Fatalf("catalog events = %+v", snap.Data.Events)
+	}
 }

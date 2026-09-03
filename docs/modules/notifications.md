@@ -206,6 +206,14 @@ the headline in the subject and details in `payload.body` reaches both the inbox
 attached ntfy topic without a custom rule. The administrator may add external channels to
 any other rule.
 
+Plugins declare the events they publish on `Manifest.Events`. `GET /api/admin/notifications/catalog`
+returns those types already prefixed (`tid.synced`), each payload field as an interpolable
+path (`event.payload.body`), the envelope paths every template can use (`event.type`,
+`event.subject`, `event.source`, `event.id`, `collapsed`), and the host events the default
+rules already match. Settings renders that catalog next to the rule form so Match and Body
+are filled from the declaration rather than remembered. Publish does not require a
+declaration; an undeclared type still delivers, it just does not appear in the catalog.
+
 ---
 
 ## Tables

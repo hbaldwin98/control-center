@@ -55,6 +55,16 @@ func (p *matrixPlugin) Manifest() host.Manifest {
 			Capabilities: []string{"chat"},
 			Purpose:      "One tiny chat call per tick.",
 		}},
+		Events: []host.EventSpec{{
+			Type:    "ticked",
+			Purpose: "The fixture tick finished.",
+			Fields: []host.EventField{
+				{Name: "at", Type: "string", Purpose: "RFC3339Nano time of the tick."},
+				{Name: "note", Type: "string", Purpose: "Configured note."},
+				{Name: "blobKey", Type: "string", Purpose: "Blob written during the tick."},
+				{Name: "aiText", Type: "string", Purpose: "Reply from cheap-chat, empty if the call failed."},
+			},
+		}},
 		Config: host.ConfigSpec{
 			Schema:   json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"}}}`),
 			Defaults: json.RawMessage(`{"note":"default"}`),

@@ -5,7 +5,7 @@
  * sees a shape the server could not send. Overrides are shallow and per-field, which is
  * enough for the branches these tests reach.
  */
-import type { Budget, Job, ModelNeed, PluginState } from "../types";
+import type { Budget, EventCatalog, EventSpec, Job, ModelNeed, PluginState } from "../types";
 
 /**
  * The only runtime values the host emits (`internal/core/pluginhost/pluginhost.go`).
@@ -41,6 +41,7 @@ export function pluginState(over: Partial<PluginState> = {}): PluginState {
     description: "A sample plugin",
     health: { desiredEnabled: true, runtime: "enabled", lastError: "" },
     models: [],
+    events: [],
     ...over,
   };
 }
@@ -54,6 +55,41 @@ export function modelNeed(over: Partial<ModelNeed> = {}): ModelNeed {
     healthy: true,
     provider: "openai",
     model: "gpt-4o-mini",
+    ...over,
+  };
+}
+
+export function eventSpec(over: Partial<EventSpec> = {}): EventSpec {
+  return {
+    type: "hello.ticked",
+    match: "hello.ticked",
+    purpose: "The cron tick finished.",
+    fields: [
+      { name: "note", type: "string", purpose: "Configured note.", path: "event.payload.note" },
+    ],
+    ...over,
+  };
+}
+
+export function eventCatalog(over: Partial<EventCatalog> = {}): EventCatalog {
+  return {
+    envelope: [
+      { path: "event.type", type: "string", purpose: "Fully qualified type." },
+      { path: "event.subject", type: "string", purpose: "Stable entity id or a short headline." },
+    ],
+    events: [
+      {
+        source: "tid",
+        name: "TID",
+        type: "tid.synced",
+        match: "tid.synced",
+        purpose: "A collection finished.",
+        fields: [
+          { name: "body", type: "string", purpose: "One-line reading.", path: "event.payload.body" },
+          { name: "day", type: "string", purpose: "Latest calendar day.", path: "event.payload.day" },
+        ],
+      },
+    ],
     ...over,
   };
 }

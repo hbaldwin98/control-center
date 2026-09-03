@@ -38,6 +38,16 @@ func (p *Plugin) Manifest() host.Manifest {
 			Capabilities: []string{"chat"},
 			Purpose:      "A tiny chat call on every tick.",
 		}},
+		Events: []host.EventSpec{{
+			Type:    "ticked",
+			Purpose: "The cron tick finished. One row in hello_ticks.",
+			Fields: []host.EventField{
+				{Name: "at", Type: "string", Purpose: "RFC3339Nano time of the tick."},
+				{Name: "note", Type: "string", Purpose: "The configured note recorded with the tick."},
+				{Name: "blobKey", Type: "string", Purpose: "Blob written during the tick."},
+				{Name: "aiText", Type: "string", Purpose: "Reply from cheap-chat, empty if the call failed."},
+			},
+		}},
 		Config: host.ConfigSpec{
 			Schema: json.RawMessage(`{
 				"type":"object",

@@ -18,7 +18,7 @@ import { Plugins } from "./Plugins";
 import { Settings } from "./Settings";
 import { Sessions } from "./Sessions";
 import { setupHarness, fill } from "./testing/harness";
-import { job, notification, pluginState, snapshot, storedCredential } from "./testing/fixtures";
+import { job, notification, pluginState, snapshot, storedCredential, eventCatalog, eventSpec } from "./testing/fixtures";
 
 const h = setupHarness();
 
@@ -262,6 +262,18 @@ describe("PluginDetail", () => {
     expect(h.text()).toContain("cheap-chat");
   });
 
+  it("renders a plugin that declares events", async () => {
+    serve([
+      pluginState({
+        pluginId: "hello",
+        events: [eventSpec({ match: "hello.ticked", purpose: "The cron tick finished." })],
+      }),
+    ]);
+    await atSettings("hello");
+    expect(h.text()).toContain("hello.ticked");
+    expect(h.text()).toContain("{event.payload.note}");
+  });
+
   it("survives both endpoints failing", async () => {
     serve();
     h.failures.set("/api/admin/plugins", 500);
@@ -384,11 +396,12 @@ describe("Events", () => {
 
 describe("NotificationSettings", () => {
   const serve = (
-    opts: { rules?: unknown[]; channels?: unknown[]; health?: unknown[] } = {},
+    opts: { rules?: unknown[]; channels?: unknown[]; health?: unknown[]; catalog?: unknown } = {},
   ) => {
     h.routes.set("/api/admin/notifications/rules", snapshot(opts.rules ?? [rule()]));
     h.routes.set("/api/admin/notifications/channels", snapshot(opts.channels ?? [channel()]));
     h.routes.set("/api/admin/notifications/health", snapshot(opts.health ?? []));
+    h.routes.set("/api/admin/notifications/catalog", snapshot(opts.catalog ?? eventCatalog()));
   };
 
   it("lists rules and channels", async () => {
@@ -396,6 +409,22 @@ describe("NotificationSettings", () => {
     await h.render(<NotificationSettings />);
     expect(h.text()).toContain("A job failed");
     expect(h.text()).toContain("plugin-alert");
+  });
+
+  it("lists declared events and their payload paths", async () => {
+    serve();
+    await h.render(<NotificationSettings />);
+    expect(h.text()).toContain("tid.synced");
+    expect(h.text()).toContain("{event.payload.body}");
+    expect(h.text()).toContain("A collection finished.");
+  });
+
+  it("fills match from a catalog event", async () => {
+    serve();
+    await h.render(<NotificationSettings />);
+    expect(await h.click("tid.synced")).toBe(true);
+    const values = [...h.container.querySelectorAll("input")].map((el) => (el as HTMLInputElement).value);
+    expect(values).toContain("tid.synced");
   });
 
   it("shows a channel's health when the host reported a failure", async () => {
@@ -420,6 +449,7 @@ describe("NotificationSettings", () => {
       "/api/admin/notifications/rules",
       "/api/admin/notifications/channels",
       "/api/admin/notifications/health",
+      "/api/admin/notifications/catalog",
     ]) {
       h.failures.set(p, 500);
     }

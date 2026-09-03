@@ -82,6 +82,13 @@ type Manifest struct {
     // one at a provider model. The host does not create the routes for you.
     Models []ModelNeed
 
+    // Events are the types this plugin publishes. Type is unprefixed ("synced",
+    // "finding.created"); the host stamps the plugin ID, so the match string is
+    // "<id>.<type>". Declaring them is how Settings lists what a rule can match
+    // and which payload fields a template can interpolate. Publish does not
+    // require a declaration.
+    Events []EventSpec
+
     Config ConfigSpec
 }
 
@@ -89,6 +96,18 @@ type ModelNeed struct {
     Name         string   // "cheap-vision"; must match ChatRequest.Model
     Capabilities []string // chat, vision, grounding, embed
     Purpose      string   // shown in the UI: "Identify lots from photographs."
+}
+
+type EventSpec struct {
+    Type    string       // "ticked", "finding.created" — not the prefixed form
+    Purpose string       // shown in the UI: "A watchlist produced new lots."
+    Fields  []EventField
+}
+
+type EventField struct {
+    Name    string // JSON key: "body", "watchlistId"
+    Type    string // string, number, boolean, or string[]
+    Purpose string // "One-line reading for a notification."
 }
 
 type ConfigSpec struct {
@@ -414,6 +433,12 @@ err := h.Store().Tx(ctx, func(tx storage.Tx) error {
 both changes; commit makes both visible. Never update state and publish in separate
 transactions when consumers depend on them being consistent.
 
+Declare every type you expect someone to write a rule against on `Manifest.Events`.
+The Plugins settings tab and Settings → notifications catalog show the prefixed match
+string (`tid.synced`) and each payload field as `{event.payload.body}`. The host does
+not refuse an undeclared `Publish`; the catalog is how the operator knows the shape
+instead of guessing.
+
 **To notify the user, publish an event — do not look for a notify API.** The user writes a
 rule against your event type. For the case where you genuinely want to reach them without
 any configuration, publish `<plugin>.alert`, which has a default rule. Put the headline in
@@ -469,7 +494,7 @@ It exercises every host capability and nothing else:
 |---|---|
 | Jobs | a cron job every minute |
 | AI | one tiny `Chat` call, so cost attribution has a live source |
-| Events | publishes `hello.ticked` |
+| Events | publishes `hello.ticked`; declares that type and its payload on the manifest |
 | Subscriptions | a durable subscription to its own event |
 | Store | one table recording ticks |
 | Blobs | writes and reads one small blob |
