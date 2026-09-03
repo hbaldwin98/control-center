@@ -2662,9 +2662,27 @@ function AuctionView() {
       <PageHeader
         title={auction?.title ?? "Auction"}
         lede={auction ? undefined : "Auction"}
-        actions={
-          <div className="bidrl-actions">
-            <LiveDot status={live.status} />
+        actions={<LiveDot status={live.status} />}
+      />
+      <Stack>
+        <BidrlTabs />
+        <div className="bidrl-crumbs">
+          <Link to="/bidrl/auctions">Auctions</Link>
+          <span className="bidrl-crumbs__spacer" />
+          {auction?.url ? <BidrlLink href={auction.url} /> : null}
+        </div>
+        <Notices message={notice} error={error} disabled={disabled} />
+        {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
+        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
+        {auction ? (
+          <Grid density="metric">
+            <Metric label="Lots" value={String(auction.lotCount)} />
+            <Metric label="Status" value={auction.status} />
+            <Metric label="Ends" value={auction.endsAt ? <Countdown iso={auction.endsAt} /> : <Dash />} />
+          </Grid>
+        ) : null}
+        <div className="bidrl-command">
+          <div className="bidrl-command__jobs">
             <Button
               variant="primary"
               disabled={disabled || pending}
@@ -2684,25 +2702,11 @@ function AuctionView() {
             >
               {busy === "refresh" ? "Queueing…" : "Refresh bids"}
             </Button>
-            <Button variant="danger" disabled={disabled || pending} onClick={() => void remove()}>
-              {deleting ? "Deleting…" : "Delete"}
-            </Button>
-            {auction?.url ? <BidrlLink href={auction.url} /> : null}
           </div>
-        }
-      />
-      <Stack>
-        <BidrlTabs />
-        <Notices message={notice} error={error} disabled={disabled} />
-        {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
-        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
-        {auction ? (
-          <Grid density="metric">
-            <Metric label="Lots" value={String(auction.lotCount)} />
-            <Metric label="Status" value={auction.status} />
-            <Metric label="Ends" value={auction.endsAt ? <Countdown iso={auction.endsAt} /> : <Dash />} />
-          </Grid>
-        ) : null}
+          <Button variant="danger" disabled={disabled || pending} onClick={() => void remove()}>
+            {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
         {snap.status === "ready" ? (
           <Card title="Lots" actions={<ViewToggle value={view} onChange={setView} />}>
             <LotBrowser
@@ -2736,34 +2740,7 @@ function LotView() {
       <PageHeader
         title={lot?.title ?? "Lot"}
         lede={lot?.lotCode ? `Lot ${lot.lotCode}` : undefined}
-        actions={
-          <div className="bidrl-actions">
-            <LiveDot status={live.status} />
-            <Button
-              variant="primary"
-              disabled={disabled || busy !== null || (lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode")}
-              title={
-                lot != null && lot.basis !== "exact_text" && lot.basis !== "barcode"
-                  ? "Repricing needs a model or barcode read from a photo. Enrich first."
-                  : undefined
-              }
-              onClick={() =>
-                void run("reprice", "Reprice", () => api.post(`/lots/${encodeURIComponent(id)}/reprice`))
-              }
-            >
-              {busy === "reprice" ? "Queueing…" : "Reprice"}
-            </Button>
-            <Button
-              disabled={disabled || busy !== null}
-              onClick={() =>
-                void run("enrich", "Enrich", () => api.post(`/lots/${encodeURIComponent(id)}/enrich`))
-              }
-            >
-              {busy === "enrich" ? "Queueing…" : "Enrich"}
-            </Button>
-            {lot?.url ? <BidrlLink href={lot.url} /> : null}
-          </div>
-        }
+        actions={<LiveDot status={live.status} />}
       />
       <Stack>
         <BidrlTabs />
@@ -2774,6 +2751,12 @@ function LotView() {
             <Link to={`/bidrl/auction/${encodeURIComponent(lot.auctionId)}`}>
               {siblings.title || "Auction"}
             </Link>
+            {lot.url ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <BidrlLink href={lot.url} />
+              </>
+            ) : null}
             <span className="bidrl-crumbs__spacer" />
             {neighbours.prev ? (
               <Link to={`/bidrl/lot/${encodeURIComponent(neighbours.prev.id)}`}>← Previous lot</Link>
@@ -2822,6 +2805,32 @@ function LotView() {
                 }
               />
             </Grid>
+            <div className="bidrl-command">
+              <div className="bidrl-command__jobs">
+                <Button
+                  variant="primary"
+                  disabled={disabled || busy !== null || (lot.basis !== "exact_text" && lot.basis !== "barcode")}
+                  title={
+                    lot.basis !== "exact_text" && lot.basis !== "barcode"
+                      ? "Repricing needs a model or barcode read from a photo. Enrich first."
+                      : undefined
+                  }
+                  onClick={() =>
+                    void run("reprice", "Reprice", () => api.post(`/lots/${encodeURIComponent(id)}/reprice`))
+                  }
+                >
+                  {busy === "reprice" ? "Queueing…" : "Reprice"}
+                </Button>
+                <Button
+                  disabled={disabled || busy !== null}
+                  onClick={() =>
+                    void run("enrich", "Enrich", () => api.post(`/lots/${encodeURIComponent(id)}/enrich`))
+                  }
+                >
+                  {busy === "enrich" ? "Queueing…" : "Enrich"}
+                </Button>
+              </div>
+            </div>
             {lot.photoUrls && lot.photoUrls.length > 0 ? (
               <LotPhotos key={lot.id} urls={lot.photoUrls} />
             ) : null}

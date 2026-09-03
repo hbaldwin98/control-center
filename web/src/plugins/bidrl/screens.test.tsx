@@ -98,7 +98,7 @@ const routes = new Map<string, unknown>([
   }],
   ["/api/plugins/bidrl/feed", { filter: "deals", q: "", lots: [lot()], latestEventId: 1 }],
   ["/api/plugins/bidrl/auctions", { auctions: [{ id: "42", title: "Test Warehouse", status: "open", lotCount: 3, url: "", endsAt: "", city: "Turlock", affiliateName: "SITES" }], latestEventId: 1 }],
-  ["/api/plugins/bidrl/auctions/42", { auction: { id: "42", title: "Test Warehouse", status: "open", lotCount: 1 }, lots: [lot()], latestEventId: 1 }],
+  ["/api/plugins/bidrl/auctions/42", { auction: { id: "42", title: "Test Warehouse", status: "open", lotCount: 1, url: "https://www.bidrl.com/auction/42" }, lots: [lot()], latestEventId: 1 }],
   ["/api/plugins/bidrl/auctions/42/index", { title: "Test Warehouse", lots: [{ id: "1001", lotCode: "A1", title: "Keurig coffee maker" }], latestEventId: 1 }],
   ["/api/plugins/bidrl/lots/1001", { ...lot(), photoUrls: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/intent", { search: null, lots: [], latestEventId: 1 }],
@@ -444,6 +444,46 @@ describe("bidrl screens", () => {
   it("keeps a lot's detail screen under the Lots tab rather than blanking the strip", async () => {
     await renderAt("/bidrl/lot/1001");
     expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
+  });
+
+  // The heading used to hold Scan, Refresh, Delete, and Open on BidRL in one right-hand
+  // pile that could not wrap. Jobs live in a full-width command row; the origin link is
+  // a crumb, not a fourth button.
+  it("keeps auction jobs out of the page heading", async () => {
+    await renderAt("/bidrl/auction/42");
+    const header = container.querySelector(".cc-page__header");
+    const commands = container.querySelector(".bidrl-command");
+    expect(header?.textContent).not.toContain("Scan");
+    expect(header?.textContent).not.toContain("Refresh bids");
+    expect(header?.textContent).not.toContain("Delete");
+    expect(header?.textContent).not.toContain("Open on BidRL");
+    expect(commands?.textContent).toContain("Scan");
+    expect(commands?.textContent).toContain("Refresh bids");
+    expect(commands?.textContent).toContain("Delete");
+    const origin = [...container.querySelectorAll<HTMLAnchorElement>("a")].find(
+      (a) => a.textContent === "Open on BidRL",
+    );
+    expect(origin?.closest(".bidrl-crumbs")).not.toBeNull();
+    expect(origin?.closest(".cc-page__header")).toBeNull();
+    expect(origin?.getAttribute("href")).toBe("https://www.bidrl.com/auction/42");
+  });
+
+  it("queues a scan from the auction command row", async () => {
+    await renderAt("/bidrl/auction/42");
+    const scan = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "Scan",
+    );
+    expect(scan).toBeDefined();
+    await act(async () => {
+      scan?.click();
+    });
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url) === "/api/plugins/bidrl/auctions/42/scan" &&
+          (init as RequestInit | undefined)?.method === "POST",
+      ),
+    ).toBe(true);
   });
 
   it("reads the catalog's filters out of the query string", async () => {

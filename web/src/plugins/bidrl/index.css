@@ -51,6 +51,23 @@
   gap: var(--space-2);
 }
 
+/* Auction jobs: a full-width row under the metrics, not a pile in the page heading.
+   Scan and refresh are the work; delete stands apart so it cannot be fat-fingered. */
+.bidrl-command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bidrl-command__jobs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+}
+
 .bidrl-actions > a {
   display: inline-flex;
   align-items: center;
@@ -537,12 +554,16 @@ tr.bidrl-similar-row td:first-child {
    awkward two-up otherwise. */
 @media (max-width: 720px) {
   .bidrl-actions,
-  .bidrl-examples {
+  .bidrl-examples,
+  .bidrl-command,
+  .bidrl-command__jobs {
     width: 100%;
   }
 
   .bidrl-actions > .cc-button,
-  .bidrl-actions > a {
+  .bidrl-actions > a,
+  .bidrl-command__jobs > .cc-button,
+  .bidrl-command > .cc-button {
     flex: 1 1 auto;
   }
 
