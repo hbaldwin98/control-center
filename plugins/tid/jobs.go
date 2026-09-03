@@ -20,17 +20,32 @@ type syncArgs struct {
 }
 
 type synced struct {
-	At     string  `json:"at"`
-	Rows   int     `json:"rows"`
-	Source string  `json:"source"`
-	Day    string  `json:"day,omitempty"`
-	KWh    float64 `json:"kwh,omitempty"`
-	Body   string  `json:"body"`
+	At     string `json:"at"`
+	Rows   int    `json:"rows"`
+	Source string `json:"source"`
+	Body   string `json:"body"`
+	days
+}
 
-	// Named days so a notification rule can pick the one it wants. TID does not
-	// fill in a day until the day after it ends, so "latest" is usually an empty
-	// or partial today; "settled" is the newest day that actually has usage on
-	// it, and is what the default body reports.
+// alerted is what the alert event carries. It embeds the same days as synced, so
+// one rule template works on both events and neither can gain a day the other
+// lacks.
+type alerted struct {
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Rows   int    `json:"rows"`
+	Source string `json:"source"`
+	days
+}
+
+// days is the set of readings both events publish. Named days let a notification
+// rule pick the one it wants: TID does not fill in a day until the day after it
+// ends, so "latest" is usually an empty or partial today, while "settled" is the
+// newest day that actually has usage on it and is what the default body reports.
+type days struct {
+	Day string  `json:"day,omitempty"`
+	KWh float64 `json:"kwh,omitempty"`
+
 	Latest    *dayPayload  `json:"latest,omitempty"`
 	Settled   *dayPayload  `json:"settled,omitempty"`
 	Today     *dayPayload  `json:"today,omitempty"`
@@ -51,43 +66,41 @@ type dayPayload struct {
 	Body       string   `json:"body"`
 }
 
-// syncedFields declares the day payloads that synced and alert both carry, so the
-// event catalog in the UI offers the same paths a rule can actually template. It
-// lives next to the structs above: change one and this has to change with it.
-func syncedFields(rowsPurpose string) []host.EventField {
-	out := []host.EventField{
-		{Name: "at", Type: "string", Purpose: "RFC3339Nano time of the sync."},
-		{Name: "rows", Type: "number", Purpose: rowsPurpose},
-		{Name: "source", Type: "string", Purpose: "Where the readings came from."},
-		{Name: "day", Type: "string", Purpose: "Newest calendar day in the collection, if any."},
-		{Name: "kwh", Type: "number", Purpose: "kWh on that newest day."},
+// dayPurposes describes the days both events carry. host.Fields reads the names
+// and types off the structs above and pairs them with these, so a payload field
+// cannot ship undeclared and a declaration cannot outlive its field: an
+// undescribed field loads with an empty purpose, which the host rejects.
+func dayPurposes(rowsPurpose string) map[string]string {
+	out := map[string]string{
+		"at":     "RFC3339Nano time of the sync.",
+		"rows":   rowsPurpose,
+		"source": "Where the readings came from.",
+		"day":    "Newest calendar day in the collection, if any.",
+		"kwh":    "kWh on that newest day.",
+		"recent": fmt.Sprintf("The trailing %d days, newest first, each shaped like the named days.", recentDays),
 	}
-	for _, d := range []struct{ name, purpose string }{
-		{"settled", "Newest day that actually has usage on it. This is what the default body reports."},
-		{"latest", "Newest day in the collection, which is often an empty or partial today."},
-		{"today", "Today in local time, if TID has filled it in yet."},
-		{"yesterday", "Yesterday in local time."},
+	for name, purpose := range map[string]string{
+		"settled":   "Newest day that actually has usage on it. This is what the default body reports.",
+		"latest":    "Newest day in the collection, which is often an empty or partial today.",
+		"today":     "Today in local time, if TID has filled it in yet.",
+		"yesterday": "Yesterday in local time.",
 	} {
-		out = append(out, host.EventField{Name: d.name, Type: "object", Purpose: d.purpose})
-		out = append(out, dayFields(d.name)...)
+		out[name] = purpose
+		for leaf, leafPurpose := range map[string]string{
+			"day":          "Calendar day, as YYYY-MM-DD.",
+			"kwh":          "kWh used that day.",
+			"cost_cents":   "What that day cost, in cents, when TID reports it.",
+			"on_peak_kwh":  "On-peak kWh, when TID reports it.",
+			"off_peak_kwh": "Off-peak kWh, when TID reports it.",
+			"high_temp_f":  "High temperature that day, when TID reports it.",
+			"low_temp_f":   "Low temperature that day, when TID reports it.",
+			"avg_temp_f":   "Average temperature that day, when TID reports it.",
+			"body":         "That day as a one-line reading, ready to send.",
+		} {
+			out[name+"."+leaf] = leafPurpose
+		}
 	}
-	return append(out, host.EventField{Name: "recent", Type: "object[]", Purpose: fmt.Sprintf("The trailing %d days, newest first, each shaped like the named days.", recentDays)})
-}
-
-// dayFields declares the leaves of one named day, so the catalog can offer them
-// as click-to-insert paths rather than an opaque object.
-func dayFields(prefix string) []host.EventField {
-	return []host.EventField{
-		{Name: prefix + ".day", Type: "string", Purpose: "Calendar day, as YYYY-MM-DD."},
-		{Name: prefix + ".kwh", Type: "number", Purpose: "kWh used that day."},
-		{Name: prefix + ".cost_cents", Type: "number", Purpose: "What that day cost, in cents, when TID reports it."},
-		{Name: prefix + ".on_peak_kwh", Type: "number", Purpose: "On-peak kWh, when TID reports it."},
-		{Name: prefix + ".off_peak_kwh", Type: "number", Purpose: "Off-peak kWh, when TID reports it."},
-		{Name: prefix + ".high_temp_f", Type: "number", Purpose: "High temperature that day, when TID reports it."},
-		{Name: prefix + ".low_temp_f", Type: "number", Purpose: "Low temperature that day, when TID reports it."},
-		{Name: prefix + ".avg_temp_f", Type: "number", Purpose: "Average temperature that day, when TID reports it."},
-		{Name: prefix + ".body", Type: "string", Purpose: "That day as a one-line reading, ready to send."},
-	}
+	return out
 }
 
 // recentDays is how many trailing days the synced event carries.
@@ -234,25 +247,25 @@ func plural(n int) string {
 // syncedPayload expands the collected readings into the days a notification
 // rule may want to name.
 func syncedPayload(readings []Reading, clock time.Time, at string, rows int, source string) synced {
-	payload := synced{At: at, Rows: rows, Source: source, Recent: []dayPayload{}}
+	payload := synced{At: at, Rows: rows, Source: source, days: days{Recent: []dayPayload{}}}
 
 	byDay := map[string]Reading{}
-	days := make([]string, 0, len(readings))
+	ordered := make([]string, 0, len(readings))
 	for _, r := range readings {
 		if r.Day == "" {
 			continue
 		}
 		if _, seen := byDay[r.Day]; !seen {
-			days = append(days, r.Day)
+			ordered = append(ordered, r.Day)
 		}
 		byDay[r.Day] = r
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(days)))
+	sort.Sort(sort.Reverse(sort.StringSlice(ordered)))
 
 	local := clock.In(localZone())
 	payload.Today = dayFrom(byDay, local.Format("2006-01-02"))
 	payload.Yesterday = dayFrom(byDay, local.AddDate(0, 0, -1).Format("2006-01-02"))
-	for i, day := range days {
+	for i, day := range ordered {
 		reading := byDay[day]
 		if i == 0 {
 			payload.Latest = readingPayload(reading)
@@ -299,20 +312,10 @@ func readingPayload(r Reading) *dayPayload {
 	}
 }
 
-// alertPayload mirrors the synced day fields so one rule template works on both.
-func alertPayload(s synced, body string, inserted int) map[string]any {
-	out := map[string]any{
-		"title": "New TID usage", "body": body, "rows": inserted, "source": s.Source,
-		"day": s.Day, "kwh": s.KWh, "recent": s.Recent,
-	}
-	for key, day := range map[string]*dayPayload{
-		"latest": s.Latest, "settled": s.Settled, "today": s.Today, "yesterday": s.Yesterday,
-	} {
-		if day != nil {
-			out[key] = day
-		}
-	}
-	return out
+// alertPayload carries the synced days onto the alert event unchanged, so one
+// rule template works on both.
+func alertPayload(s synced, body string, inserted int) alerted {
+	return alerted{Title: "New TID usage", Body: body, Rows: inserted, Source: s.Source, days: s.days}
 }
 
 func formatReading(r Reading) string {

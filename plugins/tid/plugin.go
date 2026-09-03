@@ -35,32 +35,34 @@ func (p *Plugin) Manifest() host.Manifest {
 		Models: []host.ModelNeed{{
 			Name:         "cheap-chat",
 			Capabilities: []string{"chat"},
-			Purpose:      "A reading of the last month of usage.",
+			Purpose:      "Reads the last 30 days against two years of history and the daily temperature.",
 		}},
 		Events: []host.EventSpec{
 			{
 				Type:    "synced",
 				Purpose: "A portal collection finished. Fires even when no new days were inserted.",
-				Fields:  append(syncedFields("Readings written this run."), host.EventField{Name: "body", Type: "string", Purpose: "One-line reading for a notification, such as 2026-09-02: 8.0 kWh ($2.00)."}),
+				Fields: host.Fields(synced{}, purposes(dayPurposes("Readings written this run."), map[string]string{
+					"body": "One-line reading for a notification, such as 2026-09-02: 8.0 kWh ($2.00).",
+				})),
 			},
 			{
 				Type:    "insight",
-				Purpose: "A model wrote a summary of recent usage. Needs at least three days of history and cheap-chat assigned.",
-				Fields: []host.EventField{
-					{Name: "at", Type: "string", Purpose: "RFC3339Nano time of the insight."},
-					{Name: "summary", Type: "string", Purpose: "What the model said about usage."},
-					{Name: "recommendation", Type: "string", Purpose: "What to do about it."},
-					{Name: "anomalies", Type: "string[]", Purpose: "Unusual days the model called out."},
-					{Name: "body", Type: "string", Purpose: "Summary plus recommendation, ready to send."},
-				},
+				Purpose: "A model read the last 30 days against the seasonal history and that day's temperature. Needs three days of history and cheap-chat assigned.",
+				Fields: host.Fields(insightPayload{}, map[string]string{
+					"at":             "RFC3339Nano time of the insight.",
+					"summary":        "Where usage stands versus last month and the same period last year, and whether temperature explains it.",
+					"recommendation": "What to do about it.",
+					"anomalies":      "Days that used far more or less than their outdoor temperature predicts.",
+					"body":           "Summary plus recommendation, ready to send.",
+				}),
 			},
 			{
 				Type:    "alert",
 				Purpose: "New calendar days were inserted. Matched by the default plugin-alert rule.",
-				Fields: append([]host.EventField{
-					{Name: "title", Type: "string", Purpose: "Short headline."},
-					{Name: "body", Type: "string", Purpose: "The latest reading, or a count of new days."},
-				}, syncedFields("How many new days were inserted.")...),
+				Fields: host.Fields(alerted{}, purposes(dayPurposes("How many new days were inserted."), map[string]string{
+					"title": "Short headline.",
+					"body":  "The latest reading, or a count of new days.",
+				})),
 			},
 		},
 		Config: host.ConfigSpec{
@@ -99,6 +101,18 @@ func (p *Plugin) Manifest() host.Manifest {
 			Defaults: json.RawMessage(`{"tenant_id":"","username":"","credential_id":"","cents_per_kwh":0}`),
 		},
 	}
+}
+
+// purposes merges the shared day descriptions with the ones an event adds of its
+// own. Later maps win, so an event can sharpen a shared line.
+func purposes(maps ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, m := range maps {
+		for key, value := range m {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func (p *Plugin) Jobs() []hostjobs.Def {
