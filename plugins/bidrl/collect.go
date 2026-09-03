@@ -87,8 +87,14 @@ func (p *Plugin) collectAuction(jc hostjobs.Context, h host.Host, pageURL string
 		_ = p.failAuction(jc, h, auctionID, err.Error(), now)
 		return 0, err
 	}
+	loc, err := p.auctionLocation(jc, h, auctionID)
+	if err != nil {
+		return 0, err
+	}
 	if err := h.Events().Publish(jc, "auction.collected", auctionID, map[string]any{
 		"auctionId": auctionID, "url": canonical, "title": title, "lotCount": len(lots),
+		"affiliateId": loc.AffiliateID, "affiliateName": loc.AffiliateName, "city": loc.City,
+		"endsAt": endsAt,
 	}); err != nil {
 		return 0, err
 	}
@@ -553,6 +559,23 @@ func unique(in []string) []string {
 // and ruling a lot out by drive time is exactly what you want to still work
 // after the auction is over. A cache miss leaves the stored value alone rather
 // than blanking it — the next discover backfills it.
+// auctionLocation reads back the location stamped onto a collected auction, so an
+// auction.collected event can say where the auction is and not only what it is called.
+type auctionLocation struct {
+	AffiliateID   string
+	AffiliateName string
+	City          string
+}
+
+func (p *Plugin) auctionLocation(jc hostjobs.Context, h host.Host, auctionID string) (auctionLocation, error) {
+	var loc auctionLocation
+	row := h.Store().QueryRow(jc, `SELECT affiliate_id, affiliate_name, city FROM bidrl_auctions WHERE id = ?`, auctionID)
+	if err := row.Scan(&loc.AffiliateID, &loc.AffiliateName, &loc.City); err != nil {
+		return auctionLocation{}, err
+	}
+	return loc, nil
+}
+
 func stampAuctionLocation(jc hostjobs.Context, tx hoststorage.Tx, auctionID string) error {
 	_, err := tx.Exec(jc, `UPDATE bidrl_auctions SET
 			affiliate_id   = IFNULL((SELECT affiliate_id   FROM bidrl_affiliate_auctions WHERE id = ?), affiliate_id),
