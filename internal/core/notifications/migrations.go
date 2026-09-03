@@ -92,4 +92,11 @@ CREATE TABLE core_notification_audit (
     created_at  TEXT    NOT NULL
 ) STRICT;
 `},
+	{Version: 2, Name: "plugin_alert_copy", Up: `
+UPDATE core_notification_rules
+   SET title = '{event.subject}', body = '{event.payload.body}'
+ WHERE id = 'plugin-alert'
+   AND title = '{event.type}'
+   AND body = '{event.subject}';
+`},
 }

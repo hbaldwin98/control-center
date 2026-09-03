@@ -395,6 +395,7 @@ describe("NotificationSettings", () => {
     serve({ rules: [rule({ title: "A job failed" })], channels: [channel({ id: "ch-1" })] });
     await h.render(<NotificationSettings />);
     expect(h.text()).toContain("A job failed");
+    expect(h.text()).toContain("plugin-alert");
   });
 
   it("shows a channel's health when the host reported a failure", async () => {

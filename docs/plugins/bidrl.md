@@ -277,7 +277,8 @@ right.
 | Surface | Contract |
 |---|---|
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
-| Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — the only scheduled ones, both inert while `automation.enabled` is false |
+| Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — crawl and watchlist matching, both inert while `automation.enabled` is false |
+| Jobs | `warn` (`*/15 * * * *`) — local SQL; publishes `bidrl.alert` once when a saved lot is inside the 24-hour close window |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
 | Live | `GET /api/push/bidrl?topics=lot:<id>,…` — host-owned; one `lot:<id>` topic per lot on screen, joined to the BidRL feed while anyone is watching |
 | Events | `bids.refreshed` — many lots moved, refetch. One lot's new price is a push message, not an event: it has no history worth replaying. |
@@ -289,7 +290,7 @@ right.
 | API | `GET /locations` — the SITES locations you have lots at, with lot counts |
 | API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
-| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned` |
+| Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned`, `bidrl.finding.created`, `bidrl.alert` |
 | UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/findings`, `/bidrl/watchlists`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
@@ -377,11 +378,13 @@ Two scheduled jobs, and a long list of reasons either might do nothing.
 |---|---|---|---|
 | `sweep` | `0 */6 * * *` | yes | Lists open auctions at the chosen locations, then collects ones not already stored, soonest to close first |
 | `match` | `30 */6 * * *` | no | Runs every enabled watchlist's funnel over what is collected |
+| `warn` | `*/15 * * * *` | no | Publishes `bidrl.alert` once when a saved lot is inside 24 hours of closing |
 
 They are separate and offset on purpose. `sweep` is the only scheduled work that reaches
 the origin and must stop when BidRL says so; `match` never reaches it and should still run
 while a sweep is latched, because there is usually a backlog of collected lots no
-watchlist has looked at.
+watchlist has looked at. `warn` is also local: it runs even when automation is off, because
+a saved lot can close without a crawl.
 
 **`sweep` does nothing unless every guard passes.** Automation off (the default), no
 locations chosen, or a throttle latch each end the tick before a browser session is even

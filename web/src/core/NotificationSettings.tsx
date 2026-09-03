@@ -62,8 +62,8 @@ export function NotificationSettings() {
   return (
     <Stack>
       <div className="cc-group__title">Notification channels</div>
-      <Hint>Secrets live in credentials. A channel stores a credential id, never the token.</Hint>
-      <ChannelForm onChanged={channels.reload} />
+      <Hint>Secrets live in credentials. A channel stores a credential id, never the token. A new ntfy or webpush channel is added to the plugin-alert rule so plugin alerts reach it.</Hint>
+      <ChannelForm onChanged={() => { channels.reload(); rules.reload(); }} />
       <Async state={channels} loading="Loading channels…" empty="No channels.">
         {(list) => (
           <Stack>
@@ -75,6 +75,7 @@ export function NotificationSettings() {
                 onChanged={() => {
                   channels.reload();
                   health.reload();
+                  rules.reload();
                 }}
               />
             ))}

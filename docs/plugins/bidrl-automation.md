@@ -184,8 +184,10 @@ kill switch needs no plugin-side help. Concurrency stays `1`.
 ### Events
 
 `bidrl.sweep.completed`, `bidrl.match.completed`, `bidrl.finding.created`,
-`bidrl.finding.decided`. `bidrl.finding.created` is what a notification rule would hang off
-later; this proposal does not add notifications.
+`bidrl.finding.decided`. New findings also publish `bidrl.alert`, which the default
+`plugin-alert` rule delivers to the inbox and any attached ntfy channel. Saved lots
+inside 24 hours of closing publish `bidrl.alert` from the scheduled `warn` job, once
+per lot.
 
 ---
 

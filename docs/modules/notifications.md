@@ -183,7 +183,7 @@ userinfo, and external hosts are rejected.
 |---|---|
 | `inbox` | In-app and created in the durable event transaction. |
 | `webpush` | Browser push; duplicate delivery is possible. |
-| `ntfy` | Self-hosted or public topic; uses a stable idempotency key where supported. |
+| `ntfy` | Self-hosted or public topic; uses a stable idempotency key where supported. Creating an enabled ntfy channel attaches it to the `plugin-alert` rule. Deleting a channel removes it from every rule that named it. |
 
 ---
 
@@ -191,7 +191,7 @@ userinfo, and external hosts are rejected.
 
 | Pattern | Default channels | Meaning |
 |---|---|---|
-| `*.alert` | `inbox` | a plugin's explicit `<plugin>.alert` event |
+| `*.alert` | `inbox`, plus each ntfy/webpush channel you add | a plugin's explicit `<plugin>.alert` event |
 | `core.job.dead` | `inbox` | a job exhausted its retries |
 | `core.plugin.budget_exceeded` | `inbox` | a budget admission was rejected |
 | `core.plugin.accounting_invariant_failed` | `inbox` | provider cost exceeded its conservative reservation |
@@ -200,8 +200,11 @@ userinfo, and external hosts are rejected.
 
 `*.alert` intentionally matches exactly two-segment plugin alert types. Broader plugin
 rules use patterns such as `bidrl.**`; suffix rules use patterns such as `**.failed`.
-The default alert rule also requires the source's first segment not to be `core`. The
-administrator may add external channels to any rule.
+The default alert rule also requires the source's first segment not to be `core`. Its
+title is `{event.subject}` and its body is `{event.payload.body}`, so a plugin that puts
+the headline in the subject and details in `payload.body` reaches both the inbox and any
+attached ntfy topic without a custom rule. The administrator may add external channels to
+any other rule.
 
 ---
 

@@ -416,12 +416,13 @@ transactions when consumers depend on them being consistent.
 
 **To notify the user, publish an event — do not look for a notify API.** The user writes a
 rule against your event type. For the case where you genuinely want to reach them without
-any configuration, publish `<plugin>.alert`, which has a default rule:
+any configuration, publish `<plugin>.alert`, which has a default rule. Put the headline in
+the subject and details in `payload.body`; an ntfy channel you add is attached to that
+rule automatically.
 
 ```go
-h.Events().Publish(ctx, "alert", auctionID, Alert{
-    Title: "Auction closes in 30 minutes",
-    Body:  "6 watched lots still under estimate",
+h.Events().Publish(ctx, "alert", "Auction closes in 30 minutes", map[string]string{
+    "body": "6 watched lots still under estimate",
 })
 ```
 

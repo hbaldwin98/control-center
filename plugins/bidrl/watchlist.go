@@ -374,8 +374,19 @@ func (p *Plugin) storeFindings(ctx context.Context, h host.Host, w watchlist, ke
 		_ = h.Events().Publish(ctx, "finding.created", w.ID, map[string]any{
 			"watchlistId": w.ID, "count": created,
 		})
+		body := fmt.Sprintf("%d new finding%s on %s", created, pluralS(created), w.Name)
+		_ = h.Events().Publish(ctx, "alert", body, map[string]any{
+			"title": "BIDRL finding", "body": body, "watchlistId": w.ID, "count": created,
+		})
 	}
 	return created, nil
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // ------------------------------------------------------------------- storage

@@ -150,8 +150,40 @@ func (s *Service) PutChannel(ctx context.Context, channel ChannelConfig) error {
 				return err
 			}
 		}
+		if action == "create" && channel.Enabled && isExternalKind(channel.Kind) {
+			if err := attachToPluginAlert(ctx, tx, channel.ID); err != nil {
+				return err
+			}
+		}
 		return s.auditConfig(ctx, tx, actor, "channel", channel.ID, action)
 	})
+}
+
+func isExternalKind(kind string) bool {
+	return kind == "ntfy" || kind == "webpush"
+}
+
+func attachToPluginAlert(ctx context.Context, tx storage.Tx, channelID string) error {
+	var raw string
+	err := tx.QueryRow(ctx, `SELECT channels FROM core_notification_rules WHERE id = 'plugin-alert'`).Scan(&raw)
+	if storage.IsNoRows(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ch := decodeChannels(raw)
+	for _, c := range ch {
+		if c == channelID {
+			return nil
+		}
+	}
+	encoded, err := encodeChannels(append(ch, channelID))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE core_notification_rules SET channels = ? WHERE id = 'plugin-alert'`, encoded)
+	return err
 }
 
 func (s *Service) DeleteChannel(ctx context.Context, id string) error {
@@ -163,23 +195,7 @@ func (s *Service) DeleteChannel(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: inbox cannot be deleted", ErrInvalidChannel)
 	}
 	return s.db.Tx(ctx, func(tx storage.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id, channels FROM core_notification_rules`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var rid, ch string
-			if err := rows.Scan(&rid, &ch); err != nil {
-				return err
-			}
-			for _, c := range decodeChannels(ch) {
-				if c == id {
-					return fmt.Errorf("%w: rule %s", ErrChannelInUse, rid)
-				}
-			}
-		}
-		if err := rows.Err(); err != nil {
+		if err := detachChannelFromRules(ctx, tx, id); err != nil {
 			return err
 		}
 		res, err := tx.Exec(ctx, `DELETE FROM core_notification_channels WHERE id = ?`, id)
@@ -197,6 +213,55 @@ func (s *Service) DeleteChannel(ctx context.Context, id string) error {
 		}
 		return s.auditConfig(ctx, tx, actor, "channel", id, "delete")
 	})
+}
+
+func detachChannelFromRules(ctx context.Context, tx storage.Tx, channelID string) error {
+	rows, err := tx.Query(ctx, `SELECT id, channels FROM core_notification_rules`)
+	if err != nil {
+		return err
+	}
+	type update struct {
+		id       string
+		channels string
+	}
+	var updates []update
+	for rows.Next() {
+		var rid, raw string
+		if err := rows.Scan(&rid, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		ch := decodeChannels(raw)
+		next := make([]string, 0, len(ch))
+		changed := false
+		for _, c := range ch {
+			if c == channelID {
+				changed = true
+				continue
+			}
+			next = append(next, c)
+		}
+		if !changed {
+			continue
+		}
+		encoded, err := encodeChannels(next)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, update{id: rid, channels: encoded})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, u := range updates {
+		if _, err := tx.Exec(ctx, `UPDATE core_notification_rules SET channels = ? WHERE id = ?`, u.channels, u.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) DeliveryHealth(ctx context.Context) ([]ChannelHealth, error) {

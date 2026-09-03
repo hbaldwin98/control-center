@@ -185,6 +185,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Default rules for alerts, dead jobs, budget, accounting, reauth, paused subscribers | ✅ | Inbox channel seeded |
 | Throttle windows collapse same subject; ready after window close | ✅ | Structured uniqueness keys (JSON) |
 | External ntfy / webpush sends with leases, 8 attempts, credential tokens | ✅ | Inbox write never calls out |
+| Creating an ntfy/webpush channel attaches it to `plugin-alert` | ✅ | Deleting the channel removes it from rules. |
 | Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen |
 
 ## Milestone 10 — `tid` ✅
@@ -192,7 +193,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Feature | State | Notes |
 |---|---|---|
 | Separate `plugins/tid` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
-| Daily and manual energy sync | ✅ | Host-managed My TID browser flow plus CSV upload. |
+| Daily and manual energy sync | ✅ | Host-managed My TID browser flow plus CSV upload. New daily readings publish `tid.alert`. |
 | Usage metrics and insight | ✅ | Daily kWh history, month comparisons, estimated cost, and a bounded model-written insight. |
 | Operator UI | ✅ | Summary metrics, history, insight, manual sync, and CSV upload. |
 
@@ -217,6 +218,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
 | Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
 | Automation UI | ✅ | An Automation screen: what each tick would do next and what it last did, the latch with a resume control, the Findings backlog, and the settings it runs on. Turning it on stays on the plugin's configuration screen — only the administration API writes config, so a plugin page reports its settings and links to them. |
+| Plugin alerts | ✅ | New watchlist findings publish `bidrl.alert`. A 15-minute `warn` job publishes once when a saved lot is inside 24 hours of closing. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ## Milestone 13 — `push` ✅

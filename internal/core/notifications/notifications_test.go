@@ -218,6 +218,75 @@ func TestNtfySendUsesIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestNtfyChannelReceivesPluginAlerts(t *testing.T) {
+	var hits atomic.Int32
+	var gotTitle, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		gotTitle = r.Header.Get("Title")
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	f := newNfix(t, srv.Client())
+	ctx := WithActor(f.ctx, "admin")
+	if err := f.svc.PutChannel(ctx, ChannelConfig{
+		ID: "phone", Kind: "ntfy", Enabled: true,
+		Settings: map[string]string{"server": srv.URL, "topic": "cc"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rules, err := f.svc.ListRules(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert Rule
+	for _, r := range rules {
+		if r.ID == "plugin-alert" {
+			alert = r
+		}
+	}
+	if !containsString(alert.Channels, "phone") {
+		t.Fatalf("plugin-alert channels = %v, want phone attached", alert.Channels)
+	}
+
+	if _, err := f.bus.Publish(f.ctx, events.Input{
+		Type: "hello.alert", Source: "hello", Subject: "Auction closes in 30 minutes",
+		Payload: map[string]string{"title": "Auction closes in 30 minutes", "body": "6 watched lots still under estimate"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "ntfy plugin alert", func() bool { return hits.Load() >= 1 })
+	if gotTitle != "Auction closes in 30 minutes" || gotBody != "6 watched lots still under estimate" {
+		t.Fatalf("ntfy title %q body %q", gotTitle, gotBody)
+	}
+
+	if err := f.svc.DeleteChannel(ctx, "phone"); err != nil {
+		t.Fatal(err)
+	}
+	rules, err = f.svc.ListRules(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if r.ID == "plugin-alert" && containsString(r.Channels, "phone") {
+			t.Fatal("deleted ntfy channel still listed on plugin-alert")
+		}
+	}
+}
+
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRejectsSecretChannelSettingsAndBadURL(t *testing.T) {
 	f := newNfix(t, nil)
 	ctx := WithActor(f.ctx, "admin")

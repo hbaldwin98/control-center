@@ -18,6 +18,8 @@ const (
 	// was throttled.
 	sweepSchedule = "0 */6 * * *"
 	matchSchedule = "30 */6 * * *"
+	warnSchedule  = "*/15 * * * *"
+	warnTimeout   = time.Minute
 	cronTimeZone  = "UTC"
 
 	// How long a throttle latch holds. A cron that quietly retries into a ban is

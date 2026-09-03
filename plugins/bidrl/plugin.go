@@ -142,12 +142,14 @@ func (p *Plugin) Jobs() []hostjobs.Def {
 		{Name: "intent", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.intentJob},
 		{Name: "discover", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.discoverJob},
 		{Name: "watch", Timeout: jobTO, MaxAttempts: 2, Concurrency: 1, Backoff: backoff, Handler: p.watchJob},
-		// The only two scheduled jobs. Both check automation.enabled first and do
-		// nothing when it is off, which is the default.
+		// sweep and match stay quiet unless automation.enabled is on. warn is local
+		// SQL against saved lots, so it runs even when the crawl is off.
 		{Name: "sweep", Timeout: jobTO, MaxAttempts: 1, Concurrency: 1, Backoff: backoff,
 			Schedule: sweepSchedule, TimeZone: cronTimeZone, Handler: p.sweepJob},
 		{Name: "match", Timeout: jobTO, MaxAttempts: 1, Concurrency: 1, Backoff: backoff,
 			Schedule: matchSchedule, TimeZone: cronTimeZone, Handler: p.matchJob},
+		{Name: "warn", Timeout: warnTimeout, MaxAttempts: 1, Concurrency: 1, Backoff: backoff,
+			Schedule: warnSchedule, TimeZone: cronTimeZone, Handler: p.warnJob},
 	}
 }
 

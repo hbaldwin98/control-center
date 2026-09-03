@@ -124,6 +124,17 @@ func TestListFindingsDefaultsToNewAndJoinsTheLot(t *testing.T) {
 	}
 }
 
+func TestMatchPublishesAlertForNewFindings(t *testing.T) {
+	ctx := context.Background()
+	h, _ := findingsHarness(t, ctx)
+	if !publishedEvent(h, "finding.created") {
+		t.Fatalf("match did not publish finding.created, events %v", eventTypes(h))
+	}
+	if !publishedEvent(h, "alert") {
+		t.Fatalf("new findings did not publish bidrl.alert, events %v", eventTypes(h))
+	}
+}
+
 func TestListFindingsFiltersByStateAndWatchlist(t *testing.T) {
 	ctx := context.Background()
 	h, wlID := findingsHarness(t, ctx)

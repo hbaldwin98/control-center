@@ -152,25 +152,32 @@ func TestPluginContract(t *testing.T) {
 		t.Fatalf("manifest id = %q, want %q", m.ID, pluginID)
 	}
 	jobs := p.Jobs()
-	if len(jobs) != 11 {
+	if len(jobs) != 12 {
 		t.Fatalf("jobs = %d", len(jobs))
 	}
 	scheduled := map[string]bool{}
 	for _, j := range jobs {
-		if j.Concurrency != 1 || j.Timeout != jobTO {
+		if j.Concurrency != 1 {
+			t.Fatalf("job %s = %#v", j.Name, j)
+		}
+		if j.Name == "warn" {
+			if j.Timeout != warnTimeout {
+				t.Fatalf("job %s = %#v", j.Name, j)
+			}
+		} else if j.Timeout != jobTO {
 			t.Fatalf("job %s = %#v", j.Name, j)
 		}
 		if j.Schedule == "" {
 			continue
 		}
-		// A scheduled job needs a zone, and only these two may have a schedule at
-		// all: everything else stays something a person started.
+		// A scheduled job needs a zone. sweep and match crawl; warn is local SQL
+		// against saved lots, so it is allowed to run without a person starting it.
 		if j.TimeZone == "" || len(strings.Fields(j.Schedule)) != 5 {
 			t.Fatalf("scheduled job %s = %#v", j.Name, j)
 		}
 		scheduled[j.Name] = true
 	}
-	if len(scheduled) != 2 || !scheduled["sweep"] || !scheduled["match"] {
+	if len(scheduled) != 3 || !scheduled["sweep"] || !scheduled["match"] || !scheduled["warn"] {
 		t.Fatalf("scheduled = %#v", scheduled)
 	}
 	if !m.Automated {
@@ -192,7 +199,7 @@ func TestPluginContract(t *testing.T) {
 		"bidrl_lots", "bidrl_affiliate_auctions", "itemdata_at", "reused_from_lot_id",
 		"bidrl_intent_searches", "bidrl_lot_embeddings", "affiliate_id",
 		"bidrl_favorites", "bidrl_watchlists", "strftime", "bidrl_automation",
-		"high_bidder_id",
+		"high_bidder_id", "ending_soon_alerted_at",
 	}
 	if len(mig.migrations) != len(wantMigrations) {
 		t.Fatalf("migrations = %d, want %d", len(mig.migrations), len(wantMigrations))

@@ -238,3 +238,62 @@ func TestCollectsUsageFromPortal(t *testing.T) {
 		t.Fatalf("second period days = %d, want 1", len(history.Periods[1].Days))
 	}
 }
+
+func TestSyncAlertsOnNewReadingsOnly(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, tid.New())
+	p := newPortal(t, h.Clock.Now())
+	h.Browser.Handle(portalHost, p.handler())
+	h.Browser.Credential(credential, password)
+	h.Run(ctx)
+	h.SetConfig(ctx, map[string]any{
+		"tenant_id":     tenant,
+		"username":      "person@example.test",
+		"credential_id": credential,
+		"cents_per_kwh": 0,
+	})
+
+	runHistorySync(t, ctx, h)
+	if n := countEvents(h, "tid.alert"); n != 1 {
+		t.Fatalf("after first sync, tid.alert events = %d, published %v", n, eventTypes(h))
+	}
+
+	p.step = 0
+	p.usageCall = 0
+	runHistorySync(t, ctx, h)
+	if n := countEvents(h, "tid.alert"); n != 1 {
+		t.Fatalf("a repeat sync without new days re-alerted: tid.alert events = %d", n)
+	}
+}
+
+func runHistorySync(t *testing.T, ctx context.Context, h *hosttest.Harness) {
+	t.Helper()
+	var posted struct {
+		JobID int64 `json:"jobId"`
+	}
+	h.DecodeJSON(h.POST("/history/sync", nil), http.StatusOK, &posted)
+	if posted.JobID == 0 {
+		t.Fatal("POST /history/sync returned no job id")
+	}
+	if err := h.RunJob(ctx, posted.JobID); err != nil {
+		t.Fatalf("sync job failed: %v", err)
+	}
+}
+
+func eventTypes(h *hosttest.Harness) []string {
+	var out []string
+	for _, e := range h.Events() {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
+func countEvents(h *hosttest.Harness, typ string) int {
+	n := 0
+	for _, e := range h.Events() {
+		if e.Type == typ {
+			n++
+		}
+	}
+	return n
+}

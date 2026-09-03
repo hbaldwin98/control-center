@@ -49,13 +49,13 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	}
 
 	now := h.Clock().Now().UTC().Format(time.RFC3339Nano)
-	n, err := p.upsertReadings(jc, h, result, source, now)
+	n, inserted, err := p.upsertReadings(jc, h, result, source, now)
 	if err != nil {
 		_ = jc.Logf("storing %d readings failed: %v", len(result.Readings), err)
 		_ = p.recordSync(jc, h, "failed", 0, source, err.Error())
 		return err
 	}
-	_ = jc.Logf("stored %d of %d readings from %s", n, len(result.Readings), source)
+	_ = jc.Logf("stored %d of %d readings from %s (%d new days)", n, len(result.Readings), source, inserted)
 	if err := jc.Progress(0.8, "recorded readings"); err != nil {
 		return err
 	}
@@ -66,6 +66,14 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	if err := h.Events().Publish(jc, "synced", now, synced{At: now, Rows: n, Source: source}); err != nil {
 		return err
 	}
+	if inserted > 0 {
+		body := fmt.Sprintf("%d new daily reading%s", inserted, plural(inserted))
+		if err := h.Events().Publish(jc, "alert", body, map[string]any{
+			"title": "New TID usage", "body": body, "rows": inserted, "source": source,
+		}); err != nil {
+			return err
+		}
+	}
 
 	if err := p.writeInsight(jc, h, cfg); err != nil {
 		// The sync itself succeeded; a failed insight is reported, not fatal.
@@ -74,12 +82,17 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	return nil
 }
 
-func (p *Plugin) upsertReadings(ctx hostjobs.Context, h host.Host, result collection, source, at string) (int, error) {
+func (p *Plugin) upsertReadings(ctx hostjobs.Context, h host.Host, result collection, source, at string) (int, int, error) {
 	n := 0
+	inserted := 0
 	err := h.Store().Tx(ctx, func(tx hoststorage.Tx) error {
 		for _, r := range result.Readings {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			var exists int
+			if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM tid_readings WHERE day = ?`, r.Day).Scan(&exists); err != nil {
+				return err
 			}
 			var cost any
 			if r.CostCents != nil {
@@ -99,6 +112,9 @@ func (p *Plugin) upsertReadings(ctx hostjobs.Context, h host.Host, result collec
 				return err
 			}
 			n++
+			if exists == 0 {
+				inserted++
+			}
 		}
 		for _, period := range result.Periods {
 			period.Start = parseDay(period.Start)
@@ -127,7 +143,14 @@ func (p *Plugin) upsertReadings(ctx hostjobs.Context, h host.Host, result collec
 		}
 		return nil
 	})
-	return n, err
+	return n, inserted, err
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func nullableString(value string) any {
