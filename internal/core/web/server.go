@@ -15,6 +15,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/ai"
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	harnesscore "github.com/hbaldwin98/control-center/internal/core/harness"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/notifications"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
@@ -50,6 +51,9 @@ type Deps struct {
 
 	// Jobs is the durable queue. The Jobs screen lists, inspects, and cancels.
 	Jobs *jobs.Queue
+
+	// Harness supervises configured coding-agent processes and retains bounded output.
+	Harness *harnesscore.Service
 
 	// Push is live delivery. The transport is host-owned; what travels is the
 	// publishing plugin's business.
@@ -167,6 +171,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/jobs", s.authenticated(s.handleJobList))
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.authenticated(s.handleJobGet))
 	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.authenticated(s.handleJobCancel))
+
+	s.mux.HandleFunc("GET /api/harness", s.authenticated(s.handleHarnessList))
+	s.mux.HandleFunc("POST /api/harness", s.authenticated(s.handleHarnessCreate))
+	s.mux.HandleFunc("GET /api/harness/{id}", s.authenticated(s.handleHarnessGet))
+	s.mux.HandleFunc("POST /api/harness/{id}/stop", s.authenticated(s.handleHarnessStop))
 
 	s.mux.HandleFunc("GET /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))
 	s.mux.HandleFunc("HEAD /api/blobs/{scope}/{key...}", s.authenticated(s.handleBlob))

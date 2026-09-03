@@ -14,6 +14,7 @@ import { PluginDetail } from "../core/PluginDetail";
 import { Plugins } from "../core/Plugins";
 import { Settings } from "../core/Settings";
 import { Inbox } from "../core/Inbox";
+import { Sessions } from "../core/Sessions";
 
 import { FatalScreen, LoadingScreen, LoginScreen, SetupScreen } from "./Gate";
 import { Layout } from "./Layout";
@@ -77,6 +78,7 @@ function Shell({
           <Route path="/plugins/:id" element={<PluginDetail plugins={plugins} />} />
           <Route path="/plugins/:id/settings" element={<PluginDetail plugins={plugins} />} />
           <Route path="/jobs" element={<Jobs />} />
+          <Route path="/sessions" element={<Sessions />} />
           <Route path="/events" element={<Events />} />
           <Route path="/costs" element={<Costs />} />
           <Route path="/models" element={<Models />} />

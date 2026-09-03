@@ -26,6 +26,7 @@ type Config struct {
 	AI      AI      `yaml:"ai"`
 	Browser Browser `yaml:"browser"`
 	Search  Search  `yaml:"search"`
+	Harness Harness `yaml:"harness"`
 }
 
 // Server describes the HTTP listener.
@@ -92,6 +93,24 @@ type SearXNG struct {
 	URL string `yaml:"url"`
 }
 
+// Harness describes the administrator-approved coding-agent commands. A browser request
+// may select a profile, but cannot change its executable, arguments, or workspace root.
+type Harness struct {
+	MaxSessions    int              `yaml:"maxSessions"`
+	MaxOutputBytes int64            `yaml:"maxOutputBytes"`
+	StopTimeout    time.Duration    `yaml:"stopTimeout"`
+	Profiles       []HarnessProfile `yaml:"profiles"`
+}
+
+type HarnessProfile struct {
+	ID                 string   `yaml:"id"`
+	Name               string   `yaml:"name"`
+	Command            string   `yaml:"command"`
+	Args               []string `yaml:"args"`
+	WorkspaceRoot      string   `yaml:"workspaceRoot"`
+	AcceptsInstruction bool     `yaml:"acceptsInstruction"`
+}
+
 // Blobs bounds filesystem blob storage. Limits must be finite.
 type Blobs struct {
 	MaxObjectBytes int64 `yaml:"maxObjectBytes"`
@@ -119,6 +138,7 @@ func Default() Config {
 		AI:      AI{Models: "config/models.yaml"},
 		Browser: Browser{Engine: "fake"},
 		Search:  Search{Engine: "fake"},
+		Harness: Harness{MaxSessions: 4, MaxOutputBytes: 1 << 20, StopTimeout: 5 * time.Second},
 	}
 }
 
@@ -211,6 +231,20 @@ func (c *Config) derive() {
 	if c.Search.Engine == "" {
 		c.Search.Engine = "fake"
 	}
+	if c.Harness.MaxSessions <= 0 {
+		c.Harness.MaxSessions = 4
+	}
+	if c.Harness.MaxOutputBytes <= 0 {
+		c.Harness.MaxOutputBytes = 1 << 20
+	}
+	if c.Harness.StopTimeout <= 0 {
+		c.Harness.StopTimeout = 5 * time.Second
+	}
+	for i := range c.Harness.Profiles {
+		if c.Harness.Profiles[i].Name == "" {
+			c.Harness.Profiles[i].Name = c.Harness.Profiles[i].ID
+		}
+	}
 }
 
 // Validate enforces the invariants the rest of the system relies on.
@@ -244,6 +278,25 @@ func (c Config) Validate() error {
 		}
 	default:
 		return fmt.Errorf("config: search.engine %q is not supported (fake or searxng)", c.Search.Engine)
+	}
+	if c.Harness.MaxSessions < 1 || c.Harness.MaxSessions > 32 {
+		return errors.New("config: harness.maxSessions must be 1..32")
+	}
+	if c.Harness.MaxOutputBytes < 4096 || c.Harness.MaxOutputBytes > 64<<20 {
+		return errors.New("config: harness.maxOutputBytes must be 4096..67108864")
+	}
+	if c.Harness.StopTimeout <= 0 || c.Harness.StopTimeout > time.Minute {
+		return errors.New("config: harness.stopTimeout must be positive and at most 1m")
+	}
+	profileIDs := make(map[string]struct{}, len(c.Harness.Profiles))
+	for _, p := range c.Harness.Profiles {
+		if strings.TrimSpace(p.ID) == "" || strings.TrimSpace(p.Command) == "" || strings.TrimSpace(p.WorkspaceRoot) == "" {
+			return fmt.Errorf("config: harness profile %q requires id, command, and workspaceRoot", p.ID)
+		}
+		if _, exists := profileIDs[p.ID]; exists {
+			return fmt.Errorf("config: duplicate harness profile %q", p.ID)
+		}
+		profileIDs[p.ID] = struct{}{}
 	}
 	return nil
 }

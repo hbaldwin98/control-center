@@ -19,7 +19,8 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | 11 | `pagewatch` | ✅ | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
 | 12 | `bidrl` | ✅ | The first real plugin. |
 | 13 | `push` | ✅ | Host-owned live delivery: topics, refcounted demand, fan-out, backpressure, and one SSE transport. |
-| 14 | Future | ⬜ | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
+| 14 | `harness` | ✅ | Configured commands run under host supervision with durable lifecycle, bounded output, stop, REST, and operator UI. |
+| 15 | Future | ⬜ | Interactive PTY terminal, external gateway, out-of-process plugins. |
 
 ---
 
@@ -231,10 +232,21 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Websocket transport | ⬜ | Deliberately not built. The plugin contract is topics and payloads, so it changes nothing a plugin sees; it earns its cost the first time a client needs to send as well as receive. |
 | End-to-end acceptance test | ⬜ | Covered by unit and handler tests plus the bidrl acceptance test. Nobody has yet watched a real bid move a number on a running screen. |
 
+## Milestone 14 — `harness` ✅
+
+| Feature | State | Notes |
+|---|---|---|
+| Closed command profiles | ✅ | The API selects a configured profile and relative workspace; it cannot provide an executable, flags, environment, or absolute path. |
+| Process lifecycle | ✅ | Start, graceful interrupt, timeout kill, shutdown drain, and restart reconciliation. |
+| Durable bounded output | ✅ | stdout and stderr are stored outside the event log and pruned to the configured per-session byte cap. |
+| Lifecycle events | ✅ | State changes commit with `core.harness.*` events; output emits throttled invalidations without copying output bytes into the event log. |
+| Authenticated REST and operator UI | ✅ | Create, list, inspect output, and stop from `/sessions`; mutations use the shell's existing origin and CSRF checks. |
+| Interactive PTY | ⬜ | Deliberately deferred: no stdin, resize, attach/detach, process reattachment, or terminal emulation yet. |
+
 ---
 
 ## Deferred by design (not v1)
 
-Agentic harness sessions · terminal visibility in the browser · externally reachable
+Interactive PTY harness sessions · interactive terminal input in the browser · externally reachable
 OpenAI-compatible gateway · out-of-process or containerized plugins · plugin permissions,
 installer, and registry · multi-user and multi-host. See [`DESIGN.md`](DESIGN.md) §1.

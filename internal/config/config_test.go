@@ -198,3 +198,23 @@ func TestSearchEnvOverrides(t *testing.T) {
 		t.Fatalf("search = %+v", cfg.Search)
 	}
 }
+
+func TestHarnessProfilesAreClosedAndBounded(t *testing.T) {
+	cfg := Default()
+	cfg.Harness.Profiles = []HarnessProfile{{
+		ID: "codex", Command: "codex", Args: []string{"exec"},
+		WorkspaceRoot: t.TempDir(), AcceptsInstruction: true,
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Harness.Profiles = append(cfg.Harness.Profiles, cfg.Harness.Profiles[0])
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("duplicate harness profile must fail")
+	}
+	cfg = Default()
+	cfg.Harness.MaxSessions = 33
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unbounded harness session count must fail")
+	}
+}

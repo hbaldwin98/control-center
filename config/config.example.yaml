@@ -68,3 +68,19 @@ search:
   engine: fake
   searxng:
     url: "http://127.0.0.1:8888"
+
+harness:
+  # Browser users may choose a profile and a directory beneath its workspace root.
+  # They cannot supply an executable, flags, environment variables, or an absolute path.
+  maxSessions: 4
+  maxOutputBytes: 1048576
+  stopTimeout: 5s
+  profiles: []
+  # Example non-interactive Codex profile:
+  # profiles:
+  #   - id: codex
+  #     name: Codex
+  #     command: codex
+  #     args: ["exec"]
+  #     workspaceRoot: "/workspace"
+  #     acceptsInstruction: true

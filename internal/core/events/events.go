@@ -185,6 +185,15 @@ const (
 
 	TypeBrowserDenied = "core.browser.denied"
 
+	TypeHarnessCreated     = "core.harness.created"
+	TypeHarnessStarted     = "core.harness.started"
+	TypeHarnessOutput      = "core.harness.output"
+	TypeHarnessStopping    = "core.harness.stopping"
+	TypeHarnessExited      = "core.harness.exited"
+	TypeHarnessFailed      = "core.harness.failed"
+	TypeHarnessStopped     = "core.harness.stopped"
+	TypeHarnessInterrupted = "core.harness.interrupted"
+
 	TypePluginEnabled                   = "core.plugin.enabled"
 	TypePluginDisabled                  = "core.plugin.disabled"
 	TypePluginBudgetExceeded            = "core.plugin.budget_exceeded"
@@ -205,6 +214,7 @@ const (
 	SourceJobs          = "core.jobs"
 	SourceAI            = "core.ai"
 	SourceBrowser       = "core.browser"
+	SourceHarness       = "core.harness"
 	SourcePolicy        = "core.policy"
 	SourceCredentials   = "core.credentials"
 	SourceNotifications = "core.notifications"

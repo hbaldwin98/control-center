@@ -16,6 +16,7 @@ import { NotificationSettings } from "./NotificationSettings";
 import { PluginDetail } from "./PluginDetail";
 import { Plugins } from "./Plugins";
 import { Settings } from "./Settings";
+import { Sessions } from "./Sessions";
 import { setupHarness, fill } from "./testing/harness";
 import { job, notification, pluginState, snapshot, storedCredential } from "./testing/fixtures";
 
@@ -105,6 +106,54 @@ describe("Jobs", () => {
     h.failures.set("/api/jobs", 500);
     await h.render(<Jobs />);
     expect(h.text()).toContain("Jobs");
+  });
+});
+
+describe("Sessions", () => {
+  const profile = { id: "agent", name: "Agent", workspaceRoot: "/work", acceptsInstruction: true };
+  const session = {
+    id: 7,
+    profileId: "agent",
+    profileName: "Agent",
+    title: "Review change",
+    workspace: "/work/control-center",
+    state: "running",
+    exitCode: null,
+    error: "",
+    stopReason: "",
+    createdAt: "2026-09-01T00:00:00Z",
+    startedAt: "2026-09-01T00:00:01Z",
+    finishedAt: null,
+  };
+  const serve = (sessions: unknown[] = [session], profiles: unknown[] = [profile]) =>
+    h.routes.set("/api/harness", snapshot({ profiles, sessions }));
+
+  it("lists configured profiles and sessions", async () => {
+    serve();
+    await h.render(<Sessions />);
+    expect(h.text()).toContain("Review change");
+    expect(h.text()).toContain("Agent");
+  });
+
+  it("starts a configured session", async () => {
+    serve([]);
+    await h.render(<Sessions />);
+    await fill(h.container, 'input[placeholder="."]', "control-center");
+    await h.click("Start session");
+    expect(h.calls.some((call) => call.path === "/api/harness" && call.method === "POST")).toBe(true);
+  });
+
+  it("stops a running session", async () => {
+    serve();
+    await h.render(<Sessions />);
+    await h.click("Stop");
+    expect(h.calls.some((call) => call.path === "/api/harness/7/stop" && call.method === "POST")).toBe(true);
+  });
+
+  it("explains when no profiles are configured", async () => {
+    serve([], []);
+    await h.render(<Sessions />);
+    expect(h.text()).toContain("No harness profiles are configured");
   });
 });
 

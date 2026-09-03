@@ -19,6 +19,7 @@ import (
 	"github.com/hbaldwin98/control-center/internal/core/browser"
 	"github.com/hbaldwin98/control-center/internal/core/credentials"
 	"github.com/hbaldwin98/control-center/internal/core/events"
+	"github.com/hbaldwin98/control-center/internal/core/harness"
 	"github.com/hbaldwin98/control-center/internal/core/jobs"
 	"github.com/hbaldwin98/control-center/internal/core/notifications"
 	"github.com/hbaldwin98/control-center/internal/core/pluginhost"
@@ -135,6 +136,22 @@ func run() error {
 	defer bus.Stop()
 	go bus.RunRetentionDaily(ctx)
 
+	harnessProfiles := make([]harness.Profile, 0, len(cfg.Harness.Profiles))
+	for _, p := range cfg.Harness.Profiles {
+		harnessProfiles = append(harnessProfiles, harness.Profile{
+			ID: p.ID, Name: p.Name, Command: p.Command, Args: p.Args,
+			WorkspaceRoot: p.WorkspaceRoot, AcceptsInstruction: p.AcceptsInstruction,
+		})
+	}
+	harnesssvc, err := harness.New(ctx, store, store, bus, harness.Options{
+		Profiles: harnessProfiles, MaxSessions: cfg.Harness.MaxSessions,
+		MaxOutputBytes: cfg.Harness.MaxOutputBytes, StopTimeout: cfg.Harness.StopTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = harnesssvc.Close(context.Background()) }()
+
 	creds, err := credentials.New(store, store, bus, credentials.Options{
 		Keys:                map[int][]byte{1: masterKey},
 		Active:              1,
@@ -239,6 +256,7 @@ func run() error {
 		Blobs:         blobs,
 		Policy:        pol,
 		Jobs:          jq,
+		Harness:       harnesssvc,
 		Push:          pushsvc,
 		Credentials:   creds,
 		AI:            aisvc,

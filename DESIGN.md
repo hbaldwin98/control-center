@@ -1,6 +1,6 @@
 # Control Center — Design
 
-Status: implemented through Page Watch · 2026-08-31
+Status: implemented through harness sessions · 2026-09-02
 
 A personal, self-hosted web application that runs on one Linux box and hosts plugins.
 **The host owns capabilities; plugins own workflows.**
@@ -28,7 +28,7 @@ The interfaces translate directly to Rust if that changes; the layering does not
 Module specs: [storage](docs/modules/storage.md) · [events](docs/modules/events.md) ·
 [policy](docs/modules/policy.md) · [credentials](docs/modules/credentials.md) ·
 [ai](docs/modules/ai.md) · [jobs](docs/modules/jobs.md) · [browser](docs/modules/browser.md) ·
-[search](docs/modules/search.md) ·
+[search](docs/modules/search.md) · [harness](docs/modules/harness.md) ·
 [notifications](docs/modules/notifications.md) · [pluginhost](docs/modules/pluginhost.md)
 
 The whole process, including the frontend, is one image: `docker compose up --build`.
@@ -42,20 +42,21 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 ### In v1
 
 - Web shell for one administrator, reachable on loopback or over TLS.
-- Ten core modules (below).
+- Eleven core modules (below).
 - A plugin host that mounts compiled-in plugins through a scoped facade.
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
   mutation, and browser-session admission points.
 - Four plugins: `hello` (validating), `tid` (energy usage), `pagewatch`
   (operational confidence), and `bidrl` (the first real plugin).
+- Administrator-owned harness sessions for configured commands, bounded output, and process stop.
 
 ### Not in v1
 
 | Deferred | Reason |
 |---|---|
-| Agentic harness sessions (Codex/Claude Code in a PTY) | Large surface: PTY supervision, scrollback, attach/detach, per-harness hook wiring. |
-| Terminal visibility into agents in the browser | Depends on the above. |
+| Interactive PTY harness sessions | The first harness slice deliberately has no stdin, resize, attach/detach, or terminal emulation protocol. |
+| Interactive terminal in the browser | Requires the PTY protocol above. Retained stdout and stderr are already visible. |
 | Externally reachable OpenAI-compatible gateway | Nothing outside the control center calls it yet. Additive later. |
 | Out-of-process / containerized plugins | Plugins are compiled in. The current boundary is compatible with this direction, but isolation requires protocols, adapters, supervision, and capability proxies. |
 | Plugin permissions, installer, registry | Single author. Those protect hosts from strangers. |
@@ -268,7 +269,9 @@ architectural test rather than a review convention.
 | 10 | `tid` | Daily Turlock Irrigation District usage, metrics, and insight flow through host capabilities. |
 | 11 | `pagewatch` | A cheap browser-to-AI confidence plugin produces history, cost data, and actionable alerts. |
 | 12 | `bidrl` | The first real plugin. |
-| 13 | Future | Harness sessions, terminal visibility, external gateway, out-of-process plugins. |
+| 13 | `push` | Host-owned topics, demand, fan-out, backpressure, and one SSE transport. |
+| 14 | `harness` | Configured commands run under host supervision with durable lifecycle and bounded output. |
+| 15 | Future | Interactive terminal, external gateway, out-of-process plugins. |
 
 Steps 2–6 are the ones worth getting right. Everything after is downstream of them.
 
