@@ -10,11 +10,18 @@ import (
 	"github.com/hbaldwin98/control-center/host"
 )
 
-func (p *Plugin) summary(ctx context.Context, h host.Host, cfg settings, now time.Time) (summaryPage, error) {
+// localZone is the billing timezone TID reports days in.
+func localZone() *time.Location {
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
-		loc = time.UTC
+		return time.UTC
 	}
+	return loc
+}
+
+func (p *Plugin) summary(ctx context.Context, h host.Host, cfg settings, now time.Time) (summaryPage, error) {
+	var err error
+	loc := localZone()
 	today := now.In(loc)
 	monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, loc).Format("2006-01-02")
 	nextMonth := time.Date(today.Year(), today.Month()+1, 1, 0, 0, 0, 0, loc).Format("2006-01-02")

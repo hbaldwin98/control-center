@@ -31,11 +31,7 @@ type insightPayload struct {
 }
 
 func (p *Plugin) writeInsight(jc hostjobs.Context, h host.Host, cfg settings) error {
-	loc, err := time.LoadLocation("America/Los_Angeles")
-	if err != nil {
-		loc = time.UTC
-	}
-	now := h.Clock().Now().In(loc)
+	now := h.Clock().Now().In(localZone())
 	from := now.AddDate(0, 0, -29).Format("2006-01-02")
 	to := now.Format("2006-01-02")
 	days, err := listDays(jc, h, from, to)
