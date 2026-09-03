@@ -17,7 +17,7 @@ core module lives in [`docs/modules/`](docs/modules/).
 ```
 cmd/controlcenter/     main + the one file that registers plugins
 internal/config/       configuration load and validation
-internal/core/         the eleven core modules: storage, events, policy,
+internal/core/         the core modules: storage, events, policy,
                        credentials, ai, jobs, browser, search, harness,
                        notifications, push, pluginhost, web
 host/                  the public plugin-facing module (own go.mod):

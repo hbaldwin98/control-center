@@ -42,7 +42,7 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 ### In v1
 
 - Web shell for one administrator, reachable on loopback or over TLS.
-- Eleven core modules (below).
+- The core modules (below).
 - A plugin host that mounts compiled-in plugins through a scoped facade.
 - Live per-plugin token and cost accounting, with budgets.
 - A per-plugin host-capability kill switch, enforced at execution, spending, publication,
