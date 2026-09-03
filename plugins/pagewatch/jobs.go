@@ -55,6 +55,13 @@ type checkEvent struct {
 	JobID         int64  `json:"jobId"`
 }
 
+// alertEvent is the payload behind the alert event. It is a struct, not a map,
+// so the manifest can be derived from it rather than restate it.
+type alertEvent struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
 func (p *Plugin) check(jc hostjobs.Context) error {
 	h, ok := p.host()
 	if !ok {
@@ -169,9 +176,9 @@ func (p *Plugin) check(jc hostjobs.Context) error {
 			return err
 		}
 		if status == "attention" {
-			return h.Events().PublishTx(jc, tx, "alert", allowedHost+": expected text missing", map[string]string{
-				"title": "Page Watch needs attention",
-				"body":  fmt.Sprintf("%q was not found on %s", s.ExpectedText, target),
+			return h.Events().PublishTx(jc, tx, "alert", allowedHost+": expected text missing", alertEvent{
+				Title: "Page Watch needs attention",
+				Body:  fmt.Sprintf("%q was not found on %s", s.ExpectedText, target),
 			})
 		}
 		return nil

@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hbaldwin98/control-center/host"
+	"github.com/hbaldwin98/control-center/host/hosttest"
 )
 
 func TestValidateTarget(t *testing.T) {
@@ -148,4 +149,16 @@ type captureMigrator struct {
 func (m *captureMigrator) Apply(migrations []host.Migration) error {
 	m.migrations = migrations
 	return nil
+}
+
+func TestCatalogMatchesThePayloads(t *testing.T) {
+	t.Parallel()
+	hosttest.CheckEventCatalog(t, New().Manifest(), map[string]any{
+		"check.completed": checkEvent{
+			CheckedAt: "2026-09-02T00:00:00Z", URL: "https://example.test", Status: "changed",
+			ContentHash: "abc", ExpectedText: "hello", ExpectedFound: true, Summary: "s",
+			AIRan: true, InputTokens: 1, OutputTokens: 2, CostMicroUSD: 3, BrowserMS: 4, AIMS: 5, JobID: 6,
+		},
+		"alert": alertEvent{Title: "t", Body: "b"},
+	})
 }

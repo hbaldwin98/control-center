@@ -209,9 +209,7 @@ func (p *Plugin) finishSweep(jc hostjobs.Context, h host.Host, auctions, lots in
 	if err := p.recordAutomation(jc, h, "sweep", note); err != nil {
 		return err
 	}
-	if err := h.Events().Publish(jc, "sweep.completed", "sweep", map[string]any{
-		"auctions": auctions, "lots": lots,
-	}); err != nil {
+	if err := h.Events().Publish(jc, "sweep.completed", "sweep", sweepCompleted{Auctions: auctions, Lots: lots}); err != nil {
 		return err
 	}
 	return jc.Progress(1, note)
@@ -229,9 +227,7 @@ func (p *Plugin) sweepFailed(jc hostjobs.Context, h host.Host, err error) error 
 		return setErr
 	}
 	_ = p.recordAutomation(jc, h, "sweep", "stopped: BidRL is refusing requests")
-	_ = h.Events().Publish(jc, "sweep.throttled", "sweep", map[string]any{
-		"until": until,
-	})
+	_ = h.Events().Publish(jc, "sweep.throttled", "sweep", sweepThrottled{Until: until})
 	_ = jc.Logf("latched until %s; no tick will touch BidRL until you resume it", until)
 	return err
 }
@@ -293,9 +289,7 @@ func (p *Plugin) matchJob(jc hostjobs.Context) error {
 	if err := p.recordAutomation(jc, h, "match", note); err != nil {
 		return err
 	}
-	if err := h.Events().Publish(jc, "match.completed", "match", map[string]any{
-		"findings": created, "watchlists": len(enabled), "failed": failed,
-	}); err != nil {
+	if err := h.Events().Publish(jc, "match.completed", "match", matchCompleted{Findings: created, Watchlists: len(enabled), Failed: failed}); err != nil {
 		return err
 	}
 	return jc.Progress(1, note)

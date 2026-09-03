@@ -183,9 +183,9 @@ Photos: %d`, lot.Title, lot.LotCode, lot.URL, len(images))
 		if _, err := tx.Exec(jc, `UPDATE bidrl_lots SET bucket = ?, category = ? WHERE id = ?`, bucket, parsed.Category, lot.ID); err != nil {
 			return err
 		}
-		if err := h.Events().PublishTx(jc, tx, "lot.analyzed", lot.ID, map[string]any{
-			"lotId": lot.ID, "auctionId": lot.AuctionID, "title": lot.Title,
-			"identification": parsed.Identification, "basis": parsed.Basis, "bucket": bucket, "category": parsed.Category,
+		if err := h.Events().PublishTx(jc, tx, "lot.analyzed", lot.ID, lotAnalyzed{
+			LotID: lot.ID, AuctionID: lot.AuctionID, Title: lot.Title,
+			Identification: parsed.Identification, Basis: parsed.Basis, Bucket: bucket, Category: parsed.Category,
 		}); err != nil {
 			return err
 		}

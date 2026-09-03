@@ -1,6 +1,10 @@
 package hello
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hbaldwin98/control-center/host/hosttest"
+)
 
 func TestManifestDeclaresTicked(t *testing.T) {
 	t.Parallel()
@@ -17,4 +21,11 @@ func TestManifestDeclaresTicked(t *testing.T) {
 			t.Fatalf("field = %#v", f)
 		}
 	}
+}
+
+func TestCatalogMatchesThePayload(t *testing.T) {
+	t.Parallel()
+	hosttest.CheckEventCatalog(t, New().Manifest(), map[string]any{
+		"ticked": ticked{At: "2026-09-02T00:00:00Z", Note: "hello", BlobKey: "k", AIText: "hi"},
+	})
 }

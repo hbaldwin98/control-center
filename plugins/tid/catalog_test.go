@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/hbaldwin98/control-center/host/hosttest"
 	"time"
 )
 
@@ -37,41 +39,10 @@ func samplePayloads(t *testing.T) map[string]any {
 	}
 }
 
-// TestCatalogMatchesThePayloads is the guard against drift: the manifest declares
-// what host.Fields read off the payload structs, so a field that is published
-// must be described, and a field that is described must be published.
+// TestCatalogMatchesThePayloads is the guard against drift. The assertions live
+// in hosttest so every plugin makes the same promise in one line.
 func TestCatalogMatchesThePayloads(t *testing.T) {
-	samples := samplePayloads(t)
-	for _, spec := range New().Manifest().Events {
-		sample, ok := samples[spec.Type]
-		if !ok {
-			t.Fatalf("event %q has no sample payload; add one so its fields stay checked", spec.Type)
-		}
-		raw, err := json.Marshal(sample)
-		if err != nil {
-			t.Fatalf("%s payload: %v", spec.Type, err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("%s payload: %v", spec.Type, err)
-		}
-
-		declared := map[string]bool{}
-		for _, f := range spec.Fields {
-			declared[f.Name] = true
-			if strings.TrimSpace(f.Purpose) == "" {
-				t.Errorf("%s field %q has no purpose, so the plugin will not load", spec.Type, f.Name)
-			}
-			if resolve(payload, f.Name) == nil {
-				t.Errorf("%s declares %q but the payload has no such path", spec.Type, f.Name)
-			}
-		}
-		for _, key := range topLevelKeys(payload) {
-			if !declared[key] {
-				t.Errorf("%s publishes %q but the catalog does not declare it", spec.Type, key)
-			}
-		}
-	}
+	hosttest.CheckEventCatalog(t, New().Manifest(), samplePayloads(t))
 }
 
 // TestSyncedAndAlertShareTheirDays keeps the two events interchangeable for a
@@ -117,12 +88,4 @@ func resolve(payload map[string]any, path string) any {
 		cur = m[part]
 	}
 	return cur
-}
-
-func topLevelKeys(payload map[string]any) []string {
-	out := make([]string, 0, len(payload))
-	for key := range payload {
-		out = append(out, key)
-	}
-	return out
 }

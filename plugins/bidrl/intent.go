@@ -204,9 +204,7 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 		if err := p.storeIntentHits(jc, h, args.SearchID, q, 0, 0, nil); err != nil {
 			return fail(err)
 		}
-		if err := h.Events().Publish(jc, "intent.completed", args.SearchID, map[string]any{
-			"query": q, "hits": 0, "scanned": 0, "skipped": 0,
-		}); err != nil {
+		if err := h.Events().Publish(jc, "intent.completed", args.SearchID, intentCompleted{Query: q}); err != nil {
 			return err
 		}
 		return jc.Progress(1, "no lots")
@@ -235,8 +233,8 @@ func (p *Plugin) intentJob(jc hostjobs.Context) error {
 	if err := p.storeIntentHits(jc, h, args.SearchID, q, len(cards), listed, kept); err != nil {
 		return fail(err)
 	}
-	if err := h.Events().Publish(jc, "intent.completed", args.SearchID, map[string]any{
-		"query": q, "hits": len(kept), "scanned": len(cards), "skipped": listed,
+	if err := h.Events().Publish(jc, "intent.completed", args.SearchID, intentCompleted{
+		Query: q, Hits: len(kept), Scanned: len(cards), Skipped: listed,
 	}); err != nil {
 		return err
 	}
@@ -469,9 +467,7 @@ func keepIntentMatches(matches []intentMatch, cards []intentCard) []intentMatch 
 
 func (p *Plugin) failIntent(ctx context.Context, h host.Host, id, query, now string, err error) error {
 	_ = p.markIntent(ctx, h, id, query, "failed", 0, 0, 0, err.Error(), now)
-	_ = h.Events().Publish(ctx, "intent.completed", id, map[string]any{
-		"query": query, "hits": 0, "error": err.Error(),
-	})
+	_ = h.Events().Publish(ctx, "intent.completed", id, intentCompleted{Query: query, Error: err.Error()})
 	return err
 }
 

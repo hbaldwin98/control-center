@@ -205,9 +205,7 @@ func (p *Plugin) finishWatch(jc hostjobs.Context, h host.Host, w watchlist, crea
 	if err := p.markWatchlist(jc, h, w.ID, "ready", ""); err != nil {
 		return 0, err
 	}
-	if err := h.Events().Publish(jc, "watch.completed", w.ID, map[string]any{
-		"watchlistId": w.ID, "name": w.Name, "findings": created,
-	}); err != nil {
+	if err := h.Events().Publish(jc, "watch.completed", w.ID, watchCompleted{WatchlistID: w.ID, Name: w.Name, Findings: created}); err != nil {
 		return 0, err
 	}
 	return created, jc.Progress(1, fmt.Sprintf("%d new findings", created))
@@ -371,12 +369,10 @@ func (p *Plugin) storeFindings(ctx context.Context, h host.Host, w watchlist, ke
 		return 0, err
 	}
 	if created > 0 {
-		_ = h.Events().Publish(ctx, "finding.created", w.ID, map[string]any{
-			"watchlistId": w.ID, "count": created,
-		})
+		_ = h.Events().Publish(ctx, "finding.created", w.ID, findingCreated{WatchlistID: w.ID, Count: created})
 		body := fmt.Sprintf("%d new finding%s on %s", created, pluralS(created), w.Name)
-		_ = h.Events().Publish(ctx, "alert", body, map[string]any{
-			"title": "BIDRL finding", "body": body, "watchlistId": w.ID, "count": created,
+		_ = h.Events().Publish(ctx, "alert", body, alerted{
+			Title: "BIDRL finding", Body: body, WatchlistID: w.ID, Count: created,
 		})
 	}
 	return created, nil
@@ -788,9 +784,7 @@ func (p *Plugin) decideFinding(w http.ResponseWriter, r *http.Request, state str
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	_ = h.Events().Publish(r.Context(), "finding.decided", id, map[string]any{
-		"findingId": id, "lotId": lotID, "state": state,
-	})
+	_ = h.Events().Publish(r.Context(), "finding.decided", id, findingDecided{FindingID: id, LotID: lotID, State: state})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "state": state, "lotId": lotID})
 }
 

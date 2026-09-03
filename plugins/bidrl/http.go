@@ -228,8 +228,8 @@ func (p *Plugin) handleCleanupExpired(w http.ResponseWriter, r *http.Request) {
 		writeHostErr(w, err)
 		return
 	}
-	if err := h.Events().Publish(r.Context(), "expired.cleaned", "expired", map[string]any{
-		"auctions": result.Auctions, "lots": result.Lots, "sites": result.Sites,
+	if err := h.Events().Publish(r.Context(), "expired.cleaned", "expired", expiredCleaned{
+		Auctions: result.Auctions, Lots: result.Lots, Sites: result.Sites,
 	}); err != nil {
 		writeHostErr(w, err)
 		return

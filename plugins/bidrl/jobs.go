@@ -53,9 +53,7 @@ func (p *Plugin) scanJob(jc hostjobs.Context) error {
 	if err := p.priceEligible(jc, h, args.AuctionID); err != nil {
 		return err
 	}
-	if err := h.Events().Publish(jc, "scan.completed", args.AuctionID, map[string]any{
-		"auctionId": args.AuctionID,
-	}); err != nil {
+	if err := h.Events().Publish(jc, "scan.completed", args.AuctionID, scanCompleted{AuctionID: args.AuctionID}); err != nil {
 		return err
 	}
 	return jc.Progress(1, "scan complete")
@@ -112,11 +110,11 @@ func (p *Plugin) refreshJob(jc hostjobs.Context) error {
 	if err := jc.Progress(1, fmt.Sprintf("%d lots refreshed", changed)); err != nil {
 		return err
 	}
-	return h.Events().Publish(jc, "bids.refreshed", args.AuctionID, map[string]any{
-		"auctionId": args.AuctionID,
-		"at":        h.Clock().Now().UTC().Format(time.RFC3339Nano),
-		"lots":      changed,
-		"source":    "catalog",
+	return h.Events().Publish(jc, "bids.refreshed", args.AuctionID, bidsRefreshed{
+		AuctionID: args.AuctionID,
+		At:        h.Clock().Now().UTC().Format(time.RFC3339Nano),
+		Lots:      changed,
+		Source:    "catalog",
 	})
 }
 
@@ -191,9 +189,7 @@ func (p *Plugin) enrichJob(jc hostjobs.Context) error {
 			}
 		}
 	}
-	if err := h.Events().Publish(jc, "lot.enriched", lot.ID, map[string]any{
-		"lotId": lot.ID, "auctionId": lot.AuctionID,
-	}); err != nil {
+	if err := h.Events().Publish(jc, "lot.enriched", lot.ID, lotEnriched{LotID: lot.ID, AuctionID: lot.AuctionID}); err != nil {
 		return err
 	}
 	return jc.Progress(1, "enriched")

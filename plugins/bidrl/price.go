@@ -189,11 +189,11 @@ func (p *Plugin) storeValuation(jc hostjobs.Context, h host.Host, lot lotRow, ev
 		if err != nil {
 			return err
 		}
-		payload := map[string]any{
-			"lotId": lot.ID, "auctionId": lot.AuctionID, "title": lot.Title,
-			"priceCents": ev.PriceCents, "bidCents": lot.BidCents, "kind": ev.Kind,
-			"sourceUrl": ev.SourceURL, "sourceClass": classifySource(ev.SourceURL).Class,
-			"reusedFromLotId": reusedFrom,
+		payload := lotPriced{
+			LotID: lot.ID, AuctionID: lot.AuctionID, Title: lot.Title,
+			PriceCents: ev.PriceCents, BidCents: lot.BidCents, Kind: ev.Kind,
+			SourceURL: ev.SourceURL, SourceClass: classifySource(ev.SourceURL).Class,
+			ReusedFromLotID: reusedFrom,
 		}
 		if err := h.Events().PublishTx(jc, tx, "lot.priced", lot.ID, payload); err != nil {
 			return err

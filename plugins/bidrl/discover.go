@@ -34,9 +34,7 @@ func (p *Plugin) discoverJob(jc hostjobs.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.Events().Publish(jc, "sites.discovered", "sites", map[string]any{
-		"auctionCount": n,
-	}); err != nil {
+	if err := h.Events().Publish(jc, "sites.discovered", "sites", sitesDiscovered{AuctionCount: n}); err != nil {
 		return err
 	}
 	return jc.Progress(1, fmt.Sprintf("%d SITES auctions", n))

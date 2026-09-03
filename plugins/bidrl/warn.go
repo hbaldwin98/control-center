@@ -52,8 +52,8 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 				marked, c.id); err != nil {
 				return err
 			}
-			return h.Events().PublishTx(jc, tx, "alert", body, map[string]any{
-				"title": "BIDRL lot ending soon", "body": body, "lotId": c.id, "endsAt": c.ends,
+			return h.Events().PublishTx(jc, tx, "alert", body, alerted{
+				Title: "BIDRL lot ending soon", Body: body, LotID: c.id, EndsAt: c.ends,
 			})
 		}); err != nil {
 			return err

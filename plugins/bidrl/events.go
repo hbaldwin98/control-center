@@ -2,122 +2,262 @@ package bidrl
 
 import "github.com/hbaldwin98/control-center/host"
 
+// The payloads BidRL publishes. Every event is a struct rather than an inline
+// map so the catalog below can be derived from the thing that actually ships:
+// host.Fields reads names and types off these structs and pairs them with a
+// purpose. A field with no purpose loads with an empty one, which the host
+// rejects, so an undescribed payload field fails at startup instead of reaching
+// the catalog as a mystery key.
+
+type lotAnalyzed struct {
+	LotID          string `json:"lotId"`
+	AuctionID      string `json:"auctionId"`
+	Title          string `json:"title"`
+	Identification string `json:"identification"`
+	Basis          string `json:"basis"`
+	Bucket         string `json:"bucket"`
+	Category       string `json:"category"`
+}
+
+type lotEnriched struct {
+	LotID     string `json:"lotId"`
+	AuctionID string `json:"auctionId"`
+}
+
+// lotPriced backs both lot.priced and deal_found: a deal is the same valuation,
+// republished under a type a rule can match on its own.
+type lotPriced struct {
+	LotID           string `json:"lotId"`
+	AuctionID       string `json:"auctionId"`
+	Title           string `json:"title"`
+	PriceCents      int64  `json:"priceCents"`
+	BidCents        *int64 `json:"bidCents"`
+	Kind            string `json:"kind"`
+	SourceURL       string `json:"sourceUrl"`
+	SourceClass     string `json:"sourceClass"`
+	ReusedFromLotID string `json:"reusedFromLotId"`
+}
+
+type auctionCollected struct {
+	AuctionID     string `json:"auctionId"`
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	LotCount      int    `json:"lotCount"`
+	AffiliateID   string `json:"affiliateId"`
+	AffiliateName string `json:"affiliateName"`
+	City          string `json:"city"`
+	EndsAt        string `json:"endsAt"`
+}
+
+type scanCompleted struct {
+	AuctionID string `json:"auctionId"`
+}
+
+type bidsRefreshed struct {
+	AuctionID string `json:"auctionId"`
+	At        string `json:"at"`
+	Lots      int    `json:"lots"`
+	Source    string `json:"source"`
+}
+
+type sitesDiscovered struct {
+	AuctionCount int `json:"auctionCount"`
+}
+
+type sweepCompleted struct {
+	Auctions int `json:"auctions"`
+	Lots     int `json:"lots"`
+}
+
+type sweepThrottled struct {
+	Until string `json:"until"`
+}
+
+type matchCompleted struct {
+	Findings   int `json:"findings"`
+	Watchlists int `json:"watchlists"`
+	Failed     int `json:"failed"`
+}
+
+type expiredCleaned struct {
+	Auctions int `json:"auctions"`
+	Lots     int `json:"lots"`
+	Sites    int `json:"sites"`
+}
+
+type searchCompleted struct {
+	Query string `json:"query"`
+	Scope string `json:"scope"`
+	Hits  int    `json:"hits"`
+	Error string `json:"error,omitempty"`
+}
+
+type intentCompleted struct {
+	Query   string `json:"query"`
+	Hits    int    `json:"hits"`
+	Scanned int    `json:"scanned"`
+	Skipped int    `json:"skipped"`
+	Error   string `json:"error,omitempty"`
+}
+
+type watchCompleted struct {
+	WatchlistID string `json:"watchlistId"`
+	Name        string `json:"name"`
+	Findings    int    `json:"findings"`
+}
+
+type findingCreated struct {
+	WatchlistID string `json:"watchlistId"`
+	Count       int    `json:"count"`
+}
+
+type findingDecided struct {
+	FindingID string `json:"findingId"`
+	LotID     string `json:"lotId"`
+	State     string `json:"state"`
+}
+
+// alerted is the one alert shape. Two situations raise it — a favorited lot
+// closing soon, and a watchlist finding — so each fills the fields it has and
+// leaves the rest empty, rather than publishing a second shape under the same
+// type.
+type alerted struct {
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	WatchlistID string `json:"watchlistId,omitempty"`
+	Count       int    `json:"count,omitempty"`
+	LotID       string `json:"lotId,omitempty"`
+	EndsAt      string `json:"endsAt,omitempty"`
+}
+
 func publishedEvents() []host.EventSpec {
 	return []host.EventSpec{
 		event("alert", "A new watchlist finding, or a favorited lot closing within 24 hours. Matched by the default plugin-alert rule.",
-			field("title", "string", "Short headline."),
-			field("body", "string", "What happened, ready to send."),
-			field("watchlistId", "string", "Watchlist that produced findings, when this is a finding alert."),
-			field("count", "number", "How many new findings, when this is a finding alert."),
-			field("lotId", "string", "The lot, when this is an ending-soon alert."),
-			field("endsAt", "string", "When that lot closes."),
-		),
+			alerted{}, map[string]string{
+				"title":       "Short headline.",
+				"body":        "What happened, ready to send.",
+				"watchlistId": "Watchlist that produced findings, when this is a finding alert.",
+				"count":       "How many new findings, when this is a finding alert.",
+				"lotId":       "The lot, when this is an ending-soon alert.",
+				"endsAt":      "When that lot closes.",
+			}),
 		event("finding.created", "A watchlist produced new lots that still need a decision.",
-			field("watchlistId", "string", "The watchlist that matched."),
-			field("count", "number", "How many new findings this run."),
-		),
+			findingCreated{}, map[string]string{
+				"watchlistId": "The watchlist that matched.",
+				"count":       "How many new findings this run.",
+			}),
 		event("finding.decided", "Someone accepted or rejected a finding.",
-			field("findingId", "string", "The finding that was decided."),
-			field("lotId", "string", "The lot on that finding."),
-			field("state", "string", "accepted or rejected."),
-		),
+			findingDecided{}, map[string]string{
+				"findingId": "The finding that was decided.",
+				"lotId":     "The lot on that finding.",
+				"state":     "accepted or rejected.",
+			}),
 		event("watch.completed", "One watchlist finished matching against stored lots.",
-			field("watchlistId", "string", "The watchlist that ran."),
-			field("name", "string", "Display name of the watchlist."),
-			field("findings", "number", "New findings this run."),
-		),
+			watchCompleted{}, map[string]string{
+				"watchlistId": "The watchlist that ran.",
+				"name":        "Display name of the watchlist.",
+				"findings":    "New findings this run.",
+			}),
 		event("sweep.completed", "A scheduled sweep finished collecting auctions.",
-			field("auctions", "number", "Auctions collected."),
-			field("lots", "number", "Lots stored."),
-		),
+			sweepCompleted{}, map[string]string{
+				"auctions": "Auctions collected.",
+				"lots":     "Lots stored.",
+			}),
 		event("sweep.throttled", "BidRL refused requests; the sweep is latched until a later tick.",
-			field("until", "string", "RFC3339Nano time after which the next sweep may try again."),
-		),
+			sweepThrottled{}, map[string]string{
+				"until": "RFC3339Nano time after which the next sweep may try again.",
+			}),
 		event("match.completed", "Every enabled watchlist finished a match pass.",
-			field("findings", "number", "New findings across watchlists."),
-			field("watchlists", "number", "How many watchlists ran."),
-			field("failed", "number", "How many watchlists errored."),
-		),
+			matchCompleted{}, map[string]string{
+				"findings":   "New findings across watchlists.",
+				"watchlists": "How many watchlists ran.",
+				"failed":     "How many watchlists errored.",
+			}),
 		event("auction.collected", "An auction the sweep had not stored before was collected: its lots are now stored.",
-			field("auctionId", "string", "The auction."),
-			field("url", "string", "Canonical auction URL."),
-			field("title", "string", "Auction title."),
-			field("lotCount", "number", "Lots stored."),
-			field("affiliateId", "string", "BidRL location the auction belongs to."),
-			field("affiliateName", "string", "Display name of that location."),
-			field("city", "string", "City of that location."),
-			field("endsAt", "string", "When the auction closes."),
-		),
+			auctionCollected{}, map[string]string{
+				"auctionId":     "The auction.",
+				"url":           "Canonical auction URL.",
+				"title":         "Auction title.",
+				"lotCount":      "Lots stored.",
+				"affiliateId":   "BidRL location the auction belongs to.",
+				"affiliateName": "Display name of that location.",
+				"city":          "City of that location.",
+				"endsAt":        "When the auction closes.",
+			}),
 		event("scan.completed", "Vision, enrichment, and pricing for one auction finished.",
-			field("auctionId", "string", "The auction that was scanned."),
-		),
+			scanCompleted{}, map[string]string{
+				"auctionId": "The auction that was scanned.",
+			}),
 		event("bids.refreshed", "Live catalog bids were written onto stored lots.",
-			field("auctionId", "string", "The auction whose bids were refreshed."),
-			field("at", "string", "RFC3339Nano time of the refresh."),
-			field("lots", "number", "Lots whose bid changed."),
-			field("source", "string", "Where the bids came from."),
-		),
+			bidsRefreshed{}, map[string]string{
+				"auctionId": "The auction whose bids were refreshed.",
+				"at":        "RFC3339Nano time of the refresh.",
+				"lots":      "Lots whose bid changed.",
+				"source":    "Where the bids came from.",
+			}),
 		event("lot.enriched", "Photographs for one lot were stored.",
-			field("lotId", "string", "The lot."),
-			field("auctionId", "string", "The auction it belongs to."),
-		),
+			lotEnriched{}, map[string]string{
+				"lotId":     "The lot.",
+				"auctionId": "The auction it belongs to.",
+			}),
 		event("lot.analyzed", "Vision identified what a lot's photographs show.",
-			field("lotId", "string", "The lot."),
-			field("auctionId", "string", "The auction it belongs to."),
-			field("title", "string", "Auction title as listed."),
-			field("identification", "string", "What the model said the photographs show."),
-			field("basis", "string", "How confident the identification is."),
-			field("bucket", "string", "priced, needs_price, or rejected."),
-			field("category", "string", "Closed category the model assigned."),
-		),
+			lotAnalyzed{}, map[string]string{
+				"lotId":          "The lot.",
+				"auctionId":      "The auction it belongs to.",
+				"title":          "Auction title as listed.",
+				"identification": "What the model said the photographs show.",
+				"basis":          "How confident the identification is.",
+				"bucket":         "priced, needs_price, or rejected.",
+				"category":       "Closed category the model assigned.",
+			}),
 		event("lot.priced", "A cited marketplace price was written for a lot.",
-			field("lotId", "string", "The lot."),
-			field("auctionId", "string", "The auction it belongs to."),
-			field("title", "string", "Auction title as listed."),
-			field("priceCents", "number", "Cited price in cents."),
-			field("bidCents", "number", "Current bid in cents."),
-			field("kind", "string", "How the price was obtained."),
-			field("sourceUrl", "string", "Page the price was cited from."),
-			field("sourceClass", "string", "What kind of site that was."),
-			field("reusedFromLotId", "string", "Earlier lot the price was copied from, if any."),
-		),
+			lotPriced{}, pricedPurposes()),
 		event("deal_found", "The cited price is enough of a discount relative to the current bid to be interesting.",
-			field("lotId", "string", "The lot."),
-			field("auctionId", "string", "The auction it belongs to."),
-			field("title", "string", "Auction title as listed."),
-			field("priceCents", "number", "Cited price in cents."),
-			field("bidCents", "number", "Current bid in cents."),
-			field("kind", "string", "How the price was obtained."),
-			field("sourceUrl", "string", "Page the price was cited from."),
-			field("sourceClass", "string", "What kind of site that was."),
-			field("reusedFromLotId", "string", "Earlier lot the price was copied from, if any."),
-		),
+			lotPriced{}, pricedPurposes()),
 		event("search.completed", "A title search against stored lots finished.",
-			field("query", "string", "What was searched."),
-			field("scope", "string", "prefer, only, or all."),
-			field("hits", "number", "Lots returned."),
-		),
+			searchCompleted{}, map[string]string{
+				"query": "What was searched.",
+				"scope": "prefer, only, or all.",
+				"hits":  "Lots returned.",
+				"error": "Why the search failed, on the failure event.",
+			}),
 		event("intent.completed", "An intent search ranked stored lots by meaning.",
-			field("query", "string", "The stated intent."),
-			field("hits", "number", "Lots kept."),
-			field("scanned", "number", "Lots considered."),
-			field("skipped", "number", "Lots excluded by free rules."),
-		),
+			intentCompleted{}, map[string]string{
+				"query":   "The stated intent.",
+				"hits":    "Lots kept.",
+				"scanned": "Lots considered.",
+				"skipped": "Lots excluded by free rules.",
+				"error":   "Why the search failed, on the failure event.",
+			}),
 		event("sites.discovered", "Open SITES auctions were listed from BidRL's locations menu.",
-			field("auctionCount", "number", "Auctions found."),
-		),
+			sitesDiscovered{}, map[string]string{
+				"auctionCount": "Auctions found.",
+			}),
 		event("expired.cleaned", "Closed auctions and their lots were removed.",
-			field("auctions", "number", "Auctions removed."),
-			field("lots", "number", "Lots removed."),
-			field("sites", "number", "SITES rows removed."),
-		),
+			expiredCleaned{}, map[string]string{
+				"auctions": "Auctions removed.",
+				"lots":     "Lots removed.",
+				"sites":    "SITES rows removed.",
+			}),
 	}
 }
 
-func event(typ, purpose string, fields ...host.EventField) host.EventSpec {
-	return host.EventSpec{Type: typ, Purpose: purpose, Fields: fields}
+func pricedPurposes() map[string]string {
+	return map[string]string{
+		"lotId":           "The lot.",
+		"auctionId":       "The auction it belongs to.",
+		"title":           "Auction title as listed.",
+		"priceCents":      "Cited price in cents.",
+		"bidCents":        "Current bid in cents.",
+		"kind":            "How the price was obtained.",
+		"sourceUrl":       "Page the price was cited from.",
+		"sourceClass":     "What kind of site that was.",
+		"reusedFromLotId": "Earlier lot the price was copied from, if any.",
+	}
 }
 
-func field(name, typ, purpose string) host.EventField {
-	return host.EventField{Name: name, Type: typ, Purpose: purpose}
+// event pairs a payload struct with the purposes of its fields. The struct is
+// the source of names and types, so the two cannot disagree.
+func event(typ, purpose string, payload any, purposes map[string]string) host.EventSpec {
+	return host.EventSpec{Type: typ, Purpose: purpose, Fields: host.Fields(payload, purposes)}
 }

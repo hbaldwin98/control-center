@@ -106,8 +106,8 @@ func (p *Plugin) searchJob(jc hostjobs.Context) error {
 	if err := p.storeHits(jc, h, args.SearchID, hits); err != nil {
 		return fail(err)
 	}
-	if err := h.Events().Publish(jc, "search.completed", args.SearchID, map[string]any{
-		"query": q, "scope": cfg.SearchScope, "hits": len(hits),
+	if err := h.Events().Publish(jc, "search.completed", args.SearchID, searchCompleted{
+		Query: q, Scope: cfg.SearchScope, Hits: len(hits),
 	}); err != nil {
 		return err
 	}
@@ -283,9 +283,7 @@ func mergeHits(query string, cfg pluginConfig, local []searchHit, live []parsedL
 
 func (p *Plugin) failSearch(ctx context.Context, h host.Host, id, query, scope, now string, err error) error {
 	_ = p.markSearch(ctx, h, id, query, scope, "failed", 0, err.Error(), now)
-	_ = h.Events().Publish(ctx, "search.completed", id, map[string]any{
-		"query": query, "scope": scope, "hits": 0, "error": err.Error(),
-	})
+	_ = h.Events().Publish(ctx, "search.completed", id, searchCompleted{Query: query, Scope: scope, Error: err.Error()})
 	return err
 }
 

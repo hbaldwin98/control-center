@@ -91,10 +91,10 @@ func (p *Plugin) collectAuction(jc hostjobs.Context, h host.Host, pageURL string
 	if err != nil {
 		return 0, err
 	}
-	if err := h.Events().Publish(jc, "auction.collected", auctionID, map[string]any{
-		"auctionId": auctionID, "url": canonical, "title": title, "lotCount": len(lots),
-		"affiliateId": loc.AffiliateID, "affiliateName": loc.AffiliateName, "city": loc.City,
-		"endsAt": endsAt,
+	if err := h.Events().Publish(jc, "auction.collected", auctionID, auctionCollected{
+		AuctionID: auctionID, URL: canonical, Title: title, LotCount: len(lots),
+		AffiliateID: loc.AffiliateID, AffiliateName: loc.AffiliateName, City: loc.City,
+		EndsAt: endsAt,
 	}); err != nil {
 		return 0, err
 	}
