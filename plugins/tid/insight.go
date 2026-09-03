@@ -27,6 +27,7 @@ type insightPayload struct {
 	Summary        string   `json:"summary"`
 	Recommendation string   `json:"recommendation"`
 	Anomalies      []string `json:"anomalies"`
+	Body           string   `json:"body"`
 }
 
 func (p *Plugin) writeInsight(jc hostjobs.Context, h host.Host, cfg settings) error {
@@ -107,10 +108,15 @@ func (p *Plugin) writeInsight(jc hostjobs.Context, h host.Host, cfg settings) er
 		at, parsed.Summary, parsed.Recommendation, string(anomalies)); err != nil {
 		return err
 	}
+	body := parsed.Summary
+	if parsed.Recommendation != "" {
+		body = parsed.Summary + "\n" + parsed.Recommendation
+	}
 	return h.Events().Publish(jc, "insight", at, insightPayload{
 		At:             at,
 		Summary:        parsed.Summary,
 		Recommendation: parsed.Recommendation,
 		Anomalies:      parsed.Anomalies,
+		Body:           body,
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,67 @@ func TestSyncAlertsOnNewReadingsOnly(t *testing.T) {
 	if n := countEvents(h, "tid.alert"); n != 1 {
 		t.Fatalf("a repeat sync without new days re-alerted: tid.alert events = %d", n)
 	}
+}
+
+func TestSyncPublishesLatestReadingAndInsight(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, tid.New())
+	p := newPortal(t, h.Clock.Now())
+	h.Browser.Handle(portalHost, p.handler())
+	h.Browser.Credential(credential, password)
+	if err := h.AI.ReplyJSON("cheap-chat", map[string]any{
+		"summary":        "Usage is steady across the week.",
+		"recommendation": "Run the dishwasher after 9pm.",
+		"anomalies":      []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.Run(ctx)
+	h.SetConfig(ctx, map[string]any{
+		"tenant_id":     tenant,
+		"username":      "person@example.test",
+		"credential_id": credential,
+		"cents_per_kwh": 0,
+	})
+
+	runHistorySync(t, ctx, h)
+
+	syncPay := payloadOf(t, h, "tid.synced")
+	if syncPay["day"] != p.d2 {
+		t.Fatalf("synced day = %v, want the newest portal day %s; payload %#v", syncPay["day"], p.d2, syncPay)
+	}
+	if syncPay["kwh"] != 8.0 {
+		t.Fatalf("synced kwh = %v, want 8; payload %#v", syncPay["kwh"], syncPay)
+	}
+	body, _ := syncPay["body"].(string)
+	if body == "" || !strings.Contains(body, p.d2) || !strings.Contains(body, "8") {
+		t.Fatalf("synced body = %q, want the day's reading", body)
+	}
+
+	insightPay := payloadOf(t, h, "tid.insight")
+	if insightPay["summary"] != "Usage is steady across the week." {
+		t.Fatalf("insight summary = %v", insightPay["summary"])
+	}
+	insightBody, _ := insightPay["body"].(string)
+	if !strings.Contains(insightBody, "Usage is steady") || !strings.Contains(insightBody, "dishwasher") {
+		t.Fatalf("insight body = %q", insightBody)
+	}
+}
+
+func payloadOf(t *testing.T, h *hosttest.Harness, typ string) map[string]any {
+	t.Helper()
+	for _, e := range h.Events() {
+		if e.Type != typ {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			t.Fatalf("%s payload: %v", typ, err)
+		}
+		return payload
+	}
+	t.Fatalf("no %s event in %v", typ, eventTypes(h))
+	return nil
 }
 
 func runHistorySync(t *testing.T, ctx context.Context, h *hosttest.Harness) {

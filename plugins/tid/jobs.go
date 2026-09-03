@@ -19,9 +19,12 @@ type syncArgs struct {
 }
 
 type synced struct {
-	At     string `json:"at"`
-	Rows   int    `json:"rows"`
-	Source string `json:"source"`
+	At     string  `json:"at"`
+	Rows   int     `json:"rows"`
+	Source string  `json:"source"`
+	Day    string  `json:"day,omitempty"`
+	KWh    float64 `json:"kwh,omitempty"`
+	Body   string  `json:"body"`
 }
 
 func (p *Plugin) sync(jc hostjobs.Context) error {
@@ -63,13 +66,23 @@ func (p *Plugin) sync(jc hostjobs.Context) error {
 	if err := p.recordSync(jc, h, "ok", n, source, ""); err != nil {
 		return err
 	}
-	if err := h.Events().Publish(jc, "synced", now, synced{At: now, Rows: n, Source: source}); err != nil {
+	payload := synced{At: now, Rows: n, Source: source, Body: "TID synced, no daily reading yet"}
+	if latest, ok := latestReading(result.Readings); ok {
+		payload.Day = latest.Day
+		payload.KWh = latest.KWh
+		payload.Body = formatReading(latest)
+	}
+	if err := h.Events().Publish(jc, "synced", now, payload); err != nil {
 		return err
 	}
 	if inserted > 0 {
-		body := fmt.Sprintf("%d new daily reading%s", inserted, plural(inserted))
+		body := payload.Body
+		if body == "" {
+			body = fmt.Sprintf("%d new daily reading%s", inserted, plural(inserted))
+		}
 		if err := h.Events().Publish(jc, "alert", body, map[string]any{
 			"title": "New TID usage", "body": body, "rows": inserted, "source": source,
+			"day": payload.Day, "kwh": payload.KWh,
 		}); err != nil {
 			return err
 		}
@@ -151,6 +164,29 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+func latestReading(readings []Reading) (Reading, bool) {
+	var latest Reading
+	found := false
+	for _, r := range readings {
+		if r.Day == "" {
+			continue
+		}
+		if !found || r.Day > latest.Day {
+			latest = r
+			found = true
+		}
+	}
+	return latest, found
+}
+
+func formatReading(r Reading) string {
+	s := fmt.Sprintf("%s: %.1f kWh", r.Day, r.KWh)
+	if r.CostCents != nil {
+		s += fmt.Sprintf(" ($%.2f)", float64(*r.CostCents)/100)
+	}
+	return s
 }
 
 func nullableString(value string) any {
