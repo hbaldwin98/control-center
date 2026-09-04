@@ -104,11 +104,11 @@ func TestSearXNGParsesJSONResults(t *testing.T) {
 	}
 }
 
-func TestSearXNGFallsBackWhenBraveIsEmpty(t *testing.T) {
+func TestSearXNGFallsBackWhenEarlierEnginesAreEmpty(t *testing.T) {
 	var engines []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		engines = append(engines, r.URL.Query().Get("engines"))
-		if r.URL.Query().Get("engines") == "brave" {
+		if r.URL.Query().Get("engines") != "duckduckgo" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
 			return
 		}
@@ -127,6 +127,20 @@ func TestSearXNGFallsBackWhenBraveIsEmpty(t *testing.T) {
 	}
 	if len(engines) != 2 || engines[0] != "brave" || engines[1] != "duckduckgo" {
 		t.Fatalf("engines=%v", engines)
+	}
+}
+
+func TestSearXNGUnresponsiveEngineIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results":              []any{},
+			"unresponsive_engines": [][]string{{"brave", "Suspended: too many requests"}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	_, err := (SearXNG{BaseURL: srv.URL, Client: srv.Client(), Engines: []string{"brave"}}).Search(context.Background(), "x", 1)
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "brave: Suspended: too many requests") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

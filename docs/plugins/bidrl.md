@@ -232,17 +232,20 @@ fiction. A mesh chair confidently valued at $450 because it resembles an Aeron i
 failure mode that kills the whole thing.
 
 **Vision and pricing are separate calls.** The vision model says what it sees. Pricing
-asks `Host.Search()` for public listings of that model **once**, ranks hits **eBay
-first, then retail, then other resale**, then the open web. A chat call (no provider web-search)
-picks a dollar amount already written in one of those hits. Invented MSRPs are rejected:
-`price_cents` must appear as `$…` in the hit title or snippet, and the stored quote is
-that snippet, not the model's prose. The feed shows the site, asking vs sold, quote, and
-link.
+asks `Host.Search()` for public listings using the model plus the lot's identification,
+title, description, and notes, then falls back to the model alone. It ranks hits **eBay
+first, then retail, then other resale**, then the open web. Lot text improves discovery;
+it is not pricing evidence. A chat call (no provider web-search) picks a dollar amount
+already written in a hit that contains the model, allowing punctuation and spacing
+variants. Invented MSRPs are rejected: `price_cents` must appear as `$…` in the hit title
+or snippet, and the stored quote is that snippet, not the model's prose. The feed shows
+the site, asking vs sold, quote, and link.
 
 If both search variants return model-matching results but none includes a dollar amount,
 Bidrl asks `Browser().Read` for at most two pages in the same source order. Reader text
-replaces the missing snippet only when it literally contains both the model and a dollar
-amount; the existing AI citation checks then apply unchanged. Bot walls, timeouts, an
+replaces the missing snippet only when it contains both the model (allowing punctuation
+and spacing variants) and a dollar amount; the existing AI citation checks then apply
+unchanged. Bot walls, timeouts, an
 unconfigured Reader, and extraction failures are misses, so the lot remains unpriced.
 The host renders each allowlisted URL and gives Jina only raw HTML.
 
@@ -598,8 +601,11 @@ full-window view.
   from a search hit that names the model and a dollar amount. Hits are ranked
   eBay, then retail, then other resale, then the open web. The model's
   `price_cents` must match a `$` amount in that hit.
+- Comparable discovery searches with the lot identification, title, description, and notes,
+  then falls back to the model alone. Lot text does not satisfy the evidence requirement.
 - If no snippet carries usable evidence, at most two model-matching result pages are read.
-  Extracted text must pass the same literal model and `$` amount checks.
+  Extracted text must pass the same model and `$` amount checks; model punctuation and
+  spacing may differ.
 - Missing or mismatched evidence leaves the lot unpriced. The feed shows the source site,
   quote, retrieval age, and whether the listing is asking or sold. It never presents an
   uncited model estimate as a market price.

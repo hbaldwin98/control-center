@@ -15,6 +15,7 @@ import (
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
 	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
+	"github.com/hbaldwin98/control-center/host/hosttest"
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	_ "modernc.org/sqlite"
 )
@@ -764,6 +765,121 @@ func TestLookupComparablesFallsThroughWhenEbayHasNoPrice(t *testing.T) {
 	}
 }
 
+func TestLookupComparablesUsesLotTextToFindModel(t *testing.T) {
+	t.Parallel()
+	var queries []string
+	q := func(_ context.Context, req hostsearch.Request) ([]hostsearch.Hit, error) {
+		queries = append(queries, req.Query)
+		if !strings.Contains(strings.ToLower(req.Query), "whirlpool side-by-side refrigerator") {
+			return nil, nil
+		}
+		return []hostsearch.Hit{{
+			URL: "https://www.lowes.com/pd/whirlpool-refrigerator", Title: "Whirlpool WRS325SDHZ refrigerator",
+			Snippet: "Whirlpool model WRS325SDHZ for $1,299.",
+		}}, nil
+	}
+	hits, tier, err := lookupComparables(context.Background(), q, "WRS325SDHZ", nil,
+		"Whirlpool side-by-side refrigerator", "Stainless refrigerator", "36 inch wide")
+	if err != nil || tier.class != "retail" || len(hits) != 1 {
+		t.Fatalf("tier=%s hits=%+v queries=%q err=%v", tier.class, hits, queries, err)
+	}
+}
+
+func TestModelMatchIgnoresPunctuation(t *testing.T) {
+	t.Parallel()
+	if !modelMatch("DeWalt DCD-791 cordless drill $89", "DCD791") {
+		t.Fatal("punctuation variant should identify the same model")
+	}
+}
+
+func TestModelMatchAcceptsOneOfSeveralIdentifiers(t *testing.T) {
+	t.Parallel()
+	model := "MK250; 920-013511; UPC 097855204844"
+	if !modelMatch("Logitech MK250 keyboard and mouse for $24.99", model) {
+		t.Fatal("one grounded identifier should match")
+	}
+	if got := comparableQueries(model, []string{"Logitech keyboard"})[0]; !strings.HasPrefix(got, "MK250 Logitech keyboard") {
+		t.Fatalf("query = %q", got)
+	}
+}
+
+func TestRepriceJobUsesStoredDescriptionForComparableSearch(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, New())
+	h.AI.AnswerChat("grounded-price", func(hostai.ChatRequest) (*hostai.ChatResponse, error) {
+		return &hostai.ChatResponse{Parsed: json.RawMessage(`{
+			"price_cents":8900,"currency":"USD","condition":"used","kind":"asking",
+			"model_or_code":"DCD791","source_url":"https://www.ebay.com/itm/dcd791"
+		}`)}, nil
+	})
+	var queries []string
+	h.Search.Answer(func(req hostsearch.Request) ([]hostsearch.Hit, error) {
+		queries = append(queries, req.Query)
+		if !strings.Contains(strings.ToLower(req.Query), "brushless compact kit") {
+			return nil, nil
+		}
+		return []hostsearch.Hit{{
+			URL: "https://www.ebay.com/itm/dcd791", Title: "DeWalt DCD-791 drill",
+			Snippet: "Asking $89 for a used DeWalt DCD-791 drill.",
+		}}, nil
+	})
+	h.Run(ctx)
+
+	now := h.Clock.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := h.DB().Exec(`INSERT INTO bidrl_lots(id, auction_id, url, title, current_bid_cents, description, created_at)
+		VALUES ('lot-1', 'auction-1', 'https://www.bidrl.com/auction/auction-1/item/lot-1', 'Cordless drill', 1000, 'Brushless compact kit', ?)`, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.DB().Exec(`INSERT INTO bidrl_analyses(lot_id, identification, basis, model_or_sku, title_agreement, notes, input_tokens, output_tokens, cost_micro_usd, created_at, event_id)
+		VALUES ('lot-1', 'DeWalt drill', 'exact_text', 'DCD791', 1, '', 0, 0, 0, ?, 0)`, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.RunJobNow(ctx, "reprice", map[string]string{"lotId": "lot-1"}); err != nil {
+		t.Fatalf("reprice: %v", err)
+	}
+	if len(queries) != 1 || !strings.Contains(strings.ToLower(queries[0]), "brushless compact kit") {
+		t.Fatalf("queries = %q", queries)
+	}
+	var price int64
+	if err := h.DB().QueryRow(`SELECT price_cents FROM bidrl_valuations WHERE lot_id = 'lot-1'`).Scan(&price); err != nil {
+		t.Fatal(err)
+	}
+	if price != 8900 {
+		t.Fatalf("price = %d, want 8900", price)
+	}
+}
+
+func TestScanStopsPricingWhenSearchIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, New())
+	calls := 0
+	h.Search.Answer(func(hostsearch.Request) ([]hostsearch.Hit, error) {
+		calls++
+		return nil, hostsearch.ErrUnavailable
+	})
+	h.Run(ctx)
+
+	now := h.Clock.Now().UTC().Format(time.RFC3339Nano)
+	for _, id := range []string{"lot-1", "lot-2"} {
+		if _, err := h.DB().Exec(`INSERT INTO bidrl_lots(id, auction_id, url, title, created_at)
+			VALUES (?, 'auction-1', ?, ?, ?)`, id, "https://www.bidrl.com/auction/auction-1/item/"+id, "Eligible "+id, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.DB().Exec(`INSERT INTO bidrl_analyses(lot_id, identification, basis, model_or_sku, title_agreement, notes, input_tokens, output_tokens, cost_micro_usd, created_at, event_id)
+			VALUES (?, 'Logitech keyboard', 'exact_text', 'MK250', 1, '', 0, 0, 0, ?, 0)`, id, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := h.RunJobNow(ctx, "scan", map[string]string{"auctionId": "auction-1"})
+	// The job runner retries the failed scan once. Each attempt must stop at the
+	// first lot rather than querying all eligible lots during the outage.
+	if !errors.Is(err, hostsearch.ErrUnavailable) || calls != 2 {
+		t.Fatalf("calls = %d, err = %v", calls, err)
+	}
+}
+
 func TestLookupComparablesStopsAtEbay(t *testing.T) {
 	t.Parallel()
 	calls := 0
@@ -913,21 +1029,15 @@ func TestConditionClassAndReuseOrigin(t *testing.T) {
 	}
 }
 
-func TestLookupComparablesRetriesAfterEngineError(t *testing.T) {
+func TestLookupComparablesStopsAfterEngineError(t *testing.T) {
 	t.Parallel()
 	calls := 0
 	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
 		calls++
-		if calls == 1 {
-			return nil, hostsearch.ErrUnavailable
-		}
-		return []hostsearch.Hit{{
-			URL: "https://www.walmart.com/ip/k", Title: "Keurig K-Supreme Plus",
-			Snippet: "K-Supreme Plus $79",
-		}}, nil
+		return nil, hostsearch.ErrUnavailable
 	}
 	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus", nil)
-	if err != nil || tier.class != "retail" || len(hits) != 1 || calls != 2 {
+	if !errors.Is(err, hostsearch.ErrUnavailable) || len(hits) != 0 || calls != 1 {
 		t.Fatalf("tier=%s hits=%+v calls=%d err=%v", tier.class, hits, calls, err)
 	}
 }

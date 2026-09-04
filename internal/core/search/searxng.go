@@ -120,9 +120,13 @@ func (s SearXNG) searchOnce(ctx context.Context, query, engine string, limit int
 			Title   string `json:"title"`
 			Content string `json:"content"`
 		} `json:"results"`
+		UnresponsiveEngines [][]string `json:"unresponsive_engines"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("%w: unreadable JSON", ErrUnavailable)
+	}
+	if len(parsed.Results) == 0 && len(parsed.UnresponsiveEngines) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrUnavailable, formatEngineFailures(parsed.UnresponsiveEngines))
 	}
 	out := make([]Hit, 0, len(parsed.Results))
 	for _, r := range parsed.Results {
@@ -132,4 +136,18 @@ func (s SearXNG) searchOnce(ctx context.Context, query, engine string, limit int
 		}
 	}
 	return out, nil
+}
+
+func formatEngineFailures(failures [][]string) string {
+	parts := make([]string, 0, len(failures))
+	for _, failure := range failures {
+		if len(failure) < 2 {
+			continue
+		}
+		parts = append(parts, failure[0]+": "+failure[1])
+	}
+	if len(parts) == 0 {
+		return "all requested engines failed"
+	}
+	return strings.Join(parts, "; ")
 }

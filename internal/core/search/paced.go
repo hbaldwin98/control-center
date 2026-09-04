@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const defaultPace = 800 * time.Millisecond
+const defaultPace = 3 * time.Second
 
 // Pace wraps an Engine so lookups run one at a time with a gap between them.
 // HTML backends (DuckDuckGo, Brave) hang up when a sidecar stampsedes them.

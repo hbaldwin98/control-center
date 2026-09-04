@@ -75,9 +75,9 @@ do not belong in a plugin.
 `docker compose up --build` starts `searxng` on the internal network only (no host
 port) and sets Control Center to `CC_SEARCH_ENGINE=searxng` against
 `http://searxng:8080`. Settings live in `deploy/searxng/` (`settings.yml` plus
-`limiter.toml`). The instance keeps Brave and DuckDuckGo only — not Wikipedia, Google, Bing, or
-Tor onion engines. The host queries Brave first, then DuckDuckGo if Brave is
-empty, spaces lookups by 800ms, and retries a hung request once. HTTP/2 is off
+`limiter.toml`). The instance keeps Brave and DuckDuckGo only — not Wikipedia, Google,
+Bing, or Tor onion engines. The host queries Brave first, then DuckDuckGo if Brave is
+empty, spaces lookups by three seconds, and retries a hung request once. HTTP/2 is off
 so keep-alive disconnects are less common. Recreate the sidecar after changing
 those files:
 

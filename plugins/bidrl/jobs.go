@@ -76,8 +76,12 @@ func (p *Plugin) repriceJob(jc hostjobs.Context) error {
 	if err != nil {
 		return err
 	}
+	var description string
+	if err := h.Store().QueryRow(jc, `SELECT IFNULL(description,'') FROM bidrl_lots WHERE id = ?`, lot.ID).Scan(&description); err != nil {
+		return err
+	}
 	_ = jc.Logf("repricing lot %s (%s)", lot.ID, model)
-	return p.priceLot(jc, h, lot, basis, model, ident, notes, "", true)
+	return p.priceLot(jc, h, lot, basis, model, ident, notes, description, true)
 }
 
 // refreshJob re-reads one auction's bids from the catalog endpoint. That is a single

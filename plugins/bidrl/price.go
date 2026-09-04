@@ -3,6 +3,7 @@ package bidrl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -80,7 +81,7 @@ func (p *Plugin) priceEligibleWhere(jc hostjobs.Context, h host.Host, where stri
 		}
 		if err := p.priceLot(jc, h, lot.lotRow, lot.Basis, lot.Model, lot.Ident, lot.Notes, lot.Desc, false); err != nil {
 			_ = jc.Logf("price %s: %v", lot.ID, err)
-			if stopCollect(err) {
+			if stopCollect(err) || errors.Is(err, hostsearch.ErrUnavailable) {
 				return err
 			}
 		}
@@ -103,7 +104,8 @@ func (p *Plugin) priceLot(jc hostjobs.Context, h host.Host, lot lotRow, basis, m
 			return p.storeValuation(jc, h, lot, prior, from)
 		}
 	}
-	hits, tier, err := lookupComparables(jc, h.Search().Query, model, h.Browser().Read)
+	hits, tier, err := lookupComparables(jc, h.Search().Query, model, h.Browser().Read,
+		ident, lot.Title, description, notes)
 	if err != nil {
 		return err
 	}
@@ -272,18 +274,16 @@ type pageReader func(ctx context.Context, opts hostbrowser.OpenOptions, url stri
 
 const maxComparableReads = 2
 
-func lookupComparables(ctx context.Context, query searchQuery, model string, read pageReader) ([]hostsearch.Hit, priceTier, error) {
+func lookupComparables(ctx context.Context, query searchQuery, model string, read pageReader, lotText ...string) ([]hostsearch.Hit, priceTier, error) {
 	model = strings.TrimSpace(model)
 	if model == "" || query == nil {
 		return nil, priceTier{}, nil
 	}
-	var last error
 	var candidates []hostsearch.Hit
-	for _, q := range []string{model + " used sold price", model + " price"} {
+	for _, q := range comparableQueries(model, lotText) {
 		hits, err := query(ctx, hostsearch.Request{Query: q, MaxResults: 8})
 		if err != nil {
-			last = err
-			continue
+			return nil, priceTier{}, err
 		}
 		ranked := rankUsableHits(hits, model)
 		if len(ranked) == 0 {
@@ -301,7 +301,24 @@ func lookupComparables(ctx context.Context, query searchQuery, model string, rea
 			return enriched, tierFromClass(classifySource(enriched[0].URL).Class), nil
 		}
 	}
-	return nil, priceTier{}, last
+	return nil, priceTier{}, nil
+}
+
+func comparableQueries(model string, lotText []string) []string {
+	const maxQueryBytes = 200
+	model = primaryModel(model)
+	contextWords := strings.Fields(collapseText(strings.Join(lotText, " ")))
+	withContext := strings.TrimSpace(model)
+	for _, word := range contextWords {
+		candidate := withContext + " " + word + " used sold price"
+		if len(candidate) > maxQueryBytes {
+			break
+		}
+		withContext += " " + word
+	}
+	contextual := withContext + " used sold price"
+	fallback := model + " price"
+	return []string{contextual, fallback}
 }
 
 func readComparableCandidates(ctx context.Context, read pageReader, hits []hostsearch.Hit, model string) ([]hostsearch.Hit, error) {
@@ -362,11 +379,47 @@ func matchHitFromCitations(resp *hostai.ChatResponse, hits []hostsearch.Hit) (ho
 
 func modelMatch(hay, model string) bool {
 	h := strings.ToLower(hay)
-	m := strings.ToLower(strings.TrimSpace(model))
-	if m == "" {
-		return false
+	compact := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, strings.ToLower(s))
 	}
-	return strings.Contains(h, m)
+	ch := compact(h)
+	for _, candidate := range modelAlternatives(model) {
+		m := strings.ToLower(candidate)
+		if strings.Contains(h, m) {
+			return true
+		}
+		cm := compact(m)
+		if len(cm) >= 4 && strings.Contains(ch, cm) {
+			return true
+		}
+	}
+	return false
+}
+
+func primaryModel(model string) string {
+	alternatives := modelAlternatives(model)
+	if len(alternatives) == 0 {
+		return strings.TrimSpace(model)
+	}
+	return alternatives[0]
+}
+
+func modelAlternatives(model string) []string {
+	parts := strings.FieldsFunc(model, func(r rune) bool { return r == ';' || r == ',' || r == '|' })
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		part = strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(part), "UPC"))
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func max(a, b int) int {
