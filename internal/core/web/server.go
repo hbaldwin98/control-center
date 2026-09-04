@@ -34,6 +34,18 @@ const csrfHeader = "X-CSRF-Token"
 
 const maxAuthBody = 8 << 10
 
+// Attempt ceilings for the unauthenticated auth endpoints, per one-minute window.
+//
+// The per-peer figure is the brute-force bound and stays as tight as it always was. The
+// total is the flood bound: loose enough that it is never reached by one administrator
+// and their tabs, tight enough to cap what a distributed attempt costs in password
+// hashes. Only the per-peer ceiling can lock a given client out, so no stranger can shut
+// the administrator out by exhausting a counter they share.
+const (
+	loginAttemptsPerPeer = 10
+	loginAttemptsTotal   = 100
+)
+
 // Deps are the lower-layer modules the web layer serves. Later milestones add fields here
 // rather than letting handlers reach into globals.
 type Deps struct {
@@ -111,10 +123,10 @@ func New(ctx context.Context, m storage.Migrator, deps Deps) (*Server, error) {
 
 	s := &Server{
 		deps:           deps,
-		auth:           &authStore{db: deps.DB, now: now},
+		auth:           newAuthStore(deps.DB, now),
 		mux:            http.NewServeMux(),
 		now:            now,
-		limit:          newAttemptLimiter(10, time.Minute),
+		limit:          newAttemptLimiter(loginAttemptsPerPeer, loginAttemptsTotal, time.Minute),
 		allowedOrigins: allowedOrigins(deps.Config),
 	}
 	s.routes()
@@ -403,6 +415,20 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(strings.Trim(host, "[]"))
 	return ip != nil && ip.IsLoopback()
+}
+
+// peerIP is the rate-limiting identity of a request: the address the connection came
+// from, with the port stripped so a client's every attempt lands in one bucket.
+//
+// It is read from RemoteAddr and never from a forwarded header, because nothing here
+// knows whether a proxy it can trust put one there. Behind a reverse proxy every request
+// therefore shares the loopback bucket -- see docs on exposing this server.
+func peerIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return strings.Trim(host, "[]")
 }
 
 // remoteIsLoopback reports whether the peer is on this machine. First-run bootstrap is

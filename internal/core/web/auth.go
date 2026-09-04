@@ -77,10 +77,26 @@ func verifyPassword(password, encoded string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
+// verifyConcurrency bounds how many password verifications run at the same time.
+//
+// Argon2id is deliberately expensive: the parameters above cost 64 MiB of allocation per
+// call, and the endpoints that reach it are unauthenticated. Without a gate, N requests
+// in flight are N * 64 MiB, which is an out-of-memory kill on a small box long before
+// the attempt limiter's per-minute ceiling is reached -- the limiter bounds rate, not
+// concurrency. There is one administrator, so serializing costs nothing real.
+const verifyConcurrency = 1
+
 // authStore owns the administrator row, the bootstrap token, and sessions.
 type authStore struct {
 	db  storage.DB
 	now func() time.Time
+
+	// verify is the semaphore held across a password hash comparison.
+	verify chan struct{}
+}
+
+func newAuthStore(db storage.DB, now func() time.Time) *authStore {
+	return &authStore{db: db, now: now, verify: make(chan struct{}, verifyConcurrency)}
 }
 
 func (a *authStore) adminHash(ctx context.Context) (string, error) {
@@ -208,10 +224,19 @@ func (a *authStore) createAdminIfAbsent(ctx context.Context, password string) (b
 	return true, nil
 }
 
+// checkPassword compares a submitted password against the stored hash, holding the
+// verify semaphore for the duration. A caller whose client has already gone away releases
+// its place in the queue rather than paying for a hash nobody will read.
 func (a *authStore) checkPassword(ctx context.Context, password string) error {
 	hash, err := a.adminHash(ctx)
 	if err != nil {
 		return err
+	}
+	select {
+	case a.verify <- struct{}{}:
+		defer func() { <-a.verify }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	if !verifyPassword(password, hash) {
 		return errBadCredentials

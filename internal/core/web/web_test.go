@@ -26,6 +26,10 @@ type harness struct {
 	cookie string
 	csrf   string
 	origin string
+
+	// peer is the RemoteAddr requests arrive from. Rate limiting is per peer, so a test
+	// that needs two clients changes this between calls.
+	peer string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -50,6 +54,7 @@ func newHarness(t *testing.T) *harness {
 		http:   srv.Handler(),
 		store:  store,
 		origin: "http://127.0.0.1:8080",
+		peer:   "127.0.0.1:54321",
 	}
 }
 
@@ -75,7 +80,7 @@ func (h *harness) do(method, path string, body any) *httptest.ResponseRecorder {
 		r = bytes.NewReader(buf)
 	}
 	req := httptest.NewRequest(method, path, r)
-	req.RemoteAddr = "127.0.0.1:54321"
+	req.RemoteAddr = h.peer
 	req.Host = "127.0.0.1:8080"
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
