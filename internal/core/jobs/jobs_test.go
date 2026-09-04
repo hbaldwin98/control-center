@@ -643,9 +643,9 @@ func TestCronParseAndMatch(t *testing.T) {
 
 	// Both DOM and DOW restricted: classic cron ORs them.
 	firstOrMonday := mustParse("0 0 1 * 1")
-	first := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)  // Tuesday
-	mon := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)   // Monday
-	other := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)  // Wednesday
+	first := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC) // Tuesday
+	mon := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)  // Monday
+	other := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC) // Wednesday
 	if !firstOrMonday.matches(first) || !firstOrMonday.matches(mon) || firstOrMonday.matches(other) {
 		t.Fatal("restricted DOM and DOW must OR")
 	}

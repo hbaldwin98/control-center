@@ -29,10 +29,10 @@ type ResultSet struct {
 	conn *sql.Conn
 }
 
-func (r *ResultSet) Next() bool                  { return r.rows.Next() }
-func (r *ResultSet) Scan(dest ...any) error      { return r.rows.Scan(dest...) }
-func (r *ResultSet) Err() error                  { return r.rows.Err() }
-func (r *ResultSet) Columns() ([]string, error)  { return r.rows.Columns() }
+func (r *ResultSet) Next() bool                 { return r.rows.Next() }
+func (r *ResultSet) Scan(dest ...any) error     { return r.rows.Scan(dest...) }
+func (r *ResultSet) Err() error                 { return r.rows.Err() }
+func (r *ResultSet) Columns() ([]string, error) { return r.rows.Columns() }
 func (r *ResultSet) Close() error {
 	err := r.rows.Close()
 	cerr := r.conn.Close()
