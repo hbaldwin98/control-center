@@ -6,6 +6,15 @@
 # SearXNG is a private sidecar. It is not published on the host. Control Center
 # queries its JSON API; plugins never see the URL.
 services:
+  reader:
+    image: ghcr.io/jina-ai/reader:oss@sha256:8cc9a5cf6dc9c240235fccc0026661de74b6e13c21b36e6a86b3281b9ef10f28
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
   searxng:
     image: docker.io/searxng/searxng:latest
     restart: unless-stopped
@@ -40,7 +49,9 @@ services:
     environment:
       CC_SEARCH_ENGINE: searxng
       CC_SEARCH_SEARXNG_URL: http://searxng:8080
+      CC_BROWSER_READER_URL: http://reader:8081
     depends_on:
+      - reader
       - searxng
 
 volumes:

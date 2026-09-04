@@ -187,7 +187,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	br, err := browser.New(bus, pol, browser.Options{Engine: engine})
+	reader := configuredBrowserReader(cfg.Browser.Reader.URL)
+	br, err := browser.New(bus, pol, browser.Options{Engine: engine, Reader: reader})
 	if err != nil {
 		if c, ok := engine.(interface{ Close() error }); ok {
 			_ = c.Close()
@@ -278,6 +279,14 @@ func run() error {
 	}
 
 	return srv.ListenAndServe(ctx)
+}
+
+func configuredBrowserReader(rawURL string) browser.Reader {
+	if rawURL == "" {
+		return nil
+	}
+	slog.Info("browser reader jina", "url", rawURL)
+	return browser.JinaReader{BaseURL: rawURL}
 }
 
 func newBrowserEngine(cfg config.Config) (browser.Engine, error) {

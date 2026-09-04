@@ -26,6 +26,7 @@ var (
 	ErrDenied           = errors.New("browser: url denied")
 	ErrLimit            = errors.New("browser: session or page limit")
 	ErrEngine           = errors.New("browser: engine failed")
+	ErrReader           = errors.New("browser: reader unavailable")
 	ErrNoPlugin         = errors.New("browser: plugin identity missing")
 	ErrClosed           = errors.New("browser: session closed")
 )
@@ -43,6 +44,7 @@ const (
 // Options configures limits and the engine. Zero values take the spec defaults.
 type Options struct {
 	Engine Engine
+	Reader Reader
 	Log    *slog.Logger
 	Client *http.Client
 
@@ -60,6 +62,45 @@ type Options struct {
 	// SubscribeClient overrides the websocket handshake client. The default dials only
 	// checked public addresses on 443; a test supplies its own to reach a local server.
 	SubscribeClient *http.Client
+}
+
+// Read renders an allowlisted page through the browser engine, then gives only its
+// HTML to the configured reader. The reader never becomes a second URL fetcher.
+func (s *Service) Read(ctx context.Context, opts OpenOptions, rawURL string) (Document, error) {
+	pluginID, err := pluginID(ctx)
+	if err != nil {
+		return Document{}, err
+	}
+	if err := s.gate.CheckWork(ctx, pluginID); err != nil {
+		return Document{}, err
+	}
+	if s.opts.Reader == nil {
+		return Document{}, ErrReader
+	}
+	sess, err := s.Open(ctx, opts)
+	if err != nil {
+		return Document{}, err
+	}
+	defer func() { _ = sess.Close(context.Background()) }()
+	page, err := sess.NewPage(ctx)
+	if err != nil {
+		return Document{}, err
+	}
+	if err := page.Goto(ctx, rawURL); err != nil {
+		return Document{}, err
+	}
+	html, err := page.Content(ctx)
+	if err != nil {
+		return Document{}, err
+	}
+	content, err := s.opts.Reader.Extract(ctx, html)
+	if err != nil {
+		if ctx.Err() != nil {
+			return Document{}, ctx.Err()
+		}
+		return Document{}, fmt.Errorf("%w: %v", ErrReader, err)
+	}
+	return Document{URL: rawURL, Content: content}, nil
 }
 
 func (o *Options) applyDefaults() {

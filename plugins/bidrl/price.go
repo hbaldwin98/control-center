@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
+	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
@@ -101,7 +103,7 @@ func (p *Plugin) priceLot(jc hostjobs.Context, h host.Host, lot lotRow, basis, m
 			return p.storeValuation(jc, h, lot, prior, from)
 		}
 	}
-	hits, tier, err := lookupComparables(jc, h.Search().Query, model)
+	hits, tier, err := lookupComparables(jc, h.Search().Query, model, h.Browser().Read)
 	if err != nil {
 		return err
 	}
@@ -266,13 +268,17 @@ func evidenceFrom(resp *hostai.ChatResponse, model string, now time.Time, hits [
 }
 
 type searchQuery func(ctx context.Context, req hostsearch.Request) ([]hostsearch.Hit, error)
+type pageReader func(ctx context.Context, opts hostbrowser.OpenOptions, url string) (hostbrowser.Document, error)
 
-func lookupComparables(ctx context.Context, query searchQuery, model string) ([]hostsearch.Hit, priceTier, error) {
+const maxComparableReads = 2
+
+func lookupComparables(ctx context.Context, query searchQuery, model string, read pageReader) ([]hostsearch.Hit, priceTier, error) {
 	model = strings.TrimSpace(model)
 	if model == "" || query == nil {
 		return nil, priceTier{}, nil
 	}
 	var last error
+	var candidates []hostsearch.Hit
 	for _, q := range []string{model + " used sold price", model + " price"} {
 		hits, err := query(ctx, hostsearch.Request{Query: q, MaxResults: 8})
 		if err != nil {
@@ -281,11 +287,52 @@ func lookupComparables(ctx context.Context, query searchQuery, model string) ([]
 		}
 		ranked := rankUsableHits(hits, model)
 		if len(ranked) == 0 {
+			candidates = append(candidates, modelHits(hits, model)...)
 			continue
 		}
 		return ranked, tierFromClass(classifySource(ranked[0].URL).Class), nil
 	}
+	if read != nil {
+		enriched, err := readComparableCandidates(ctx, read, candidates, model)
+		if err != nil {
+			return nil, priceTier{}, err
+		}
+		if len(enriched) > 0 {
+			return enriched, tierFromClass(classifySource(enriched[0].URL).Class), nil
+		}
+	}
 	return nil, priceTier{}, last
+}
+
+func readComparableCandidates(ctx context.Context, read pageReader, hits []hostsearch.Hit, model string) ([]hostsearch.Hit, error) {
+	candidates := rankModelHits(hits, model)
+	for i, hit := range candidates {
+		if i >= maxComparableReads {
+			break
+		}
+		u, err := url.Parse(hit.URL)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		doc, err := read(ctx, hostbrowser.OpenOptions{AllowedHosts: []string{u.Hostname()}}, hit.URL)
+		if err != nil {
+			if stopCollect(err) {
+				return nil, err
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		hit.Snippet = strings.TrimSpace(doc.Content)
+		if len(hit.Snippet) > 16<<10 {
+			hit.Snippet = hit.Snippet[:16<<10]
+		}
+		if len(usableHits([]hostsearch.Hit{hit}, model)) > 0 {
+			return []hostsearch.Hit{hit}, nil
+		}
+	}
+	return nil, nil
 }
 
 func matchHit(sourceURL string, hits []hostsearch.Hit) (hostsearch.Hit, bool) {

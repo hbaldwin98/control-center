@@ -9,6 +9,7 @@ import (
 
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
+	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
 	hostevents "github.com/hbaldwin98/control-center/host/events"
 	"github.com/hbaldwin98/control-center/host/hosttest"
 	hostjobs "github.com/hbaldwin98/control-center/host/jobs"
@@ -136,6 +137,44 @@ func TestJobRunsAndWritesThroughTheStore(t *testing.T) {
 	h.DecodeJSON(h.GET("/counts"), http.StatusOK, &got)
 	if len(got) != 1 || got[0] != 7 {
 		t.Fatalf("counts = %v, want [7]", got)
+	}
+}
+
+func TestBrowserReaderProgramsAndRecordsDocuments(t *testing.T) {
+	ctx := context.Background()
+	_, h := newFixture(t)
+	const pageURL = "https://shop.example/item"
+	h.Browser.Readable(pageURL, "Model X sold for $129.")
+
+	doc, err := h.Host().Browser().Read(ctx, hostbrowser.OpenOptions{AllowedHosts: []string{"shop.example"}}, pageURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.URL != pageURL || doc.Content != "Model X sold for $129." {
+		t.Fatalf("document = %+v", doc)
+	}
+	if reads := h.Browser.Reads(); len(reads) != 1 || reads[0] != pageURL {
+		t.Fatalf("reads = %v", reads)
+	}
+}
+
+func TestBrowserReaderEnforcesBoundaryErrors(t *testing.T) {
+	ctx := context.Background()
+	_, h := newFixture(t)
+	const pageURL = "https://shop.example/item"
+
+	if _, err := h.Host().Browser().Read(ctx, hostbrowser.OpenOptions{}, pageURL); !errors.Is(err, hostbrowser.ErrInvalidAllowlist) {
+		t.Fatalf("empty allowlist = %v", err)
+	}
+	if _, err := h.Host().Browser().Read(ctx, hostbrowser.OpenOptions{AllowedHosts: []string{"other.example"}}, pageURL); !errors.Is(err, hostbrowser.ErrDenied) {
+		t.Fatalf("denied URL = %v", err)
+	}
+	if _, err := h.Host().Browser().Read(ctx, hostbrowser.OpenOptions{AllowedHosts: []string{"shop.example"}}, pageURL); !errors.Is(err, hostbrowser.ErrReader) {
+		t.Fatalf("missing document = %v", err)
+	}
+	h.Disable()
+	if _, err := h.Host().Browser().Read(ctx, hostbrowser.OpenOptions{AllowedHosts: []string{"shop.example"}}, pageURL); !errors.Is(err, hostpolicy.ErrPluginDisabled) {
+		t.Fatalf("disabled plugin = %v", err)
 	}
 }
 

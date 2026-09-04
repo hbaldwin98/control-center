@@ -54,6 +54,10 @@ func (a *scoped) Do(ctx context.Context, opts OpenOptions, req Request) (Resourc
 	return a.s.Do(WithPlugin(ctx, a.pluginID), opts, req)
 }
 
+func (a *scoped) Read(ctx context.Context, opts OpenOptions, url string) (Document, error) {
+	return a.s.Read(WithPlugin(ctx, a.pluginID), opts, url)
+}
+
 type scopedSession struct {
 	inner    Session
 	pluginID string

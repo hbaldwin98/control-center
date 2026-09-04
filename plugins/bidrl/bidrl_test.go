@@ -14,6 +14,7 @@ import (
 
 	"github.com/hbaldwin98/control-center/host"
 	hostai "github.com/hbaldwin98/control-center/host/ai"
+	hostbrowser "github.com/hbaldwin98/control-center/host/browser"
 	hostsearch "github.com/hbaldwin98/control-center/host/search"
 	_ "modernc.org/sqlite"
 )
@@ -740,7 +741,7 @@ func TestLookupComparablesPrefersRetailOverMarketplace(t *testing.T) {
 			{URL: "https://www.amazon.com/dp/k-supreme-plus", Title: "Keurig K-Supreme Plus", Snippet: "K-Supreme Plus for $89."},
 		}, nil
 	}
-	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus", nil)
 	if err != nil || tier.class != "retail" || len(hits) != 1 || !strings.Contains(hits[0].URL, "amazon.com") {
 		t.Fatalf("tier=%s hits=%+v err=%v", tier.class, hits, err)
 	}
@@ -754,7 +755,7 @@ func TestLookupComparablesFallsThroughWhenEbayHasNoPrice(t *testing.T) {
 			Snippet: "K-Supreme Plus for $40 used.",
 		}}, nil
 	}
-	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,9 +774,103 @@ func TestLookupComparablesStopsAtEbay(t *testing.T) {
 			{URL: "https://www.ebay.com/itm/k-supreme-plus", Title: "Keurig K-Supreme Plus", Snippet: "Sold listing for K-Supreme Plus at $129 used."},
 		}, nil
 	}
-	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus", nil)
 	if err != nil || tier.class != "ebay" || len(hits) != 1 || calls != 1 {
 		t.Fatalf("tier=%s hits=%d calls=%d err=%v", tier.class, len(hits), calls, err)
+	}
+}
+
+func TestLookupComparablesReadsPageWhenSnippetsHaveNoPrice(t *testing.T) {
+	t.Parallel()
+	url := "https://www.ebay.com/itm/k-supreme-plus"
+	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
+		return []hostsearch.Hit{{URL: url, Title: "Keurig K-Supreme Plus sold listing", Snippet: "Used listing."}}, nil
+	}
+	reads := 0
+	read := func(_ context.Context, opts hostbrowser.OpenOptions, gotURL string) (hostbrowser.Document, error) {
+		reads++
+		if gotURL != url || len(opts.AllowedHosts) != 1 || opts.AllowedHosts[0] != "www.ebay.com" {
+			t.Fatalf("read url=%q opts=%+v", gotURL, opts)
+		}
+		return hostbrowser.Document{URL: gotURL, Content: "Keurig K-Supreme Plus sold for $129 in used condition."}, nil
+	}
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus", read)
+	if err != nil || reads != 1 || tier.class != "ebay" || len(hits) != 1 || !strings.Contains(hits[0].Snippet, "$129") {
+		t.Fatalf("tier=%s hits=%+v reads=%d err=%v", tier.class, hits, reads, err)
+	}
+}
+
+func TestLookupComparablesDoesNotReadWhenSnippetHasPrice(t *testing.T) {
+	t.Parallel()
+	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
+		return []hostsearch.Hit{{
+			URL: "https://www.ebay.com/itm/k", Title: "Keurig K-Supreme Plus",
+			Snippet: "K-Supreme Plus sold for $129.",
+		}}, nil
+	}
+	read := func(context.Context, hostbrowser.OpenOptions, string) (hostbrowser.Document, error) {
+		t.Fatal("reader called on usable search evidence")
+		return hostbrowser.Document{}, nil
+	}
+	if _, _, err := lookupComparables(context.Background(), q, "K-Supreme Plus", read); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLookupComparablesCapsReaderAttempts(t *testing.T) {
+	t.Parallel()
+	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
+		return []hostsearch.Hit{
+			{URL: "https://www.ebay.com/itm/1", Title: "K-Supreme Plus one"},
+			{URL: "https://www.ebay.com/itm/2", Title: "K-Supreme Plus two"},
+			{URL: "https://www.amazon.com/dp/3", Title: "K-Supreme Plus three"},
+		}, nil
+	}
+	reads := 0
+	read := func(_ context.Context, _ hostbrowser.OpenOptions, url string) (hostbrowser.Document, error) {
+		reads++
+		return hostbrowser.Document{URL: url, Content: "No amount here."}, nil
+	}
+	_, _, err := lookupComparables(context.Background(), q, "K-Supreme Plus", read)
+	if err != nil || reads != maxComparableReads {
+		t.Fatalf("reads=%d err=%v", reads, err)
+	}
+}
+
+func TestLookupComparablesSkipsUnreadableCandidate(t *testing.T) {
+	t.Parallel()
+	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
+		return []hostsearch.Hit{
+			{URL: "https://www.ebay.com/itm/blocked", Title: "K-Supreme Plus blocked"},
+			{URL: "https://www.ebay.com/itm/readable", Title: "K-Supreme Plus readable"},
+		}, nil
+	}
+	reads := 0
+	read := func(_ context.Context, _ hostbrowser.OpenOptions, url string) (hostbrowser.Document, error) {
+		reads++
+		if strings.HasSuffix(url, "/blocked") {
+			return hostbrowser.Document{}, hostbrowser.ErrReader
+		}
+		return hostbrowser.Document{URL: url, Content: "K-Supreme Plus used for $85."}, nil
+	}
+	hits, _, err := lookupComparables(context.Background(), q, "K-Supreme Plus", read)
+	if err != nil || reads != 2 || len(hits) != 1 || !strings.HasSuffix(hits[0].URL, "/readable") {
+		t.Fatalf("hits=%+v reads=%d err=%v", hits, reads, err)
+	}
+}
+
+func TestLookupComparablesPropagatesCancellation(t *testing.T) {
+	t.Parallel()
+	q := func(_ context.Context, _ hostsearch.Request) ([]hostsearch.Hit, error) {
+		return []hostsearch.Hit{{URL: "https://www.ebay.com/itm/x", Title: "K-Supreme Plus"}}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	read := func(context.Context, hostbrowser.OpenOptions, string) (hostbrowser.Document, error) {
+		return hostbrowser.Document{}, context.Canceled
+	}
+	if _, _, err := lookupComparables(ctx, q, "K-Supreme Plus", read); !errors.Is(err, context.Canceled) {
+		t.Fatalf("lookupComparables() = %v", err)
 	}
 }
 
@@ -831,7 +926,7 @@ func TestLookupComparablesRetriesAfterEngineError(t *testing.T) {
 			Snippet: "K-Supreme Plus $79",
 		}}, nil
 	}
-	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus")
+	hits, tier, err := lookupComparables(context.Background(), q, "K-Supreme Plus", nil)
 	if err != nil || tier.class != "retail" || len(hits) != 1 || calls != 2 {
 		t.Fatalf("tier=%s hits=%+v calls=%d err=%v", tier.class, hits, calls, err)
 	}

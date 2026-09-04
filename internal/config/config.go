@@ -92,6 +92,11 @@ type Browser struct {
 	// Engine is "fake" (in-process, no sockets) or "playwright" (Chromium). Empty
 	// defaults to fake.
 	Engine string `yaml:"engine"`
+	Reader Reader `yaml:"reader"`
+}
+
+type Reader struct {
+	URL string `yaml:"url"`
 }
 
 // Search selects the web-lookup engine. Plugins never choose this or see the URL.
@@ -198,6 +203,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("CC_BROWSER_ENGINE"); v != "" {
 		c.Browser.Engine = v
 	}
+	if v := os.Getenv("CC_BROWSER_READER_URL"); v != "" {
+		c.Browser.Reader.URL = v
+	}
 	if v := os.Getenv("CC_SEARCH_ENGINE"); v != "" {
 		c.Search.Engine = v
 	}
@@ -289,6 +297,11 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("config: browser.engine %q is not supported (fake or playwright)", c.Browser.Engine)
 	}
+	if c.Browser.Reader.URL != "" {
+		if err := validateSidecarURL("browser.reader.url", c.Browser.Reader.URL); err != nil {
+			return err
+		}
+	}
 	switch strings.ToLower(c.Search.Engine) {
 	case "fake":
 	case "searxng":
@@ -341,6 +354,15 @@ func validateSearxngURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return fmt.Errorf("config: search.searxng.url %q must be an http(s) URL with a host", raw)
+	}
+	return nil
+}
+
+func validateSidecarURL(name, raw string) error {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("config: %s %q must be an http(s) base URL with a host", name, raw)
 	}
 	return nil
 }

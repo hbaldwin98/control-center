@@ -239,6 +239,13 @@ picks a dollar amount already written in one of those hits. Invented MSRPs are r
 that snippet, not the model's prose. The feed shows the site, asking vs sold, quote, and
 link.
 
+If both search variants return model-matching results but none includes a dollar amount,
+Bidrl asks `Browser().Read` for at most two pages in the same source order. Reader text
+replaces the missing snippet only when it literally contains both the model and a dollar
+amount; the existing AI citation checks then apply unchanged. Bot walls, timeouts, an
+unconfigured Reader, and extraction failures are misses, so the lot remains unpriced.
+The host renders each allowlisted URL and gives Jina only raw HTML.
+
 **Resolution is the cost lever.** Medium for every photo; high on retry for a label or
 plate the model could not read.
 
@@ -255,7 +262,7 @@ This is why it is the right first real plugin: it touches nearly the whole surfa
 
 | Host capability | Use |
 |---|---|
-| `Browser()` allowlisted sessions | gallery census, `Post` ItemData, `Get` pusher snapshots and photos |
+| `Browser()` allowlisted sessions | gallery census, `Post` ItemData, `Get` pusher snapshots and photos; bounded comparable-page extraction when search snippets omit prices |
 | `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
 | `AI()` chat with a cited-price schema | pick a `$` amount already written in those hits |
@@ -591,6 +598,8 @@ full-window view.
   from a search hit that names the model and a dollar amount. Hits are ranked
   eBay, then retail, then other resale, then the open web. The model's
   `price_cents` must match a `$` amount in that hit.
+- If no snippet carries usable evidence, at most two model-matching result pages are read.
+  Extracted text must pass the same literal model and `$` amount checks.
 - Missing or mismatched evidence leaves the lot unpriced. The feed shows the source site,
   quote, retrieval age, and whether the listing is asking or sold. It never presents an
   uncited model estimate as a market price.

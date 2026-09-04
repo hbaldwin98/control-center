@@ -14,6 +14,13 @@ import (
 type Browser interface {
 	Open(ctx context.Context, opts OpenOptions) (Session, error)
 	Do(ctx context.Context, opts OpenOptions, req Request) (Resource, error)
+	Read(ctx context.Context, opts OpenOptions, url string) (Document, error)
+}
+
+// Document is readable text extracted from one rendered public web page.
+type Document struct {
+	URL     string
+	Content string
 }
 
 // Request is one direct allowlisted HTTP request. Credential, when set, is
@@ -123,4 +130,5 @@ var (
 	ErrDenied           = errors.New("browser: url denied")
 	ErrLimit            = errors.New("browser: session or page limit")
 	ErrEngine           = errors.New("browser: engine failed")
+	ErrReader           = errors.New("browser: reader unavailable")
 )

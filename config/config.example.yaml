@@ -70,6 +70,10 @@ browser:
   # playwright: host-owned Chromium. Plugins never select an engine.
   # Plugins that read real sites (bidrl, tid) need playwright: fake runs no JavaScript.
   engine: fake
+  # Optional Jina Reader sidecar. Control Center renders public pages itself and sends
+  # only raw HTML here; plugins never see this address and Reader never receives a URL.
+  reader:
+    url: ""
 
 search:
   # fake: in-process fixtures (default, tests).

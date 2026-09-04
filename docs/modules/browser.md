@@ -20,6 +20,13 @@ package browser
 
 type Browser interface {
     Open(ctx context.Context, opts OpenOptions) (Session, error)
+    Do(ctx context.Context, opts OpenOptions, req Request) (Resource, error)
+    Read(ctx context.Context, opts OpenOptions, url string) (Document, error)
+}
+
+type Document struct {
+    URL     string
+    Content string
 }
 
 type OpenOptions struct {
@@ -112,7 +119,13 @@ Conversation and DOM state belong to the `Page`. The plugin parses HTML and capt
 XHR bodies itself; v1 does not expose `Evaluate`, screenshots, or a raw CDP handle.
 Those would leak the engine into plugin code and make the allowlist unenforceable.
 
-`Open`, `NewPage`, `Goto`, `WaitFor`, `Content`, `Get`, `Post`, `Responses`, `Fill`, and `Click` all require a plugin identity
+`Read` is an optional document-extraction path for public pages. The host opens an
+allowlisted browser session, renders the page, and sends only the bounded live HTML to
+the configured transformer. The transformer never receives the source URL, so it cannot
+become a second, weaker URL fetcher. `ErrReader` means no transformer is configured or
+the extraction failed; a plugin may treat that as a best-effort miss.
+
+`Open`, `Do`, `Read`, `NewPage`, `Goto`, `WaitFor`, `Content`, `Get`, `Post`, `Responses`, `Fill`, and `Click` all require a plugin identity
 on the context (stamped by the scoped facade) and call `policy.Gate.CheckWork` before
 doing work. A cancelled context does not leave a Chromium context behind: `Session.Close`
 and plugin disable both close the underlying browser context.
@@ -141,9 +154,9 @@ if err := page.WaitFor(ctx, "article.lot", 15*time.Second); err != nil {
 html, err := page.Content(ctx)
 ```
 
-Two errors a plugin must handle: `policy.ErrPluginDisabled` and `browser.ErrDenied`.
-Disabled means stop. Denied means the URL failed the allowlist or the private-network
-check — fix the URL, do not retry the same one.
+`policy.ErrPluginDisabled` means stop. `browser.ErrDenied` means the URL failed the
+allowlist or private-network check; fix the URL rather than retrying it. `Read` may also
+return `browser.ErrReader`, which a best-effort caller can treat as unavailable evidence.
 
 ---
 
@@ -302,6 +315,11 @@ installed on first start (`chromium` only), or ahead of time with
 `go run github.com/mxschmitt/playwright-go/cmd/playwright@v0.6201.1 install chromium`.
 Plugins never select this; CI still rejects a plugin that imports Playwright.
 
+`browser.reader.url` optionally points to the private Jina Reader sidecar. The client
+uses its HTTP/1.1 port, requests at most 2,048 tokens, drops links and images, and rejects
+a response over 64 KiB. Docker Compose pins the sidecar image by digest and does not
+publish its ports. The setting can also be supplied as `CC_BROWSER_READER_URL`.
+
 ---
 
 ## Events emitted
@@ -324,6 +342,7 @@ var (
     ErrDenied           = errors.New("browser: url denied")
     ErrLimit            = errors.New("browser: session or page limit")
     ErrEngine           = errors.New("browser: engine failed")
+    ErrReader           = errors.New("browser: reader unavailable")
 )
 ```
 

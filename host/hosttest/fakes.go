@@ -326,14 +326,30 @@ var _ hostsearch.Search = (*SearchFake)(nil)
 type BrowserFake struct {
 	mu       sync.Mutex
 	pages    map[string]string               // URL -> HTML
+	readable map[string]string               // URL -> extracted readable text
 	resource map[string]hostbrowser.Resource // URL -> non-HTML fetch
 	frames   map[string][][]byte             // wss URL -> frames to deliver
 	handlers map[string]http.Handler         // DNS name -> handler serving the whole site
 	creds    map[string]string               // credential ID -> secret the host injects
 	visited  []string
+	reads    []string
 	posts    []Post
 	gate     func(mutating bool) error
 	clock    *Clock
+}
+
+// Readable programs the text returned when a plugin asks the host to read a page.
+func (f *BrowserFake) Readable(rawURL, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readable[rawURL] = content
+}
+
+// Reads returns the page URLs sent through the reader, in order.
+func (f *BrowserFake) Reads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.reads...)
 }
 
 // Handle serves every request for a DNS name through an http.Handler, instead of
@@ -482,6 +498,26 @@ func (f *BrowserFake) Do(ctx context.Context, opts hostbrowser.OpenOptions, req 
 		return res, nil
 	}
 	return f.fetch(req.URL)
+}
+
+func (f *BrowserFake) Read(ctx context.Context, opts hostbrowser.OpenOptions, rawURL string) (hostbrowser.Document, error) {
+	if err := f.gate(true); err != nil {
+		return hostbrowser.Document{}, err
+	}
+	if len(opts.AllowedHosts) == 0 {
+		return hostbrowser.Document{}, hostbrowser.ErrInvalidAllowlist
+	}
+	if !hostAllowed(rawURL, opts.AllowedHosts) {
+		return hostbrowser.Document{}, hostbrowser.ErrDenied
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads = append(f.reads, rawURL)
+	content, ok := f.readable[rawURL]
+	if !ok {
+		return hostbrowser.Document{}, hostbrowser.ErrReader
+	}
+	return hostbrowser.Document{URL: rawURL, Content: content}, nil
 }
 
 func (f *BrowserFake) fetch(rawURL string) (hostbrowser.Resource, error) {

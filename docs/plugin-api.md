@@ -344,6 +344,19 @@ only. `AllowedDomains` keeps a host and its subdomains. Pass them into a later `
 with no `Grounding`, and keep a price only if the model cites one of those URLs **and**
 the dollar amount appears in that hit. See [`search.md`](modules/search.md).
 
+When a result names the model but its snippet omits the evidence, an optional host-owned
+document transformer can read the rendered page:
+
+```go
+doc, err := h.Browser().Read(ctx, browser.OpenOptions{
+    AllowedHosts: []string{"shop.example"},
+}, hit.URL)
+```
+
+The host fetches and allowlist-checks the URL. It sends only page HTML to the transformer.
+Treat `browser.ErrReader` as unavailable unless extraction is required for the workflow;
+`policy.ErrPluginDisabled` and cancellation still stop work.
+
 ---
 
 ## 5. Jobs

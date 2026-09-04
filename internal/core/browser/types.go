@@ -10,6 +10,17 @@ import (
 type Browser interface {
 	Open(ctx context.Context, opts OpenOptions) (Session, error)
 	Do(ctx context.Context, opts OpenOptions, req Request) (Resource, error)
+	Read(ctx context.Context, opts OpenOptions, url string) (Document, error)
+}
+
+type Document struct {
+	URL     string
+	Content string
+}
+
+// Reader converts host-fetched HTML to bounded readable text. It never receives a URL.
+type Reader interface {
+	Extract(ctx context.Context, html string) (string, error)
 }
 
 type Request struct {

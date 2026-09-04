@@ -135,6 +135,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 | `host/browser` SDK: Open, Session, Page, allowlist, sentinels | ✅ | Plugins never import Playwright/chromedp/rod. |
 | Fake engine | ✅ | In-process `http.Handler` per DNS name; no sockets, no Chromium. |
 | Playwright engine | ✅ | `browser.engine: playwright`; Chromium + connect-time SSRF proxy. |
+| Optional document extraction | ✅ | `Browser.Read` renders through the allowlisted engine, then sends raw HTML only to a private, bounded Jina Reader sidecar. |
 | URL policy | ✅ | HTTPS only, or `wss` for `Subscribe`; plugin allowlist; no userinfo/IPs/ports; fail-closed. A fetch scheme is not a feed scheme. |
 | Limits | ✅ | 2 sessions/plugin, 4 pages/session, 4 subscriptions/session, 5 MiB document, 10 MiB resource, 1 MiB frame. |
 | Realtime feeds | ✅ | `Subscribe` streams an allowlisted `wss://` read-only; handshake frames and heartbeat replies are declared before connect, so there is no send channel. Dial bypasses the engine and reuses the connect-time private-address checks. |
@@ -216,6 +217,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Separate `plugins/bidrl` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
 | User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
+| Missing-price enrichment | ✅ | If snippets omit prices, read at most two ranked result pages; extracted model and amount must remain literal evidence. |
 | Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
 | Automation UI | ✅ | An Automation screen: what each tick would do next and what it last did, the latch with a resume control, the Findings backlog, and the settings it runs on. Turning it on stays on the plugin's configuration screen — only the administration API writes config, so a plugin page reports its settings and links to them. |
 | Plugin alerts | ✅ | New watchlist findings publish `bidrl.alert`. A 15-minute `warn` job publishes once when a saved lot is inside 24 hours of closing. |

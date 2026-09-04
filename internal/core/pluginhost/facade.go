@@ -106,6 +106,14 @@ func (a *browserAdapter) Do(ctx context.Context, opts hostbrowser.OpenOptions, r
 	return hostbrowser.Resource{URL: r.URL, MIME: r.MIME, Body: r.Body, Status: r.Status}, nil
 }
 
+func (a *browserAdapter) Read(ctx context.Context, opts hostbrowser.OpenOptions, url string) (hostbrowser.Document, error) {
+	doc, err := a.inner.Read(ctx, browser.OpenOptions{AllowedHosts: opts.AllowedHosts}, url)
+	if err != nil {
+		return hostbrowser.Document{}, mapBrowserErr(err)
+	}
+	return hostbrowser.Document{URL: doc.URL, Content: doc.Content}, nil
+}
+
 type browserSessionAdapter struct {
 	inner browser.Session
 	creds credentials.Runtime
@@ -264,6 +272,8 @@ func mapBrowserErr(err error) error {
 		return errors.Join(hostbrowser.ErrLimit, err)
 	case errors.Is(err, browser.ErrEngine), errors.Is(err, browser.ErrClosed):
 		return errors.Join(hostbrowser.ErrEngine, err)
+	case errors.Is(err, browser.ErrReader):
+		return errors.Join(hostbrowser.ErrReader, err)
 	}
 	return err
 }
@@ -275,6 +285,9 @@ func (disabledBrowser) Open(context.Context, hostbrowser.OpenOptions) (hostbrows
 }
 func (disabledBrowser) Do(context.Context, hostbrowser.OpenOptions, hostbrowser.Request) (hostbrowser.Resource, error) {
 	return hostbrowser.Resource{}, hostpolicy.ErrPluginDisabled
+}
+func (disabledBrowser) Read(context.Context, hostbrowser.OpenOptions, string) (hostbrowser.Document, error) {
+	return hostbrowser.Document{}, hostpolicy.ErrPluginDisabled
 }
 
 type searchAdapter struct {

@@ -173,6 +173,29 @@ func TestBrowserEnginePlaywrightAndUnknown(t *testing.T) {
 	}
 }
 
+func TestBrowserReaderURL(t *testing.T) {
+	cfg := Default()
+	cfg.Browser.Reader.URL = "http://reader:8081"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Browser.Reader.URL = "http://user@reader:8081/path?target=secret"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("reader url with userinfo and query must fail")
+	}
+}
+
+func TestBrowserReaderEnvOverride(t *testing.T) {
+	t.Setenv("CC_BROWSER_READER_URL", "http://reader:8081")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Browser.Reader.URL != "http://reader:8081" {
+		t.Fatalf("browser reader = %q", cfg.Browser.Reader.URL)
+	}
+}
+
 func TestSearchEngineSearxngRequiresURL(t *testing.T) {
 	cfg := Default()
 	if cfg.Search.Engine != "fake" {

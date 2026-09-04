@@ -120,6 +120,7 @@ func New(tb TB, plugin host.Plugin) *Harness {
 	h.Push = &PushFake{subs: map[string]int{}, state: map[string]string{}, gate: gate}
 	h.Browser = &BrowserFake{
 		pages:    map[string]string{},
+		readable: map[string]string{},
 		resource: map[string]hostbrowser.Resource{},
 		frames:   map[string][][]byte{},
 		handlers: map[string]http.Handler{},

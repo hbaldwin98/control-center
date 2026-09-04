@@ -59,6 +59,28 @@ func rankUsableHits(hits []hostsearch.Hit, model string) []hostsearch.Hit {
 	return out
 }
 
+func rankModelHits(hits []hostsearch.Hit, model string) []hostsearch.Hit {
+	usable := modelHits(hits, model)
+	sort.SliceStable(usable, func(i, j int) bool {
+		return classRank(classifySource(usable[i].URL).Class) < classRank(classifySource(usable[j].URL).Class)
+	})
+	return usable
+}
+
+func modelHits(hits []hostsearch.Hit, model string) []hostsearch.Hit {
+	var out []hostsearch.Hit
+	seen := map[string]bool{}
+	for _, hit := range hits {
+		key := strings.TrimRight(strings.ToLower(strings.TrimSpace(hit.URL)), "/")
+		if key == "" || seen[key] || (!modelMatch(hit.Title, model) && !modelMatch(hit.Snippet, model)) {
+			continue
+		}
+		seen[key] = true
+		out = append(out, hit)
+	}
+	return out
+}
+
 type sourceInfo struct {
 	Class string
 	Label string

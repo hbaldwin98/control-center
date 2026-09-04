@@ -41,7 +41,7 @@ per-plugin spend and budgets are exact rather than estimated.
 
 ## Deployment
 
-The whole thing — frontend, daemon, and a private SearXNG sidecar — is one
+The whole thing — frontend, daemon, and private SearXNG and Reader sidecars — is one
 `docker compose` stack.
 
 ```sh
@@ -63,6 +63,8 @@ downloaded once into `/data/.playwright`.
 
 The SearXNG sidecar is private — it is not published on the host. Control Center
 queries its JSON API; plugins never see the URL or choose the engine.
+The optional Jina Reader sidecar is also private. Control Center renders allowlisted
+public pages and sends Reader only raw HTML for bounded text extraction.
 
 ### Configuration
 
@@ -82,6 +84,7 @@ Secrets and deployment-specific values come from the environment instead:
 | `CC_TLS_CERT` / `CC_TLS_KEY` | PEM paths. Set both or neither. |
 | `CC_DATA_DIR` | Database, blobs, key, and password location (`/data`). |
 | `CC_BROWSER_ENGINE` | `fake` (in-process fixtures) or `playwright` (host-owned Chromium). |
+| `CC_BROWSER_READER_URL` | Optional private Jina Reader HTTP/1.1 address; enables browser document extraction. |
 | `CC_SEARCH_ENGINE` / `CC_SEARCH_SEARXNG_URL` | `fake` or `searxng`, and the sidecar's address. |
 | `CC_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | Enables the Google OAuth provider. |
 | `CC_OAUTH_CODEX_CLIENT_ID` | Overrides the public ChatGPT client id. |
