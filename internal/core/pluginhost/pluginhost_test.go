@@ -183,13 +183,13 @@ func TestRegisterAllIsAtomic(t *testing.T) {
 
 type invalidID struct{ probe }
 
-func (invalidID) Manifest() host.Manifest {
+func (*invalidID) Manifest() host.Manifest {
 	return host.Manifest{ID: "CORE", Name: "nope"}
 }
 
 type badModel struct{ probe }
 
-func (badModel) Manifest() host.Manifest {
+func (*badModel) Manifest() host.Manifest {
 	m := newProbe().Manifest()
 	m.Models = []host.ModelNeed{{Name: "CheapVision", Capabilities: []string{"chat"}, Purpose: "nope"}}
 	return m
@@ -502,7 +502,7 @@ func TestSecretConfigRejected(t *testing.T) {
 
 type secretPlugin struct{ probe }
 
-func (secretPlugin) Manifest() host.Manifest {
+func (*secretPlugin) Manifest() host.Manifest {
 	return host.Manifest{
 		ID: "secr", Name: "S",
 		Config: host.ConfigSpec{
