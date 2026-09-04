@@ -40,6 +40,7 @@ func (p *Plugin) handleListAuctions(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Store().Query(r.Context(), `SELECT id, url, title, status, lot_count, last_error, collected_at, ends_at,
 		affiliate_id, affiliate_name, city
 		FROM bidrl_auctions
+		WHERE hidden = 0
 		ORDER BY created_at DESC`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")

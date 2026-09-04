@@ -27,7 +27,7 @@ func (p *Plugin) handleListLocations(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Store().Query(r.Context(), `SELECT au.affiliate_id, au.affiliate_name, au.city, COUNT(l.id)
 		FROM bidrl_auctions au
 		LEFT JOIN bidrl_lots l ON l.auction_id = au.id
-		WHERE au.affiliate_id != ''
+		WHERE au.affiliate_id != '' AND au.hidden = 0
 		GROUP BY au.affiliate_id, au.affiliate_name, au.city
 		ORDER BY au.affiliate_name, au.city`)
 	if err != nil {

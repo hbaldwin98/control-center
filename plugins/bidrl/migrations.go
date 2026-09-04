@@ -298,6 +298,12 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 		Up: `
 			ALTER TABLE bidrl_lots ADD COLUMN ending_soon_alerted_at TEXT NOT NULL DEFAULT '';
 		`,
+	}, {
+		Version: 14,
+		Name:    "auction_hidden",
+		Up: `
+			ALTER TABLE bidrl_auctions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+		`,
 	}})
 }
 

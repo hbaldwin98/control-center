@@ -8,6 +8,10 @@ import (
 
 // The two summary screens: the front door, and the deal feed behind the tile.
 
+// lotVisible keeps a lot out of the summary counts when its auction is hidden. It is
+// written against the alias `l`, the one every lot query here uses.
+const lotVisible = `EXISTS (SELECT 1 FROM bidrl_auctions a WHERE a.id = l.auction_id AND a.hidden = 0)`
+
 // handleGetOverview answers the front door in one request.
 //
 // The overview wants counts, the widest gaps, and what closes next. Computing that in the
@@ -30,11 +34,15 @@ func (p *Plugin) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 		Live      int `json:"live"`
 		Ending    int `json:"ending"`
 	}
+	// A hidden auction — one that ended holding a saved lot or an undecided finding —
+	// is off the auctions list, so it is off these counts too. A front door that says
+	// nine auctions over a list of eight is worse than either number alone. Its lots are
+	// still on /bidrl/saved and in the findings queue, which is where they are wanted.
 	if err := h.Store().QueryRow(r.Context(), `SELECT
-		(SELECT COUNT(*) FROM bidrl_auctions),
-		(SELECT COUNT(*) FROM bidrl_lots),
-		(SELECT COUNT(*) FROM bidrl_lots WHERE bucket != 'pending'),
-		(SELECT COUNT(*) FROM bidrl_lots l WHERE EXISTS (SELECT 1 FROM bidrl_valuations v WHERE v.lot_id = l.id AND v.price_cents IS NOT NULL))`).
+		(SELECT COUNT(*) FROM bidrl_auctions WHERE hidden = 0),
+		(SELECT COUNT(*) FROM bidrl_lots l WHERE `+lotVisible+`),
+		(SELECT COUNT(*) FROM bidrl_lots l WHERE bucket != 'pending' AND `+lotVisible+`),
+		(SELECT COUNT(*) FROM bidrl_lots l WHERE `+lotVisible+` AND EXISTS (SELECT 1 FROM bidrl_valuations v WHERE v.lot_id = l.id AND v.price_cents IS NOT NULL))`).
 		Scan(&stats.Auctions, &stats.Lots, &stats.Scanned, &stats.Priced); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
@@ -44,7 +52,7 @@ func (p *Plugin) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 	// Close times are stored as text and may be blank or unparsable, so the two
 	// time-sensitive counts go through the same parser the rest of the plugin uses rather
 	// than trusting SQL string comparison.
-	endTimes, err := h.Store().Query(r.Context(), `SELECT ends_at FROM bidrl_lots WHERE ends_at != ''`)
+	endTimes, err := h.Store().Query(r.Context(), `SELECT l.ends_at FROM bidrl_lots l WHERE l.ends_at != '' AND `+lotVisible)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return

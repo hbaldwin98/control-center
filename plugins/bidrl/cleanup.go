@@ -15,6 +15,7 @@ type cleanupResult struct {
 	Auctions int `json:"auctions"`
 	Lots     int `json:"lots"`
 	Sites    int `json:"sites"`
+	Hidden   int `json:"hidden"`
 	Kept     int `json:"kept"`
 }
 
@@ -30,7 +31,7 @@ func (p *Plugin) handleCleanupExpired(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Events().Publish(r.Context(), "expired.cleaned", "expired", expiredCleaned{
-		Auctions: result.Auctions, Lots: result.Lots, Sites: result.Sites,
+		Auctions: result.Auctions, Lots: result.Lots, Sites: result.Sites, Hidden: result.Hidden,
 	}); err != nil {
 		writeHostErr(w, err)
 		return
@@ -61,6 +62,12 @@ func (p *Plugin) cleanupExpired(ctx context.Context, h host.Host) (cleanupResult
 				return result, err
 			}
 			result.Lots++
+		}
+		if plan.HideAuction && !a.Hidden {
+			if _, err := h.Store().Exec(ctx, `UPDATE bidrl_auctions SET hidden = 1 WHERE id = ?`, a.ID); err != nil {
+				return result, err
+			}
+			result.Hidden++
 		}
 	}
 
@@ -95,6 +102,7 @@ func (p *Plugin) cleanupExpired(ctx context.Context, h host.Host) (cleanupResult
 // auctionCleanup is what cleanup decided to do with one auction.
 type auctionCleanup struct {
 	DropAuction bool
+	HideAuction bool
 	DropLots    []string
 	Kept        int
 }
@@ -107,6 +115,11 @@ type auctionCleanup struct {
 // is kept as its shell — the lot keeps its photos, comparable, and location — while its
 // unsaved ended lots still go. Explicitly deleting the auction still takes everything,
 // saved lots included; that was asked for.
+//
+// A shell is hidden rather than left in the list. An ended auction that survives a
+// tidy still reads as one the tidy missed, so it drops out of the auctions screen and
+// stays reachable from the saved lot or the finding that held it. Collecting it again
+// brings it back.
 //
 // An undecided finding pins its lot the same way. A finding is the record of what a
 // watchlist turned up, and deleting the lot out from under it before you have looked
@@ -121,25 +134,33 @@ func cleanupPlan(a cleanupAuction, now time.Time) auctionCleanup {
 			pinned++
 		}
 	}
-	if auctionEnded(a.EndsAt, lotEnds, now) && pinned == 0 {
-		plan.DropAuction = true
-		return plan
+	if auctionEnded(a.EndsAt, lotEnds, now) {
+		if pinned == 0 {
+			plan.DropAuction = true
+			return plan
+		}
+		plan.HideAuction = true
 	}
 	for _, lot := range a.Lots {
-		if !hasEnded(lot.EndsAt, now) {
-			continue
-		}
 		if lot.Favorite || lot.Pending {
-			plan.Kept++
+			// A pinned lot counts as kept whenever its auction is over, close time or
+			// not: the tidy reporting nothing kept while an auction visibly survived is
+			// what made the rule look broken.
+			if plan.HideAuction || hasEnded(lot.EndsAt, now) {
+				plan.Kept++
+			}
 			continue
 		}
-		plan.DropLots = append(plan.DropLots, lot.ID)
+		if hasEnded(lot.EndsAt, now) {
+			plan.DropLots = append(plan.DropLots, lot.ID)
+		}
 	}
 	return plan
 }
 
 type cleanupAuction struct {
 	ID, EndsAt string
+	Hidden     bool
 	Lots       []cleanupLot
 }
 
@@ -150,17 +171,19 @@ type cleanupLot struct {
 }
 
 func (p *Plugin) loadCleanupAuctions(ctx context.Context, h host.Host) ([]cleanupAuction, error) {
-	rows, err := h.Store().Query(ctx, `SELECT id, ends_at FROM bidrl_auctions`)
+	rows, err := h.Store().Query(ctx, `SELECT id, ends_at, hidden FROM bidrl_auctions`)
 	if err != nil {
 		return nil, err
 	}
 	var auctions []cleanupAuction
 	for rows.Next() {
 		var a cleanupAuction
-		if err := rows.Scan(&a.ID, &a.EndsAt); err != nil {
+		var hidden int
+		if err := rows.Scan(&a.ID, &a.EndsAt, &hidden); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
+		a.Hidden = hidden != 0
 		auctions = append(auctions, a)
 	}
 	_ = rows.Close()

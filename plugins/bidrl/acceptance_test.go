@@ -684,3 +684,92 @@ func TestCollectsAnalyzesAndPrices(t *testing.T) {
 		t.Fatalf("deleted auction still present: %d", rec.Code)
 	}
 }
+
+// TestCleanupHidesAnEndedAuctionYouSavedFrom covers the one case where "Remove ended"
+// leaves an ended auction standing: something saved still points into it. The shell has
+// to stay for the favourite's photos and comparable, but leaving it in the auctions list
+// is indistinguishable from a tidy that missed it, so it is hidden instead.
+func TestCleanupHidesAnEndedAuctionYouSavedFrom(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, bidrl.New())
+	h.Run(ctx)
+
+	past := hosttest.DefaultNow.Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := h.DB().ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	exec(`INSERT INTO bidrl_auctions(id, url, title, host, status, created_at, ends_at, affiliate_id, affiliate_name, city)
+		VALUES ('saved', 'https://www.bidrl.com/auction/saved', 'Saved', 'www.bidrl.com', 'ready', ?, ?, 'aff-1', 'Affiliate One', 'Columbia')`, past, past)
+	exec(`INSERT INTO bidrl_auctions(id, url, title, host, status, created_at, ends_at)
+		VALUES ('gone', 'https://www.bidrl.com/auction/gone', 'Gone', 'www.bidrl.com', 'ready', ?, ?)`, past, past)
+	exec(`INSERT INTO bidrl_lots(id, auction_id, url, title, created_at, ends_at)
+		VALUES ('l1', 'saved', 'https://www.bidrl.com/lot/1', 'Kept', ?, ?)`, past, past)
+	exec(`INSERT INTO bidrl_lots(id, auction_id, url, title, created_at, ends_at)
+		VALUES ('l2', 'saved', 'https://www.bidrl.com/lot/2', 'Dropped', ?, ?)`, past, past)
+	exec(`INSERT INTO bidrl_lots(id, auction_id, url, title, created_at, ends_at)
+		VALUES ('l3', 'gone', 'https://www.bidrl.com/lot/3', 'Dropped', ?, ?)`, past, past)
+	exec(`INSERT INTO bidrl_favorites(lot_id, created_at) VALUES ('l1', ?)`, past)
+
+	var result struct {
+		Auctions int `json:"auctions"`
+		Lots     int `json:"lots"`
+		Hidden   int `json:"hidden"`
+		Kept     int `json:"kept"`
+	}
+	h.DecodeJSON(h.POST("/cleanup", nil), http.StatusOK, &result)
+	if result.Auctions != 1 || result.Lots != 1 || result.Hidden != 1 || result.Kept != 1 {
+		t.Fatalf("cleanup = %#v", result)
+	}
+
+	var listed struct {
+		Auctions []struct {
+			ID string `json:"id"`
+		} `json:"auctions"`
+	}
+	h.DecodeJSON(h.GET("/auctions"), http.StatusOK, &listed)
+	if len(listed.Auctions) != 0 {
+		t.Fatalf("hidden auction still listed: %#v", listed.Auctions)
+	}
+
+	// Hidden, not deleted: the favourite still has its auction behind it.
+	var lots int
+	if err := h.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM bidrl_lots WHERE auction_id = 'saved'`).Scan(&lots); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if lots != 1 {
+		t.Fatalf("saved auction lots = %d, want 1", lots)
+	}
+
+	// The front door counts what the list shows: the hidden auction and its lot are out
+	// of both, and out of the location filter.
+	var overview struct {
+		Stats struct {
+			Auctions int `json:"auctions"`
+			Lots     int `json:"lots"`
+			Live     int `json:"live"`
+		} `json:"stats"`
+	}
+	h.DecodeJSON(h.GET("/overview"), http.StatusOK, &overview)
+	if overview.Stats.Auctions != 0 || overview.Stats.Lots != 0 || overview.Stats.Live != 0 {
+		t.Fatalf("overview counts the hidden auction: %#v", overview.Stats)
+	}
+
+	var locations struct {
+		Locations []struct {
+			ID string `json:"id"`
+		} `json:"locations"`
+	}
+	h.DecodeJSON(h.GET("/locations"), http.StatusOK, &locations)
+	if len(locations.Locations) != 0 {
+		t.Fatalf("hidden auction still offered as a location: %#v", locations.Locations)
+	}
+
+	// A second pass has nothing left to do, and must not count the shell again.
+	h.DecodeJSON(h.POST("/cleanup", nil), http.StatusOK, &result)
+	if result.Auctions != 0 || result.Lots != 0 || result.Hidden != 0 || result.Kept != 1 {
+		t.Fatalf("second cleanup = %#v", result)
+	}
+}

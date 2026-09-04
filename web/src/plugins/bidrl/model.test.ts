@@ -76,18 +76,26 @@ describe("LOT_CATEGORIES", () => {
 
 describe("cleanupMessage", () => {
   it("names what was removed", () => {
-    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, kept: 0 })).toBe("Nothing had ended.");
-    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, kept: 0 })).toBe(
+    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, hidden: 0, kept: 0 })).toBe(
+      "Nothing had ended.",
+    );
+    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, hidden: 0, kept: 0 })).toBe(
       "Removed 1 ended auction and 4 ended lots.",
     );
   });
 
   it("says what it kept, because a tidy that spared your saved lots looks the same as one that deleted them", () => {
-    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, kept: 2 })).toBe(
+    expect(cleanupMessage({ auctions: 1, lots: 4, sites: 0, hidden: 0, kept: 2 })).toBe(
       "Removed 1 ended auction and 4 ended lots. Kept 2 you saved.",
     );
-    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, kept: 3 })).toBe(
+    expect(cleanupMessage({ auctions: 0, lots: 0, sites: 0, hidden: 0, kept: 3 })).toBe(
       "Nothing had ended that you had not saved. Kept 3 you saved.",
+    );
+  });
+
+  it("says an ended auction was hidden, not missed", () => {
+    expect(cleanupMessage({ auctions: 0, lots: 2, sites: 0, hidden: 1, kept: 1 })).toBe(
+      "Removed 2 ended lots. Kept 1 you saved. Hid 1 ended auction still holding something saved.",
     );
   });
 });

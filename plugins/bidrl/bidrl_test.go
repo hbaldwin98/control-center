@@ -199,7 +199,7 @@ func TestPluginContract(t *testing.T) {
 		"bidrl_lots", "bidrl_affiliate_auctions", "itemdata_at", "reused_from_lot_id",
 		"bidrl_intent_searches", "bidrl_lot_embeddings", "affiliate_id",
 		"bidrl_favorites", "bidrl_watchlists", "strftime", "bidrl_automation",
-		"high_bidder_id", "ending_soon_alerted_at",
+		"high_bidder_id", "ending_soon_alerted_at", "hidden",
 	}
 	if len(mig.migrations) != len(wantMigrations) {
 		t.Fatalf("migrations = %d, want %d", len(mig.migrations), len(wantMigrations))
@@ -1116,13 +1116,25 @@ func TestCleanupKeepsWhatYouSaved(t *testing.T) {
 	}
 
 	// One saved lot keeps the auction as a shell, so the lot keeps its photos and
-	// comparable, but the auction's other ended lots still go.
+	// comparable, but the auction's other ended lots still go. The shell is hidden:
+	// an ended auction left in the list reads as one the tidy missed.
 	plan = cleanupPlan(cleanupAuction{ID: "2", EndsAt: past, Lots: []cleanupLot{
 		{ID: "a", EndsAt: past, Favorite: true},
 		{ID: "b", EndsAt: past},
 	}}, now)
-	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+	if plan.DropAuction || !plan.HideAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
 		t.Fatalf("saved auction = %#v", plan)
+	}
+
+	// A saved lot with no close time still pins its ended auction, and still counts as
+	// kept — reporting nothing kept while the auction survived is what made the rule
+	// look broken.
+	plan = cleanupPlan(cleanupAuction{ID: "2b", EndsAt: past, Lots: []cleanupLot{
+		{ID: "a", Favorite: true},
+		{ID: "b", EndsAt: past},
+	}}, now)
+	if plan.DropAuction || !plan.HideAuction || plan.Kept != 1 || len(plan.DropLots) != 1 {
+		t.Fatalf("undated favourite = %#v", plan)
 	}
 
 	// A saved ended lot in a still-open auction is kept too.
@@ -1131,7 +1143,7 @@ func TestCleanupKeepsWhatYouSaved(t *testing.T) {
 		{ID: "b", EndsAt: past},
 		{ID: "c", EndsAt: future},
 	}}, now)
-	if plan.DropAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
+	if plan.DropAuction || plan.HideAuction || plan.Kept != 1 || len(plan.DropLots) != 1 || plan.DropLots[0] != "b" {
 		t.Fatalf("open auction = %#v", plan)
 	}
 }

@@ -472,7 +472,9 @@ func (p *Plugin) downloadPhotos(jc hostjobs.Context, h host.Host, page hostbrows
 func (p *Plugin) upsertAuction(jc hostjobs.Context, h host.Host, id, pageURL, hostName, status, now string) error {
 	_, err := h.Store().Exec(jc, `INSERT INTO bidrl_auctions(id, url, title, host, status, created_at)
 		VALUES (?, ?, '', ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET url = excluded.url, host = excluded.host, status = excluded.status, last_error = ''`,
+		ON CONFLICT(id) DO UPDATE SET url = excluded.url, host = excluded.host, status = excluded.status, last_error = '',
+			-- Asking to collect it again is asking to see it again.
+			hidden = 0`,
 		id, pageURL, hostName, status, now)
 	return err
 }

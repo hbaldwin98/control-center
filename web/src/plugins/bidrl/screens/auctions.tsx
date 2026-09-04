@@ -209,7 +209,9 @@ export function Auctions() {
         >
           <Hint>
             Ended auctions and lots stay until you remove them. The countdown is local from
-            the last collect or bid refresh — nothing is deleted on a schedule.
+            the last collect or bid refresh — nothing is deleted on a schedule. An ended
+            auction you saved a lot from is hidden here rather than deleted; collecting it
+            again brings it back.
           </Hint>
           {auctions.status === "loading" ? <Loading label="Loading auctions…" /> : null}
           {auctions.status === "error" && !disabled ? <Callout tone="danger">{auctions.error.message}</Callout> : null}

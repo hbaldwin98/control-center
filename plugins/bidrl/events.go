@@ -83,6 +83,7 @@ type expiredCleaned struct {
 	Auctions int `json:"auctions"`
 	Lots     int `json:"lots"`
 	Sites    int `json:"sites"`
+	Hidden   int `json:"hidden"`
 }
 
 type searchCompleted struct {
@@ -238,6 +239,7 @@ func publishedEvents() []host.EventSpec {
 				"auctions": "Auctions removed.",
 				"lots":     "Lots removed.",
 				"sites":    "SITES rows removed.",
+				"hidden":   "Ended auctions hidden because something saved still points at them.",
 			}),
 	}
 }

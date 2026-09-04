@@ -744,6 +744,7 @@ export type CleanupResult = {
   auctions: number;
   lots: number;
   sites: number;
+  hidden: number;
   kept: number;
 };
 
@@ -759,13 +760,19 @@ export function cleanupMessage(result: CleanupResult): string {
     parts.push(`${result.sites} ended SITES listing${result.sites === 1 ? "" : "s"}`);
   }
   // Saying what was kept matters more than saying what went: a tidy that silently
-  // spared your saved lots looks identical to one that quietly deleted them.
-  const kept =
-    result.kept > 0 ? ` Kept ${result.kept} you saved.` : "";
+  // spared your saved lots looks identical to one that quietly deleted them. An ended
+  // auction held back by something saved is hidden rather than removed, so say that
+  // too — otherwise it reads as an auction the tidy failed to take.
+  const kept = result.kept > 0 ? ` Kept ${result.kept} you saved.` : "";
+  const hidden =
+    result.hidden > 0
+      ? ` Hid ${result.hidden} ended auction${result.hidden === 1 ? "" : "s"} still holding something saved.`
+      : "";
   if (parts.length === 0) {
-    return kept ? `Nothing had ended that you had not saved.${kept}` : "Nothing had ended.";
+    const nothing = kept || hidden ? "Nothing had ended that you had not saved." : "Nothing had ended.";
+    return `${nothing}${kept}${hidden}`;
   }
-  return `Removed ${parts.join(" and ")}.${kept}`;
+  return `Removed ${parts.join(" and ")}.${kept}${hidden}`;
 }
 
 /**

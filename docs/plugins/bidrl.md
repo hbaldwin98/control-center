@@ -282,7 +282,7 @@ right.
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
 | Live | `GET /api/push/bidrl?topics=lot:<id>,…` — host-owned; one `lot:<id>` topic per lot on screen, joined to the BidRL feed while anyone is watching |
 | Events | `bids.refreshed` — many lots moved, refetch. One lot's new price is a push message, not an event: it has no history worth replaying. |
-| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot |
+| API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot, whose auction is hidden instead |
 | API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
 | API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |
 | API | `GET /findings?state=&watchlist=`, `POST /findings/{id}/accept`, `POST /findings/{id}/reject` |
@@ -523,6 +523,15 @@ next tidy is worse than no favourite. An ended auction holding a saved lot is ke
 shell so the lot keeps its photos, comparable, and location; that auction's unsaved lots
 still go, and cleanup reports what it kept as well as what it removed. Deleting an auction
 outright still takes everything in it, saved lots included: that was asked for.
+
+That shell is **hidden** rather than left on the auctions list (`bidrl_auctions.hidden`).
+An ended auction still sitting in the list after a tidy reads as one the tidy failed to
+take, which is the whole complaint the rule was meant to avoid; hidden, it stays reachable
+from the saved lot or the finding that held it, and collecting it again unhides it.
+Hidden means hidden everywhere a count is offered by default: the overview's auction, lot,
+scanned, priced and live counts skip it and its lots, and it is not offered as a location
+filter. A front door reading nine auctions over a list of eight is worse than either
+number alone. Showing hidden auctions again is a deliberate act — collect the auction.
 
 Find filters the visible lots by title, identification, model, and category without
 starting a BidRL search. The catalog's whole state — preset, text, bucket, category,
