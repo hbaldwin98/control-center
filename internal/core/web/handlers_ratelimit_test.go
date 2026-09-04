@@ -186,20 +186,84 @@ func TestPasswordVerifyIsBounded(t *testing.T) {
 }
 
 // TestPeerIP keeps the rate-limiting identity honest: the port must not split one
-// client's attempts across buckets, and a forwarded header must never be believed.
+// client's attempts across buckets, and a forwarded header must never be believed unless
+// the operator has said a proxy they control is the only way in.
 func TestPeerIP(t *testing.T) {
-	cases := map[string]string{
-		"203.0.113.5:40000":   "203.0.113.5",
-		"[2001:db8::1]:40000": "2001:db8::1",
-		"127.0.0.1:1":         "127.0.0.1",
-		"no-port-at-all":      "no-port-at-all",
+	h := newHarness(t)
+
+	cases := []struct {
+		remote, forwarded, want string
+	}{
+		{remote: "203.0.113.5:40000", want: "203.0.113.5"},
+		{remote: "[2001:db8::1]:40000", want: "2001:db8::1"},
+		{remote: "127.0.0.1:1", want: "127.0.0.1"},
+		{remote: "no-port-at-all", want: "no-port-at-all"},
+		// Untrusted by default, so the header is ignored however inviting it looks.
+		{remote: "203.0.113.5:40000", forwarded: "10.0.0.1", want: "203.0.113.5"},
 	}
-	for remote, want := range cases {
+	for _, c := range cases {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(nil))
-		req.RemoteAddr = remote
-		req.Header.Set("X-Forwarded-For", "10.0.0.1")
-		if got := peerIP(req); got != want {
-			t.Errorf("peerIP(%q) = %q, want %q", remote, got, want)
+		req.RemoteAddr = c.remote
+		if c.forwarded != "" {
+			req.Header.Set("X-Forwarded-For", c.forwarded)
 		}
+		if got := h.server.peerIP(req); got != c.want {
+			t.Errorf("peerIP(remote=%q xff=%q) = %q, want %q", c.remote, c.forwarded, got, c.want)
+		}
+	}
+}
+
+// TestPeerIPBehindTrustedProxy covers the other half: once a proxy is configured, the
+// address must come from the header, and it must be the entry that proxy appended rather
+// than anything a client managed to put to the left of it.
+func TestPeerIPBehindTrustedProxy(t *testing.T) {
+	h := newHarness(t)
+	h.server.deps.Config.Server.TrustedProxy = true
+
+	cases := []struct {
+		forwarded, want string
+	}{
+		{forwarded: "198.51.100.7", want: "198.51.100.7"},
+		// A client that forged its own header is overruled by the real hop on the right.
+		{forwarded: "10.0.0.1, 198.51.100.7", want: "198.51.100.7"},
+		{forwarded: "spoofed, 203.0.113.9 ", want: "203.0.113.9"},
+		// Nothing usable in the header falls back to the connection.
+		{forwarded: "", want: "192.0.2.1"},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(nil))
+		req.RemoteAddr = "192.0.2.1:9000"
+		if c.forwarded != "" {
+			req.Header.Set("X-Forwarded-For", c.forwarded)
+		}
+		if got := h.server.peerIP(req); got != c.want {
+			t.Errorf("peerIP(xff=%q) = %q, want %q", c.forwarded, got, c.want)
+		}
+	}
+}
+
+// TestTrustedProxyRevokesLoopbackPrivilege is the reason the switch exists. A proxy on
+// the same host makes every request look local, and two privileges hang off "local":
+// first-run bootstrap, and exemption from the shared attempt ceiling.
+func TestTrustedProxyRevokesLoopbackPrivilege(t *testing.T) {
+	h := newHarness(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	if !h.server.remoteIsLoopback(req) {
+		t.Fatal("a genuine loopback peer was not recognised")
+	}
+
+	h.server.deps.Config.Server.TrustedProxy = true
+	if h.server.remoteIsLoopback(req) {
+		t.Fatal("the proxy's own loopback socket was mistaken for the console")
+	}
+
+	// The bootstrap route is the privilege that matters most, so check it end to end.
+	h.peer = "127.0.0.1:54321"
+	rec := h.do(http.MethodPost, "/api/auth/bootstrap",
+		map[string]string{"token": h.issueToken(), "password": testPassword})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("bootstrap through a proxy: got %d, want 403", rec.Code)
 	}
 }

@@ -142,8 +142,13 @@ func TestDeriveFillsZeroDurationsAndPool(t *testing.T) {
 	if cfg.Data.BusyTimeout != 5*time.Second || cfg.Data.ReadPool != 8 {
 		t.Fatalf("busy=%v pool=%d", cfg.Data.BusyTimeout, cfg.Data.ReadPool)
 	}
-	if cfg.Session.Absolute != 12*time.Hour || cfg.Session.Idle != 12*time.Hour || cfg.Session.ReauthWindow != 5*time.Minute {
+	if cfg.Session.Absolute != 12*time.Hour || cfg.Session.Idle != time.Hour || cfg.Session.ReauthWindow != 5*time.Minute {
 		t.Fatalf("session = %+v", cfg.Session)
+	}
+	// An idle window that is not shorter than the absolute one can never close first,
+	// which would leave an abandoned session alive for as long as a used one.
+	if cfg.Session.Idle >= cfg.Session.Absolute {
+		t.Fatalf("idle %v does not expire before absolute %v", cfg.Session.Idle, cfg.Session.Absolute)
 	}
 	if cfg.AI.Models != "config/models.yaml" {
 		t.Fatalf("ai.models = %q", cfg.AI.Models)

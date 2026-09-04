@@ -1,10 +1,14 @@
 package web
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/hbaldwin98/control-center/internal/core/events"
 )
 
 // minPasswordLen is the only password rule. There is one administrator, no reset flow, and
@@ -28,7 +32,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	st := authStatus{
 		BootstrapRequired:  !exists,
-		BootstrapAvailable: !exists && remoteIsLoopback(r),
+		BootstrapAvailable: !exists && s.remoteIsLoopback(r),
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		if _, err := s.auth.lookup(r.Context(), c.Value, s.deps.Config.Session.Idle); err == nil {
@@ -46,7 +50,7 @@ type bootstrapAdminRequest struct {
 // handleBootstrapAdmin completes first-run setup. It is accepted only from a loopback peer
 // and only while no administrator exists, and it consumes the one-time token.
 func (s *Server) handleBootstrapAdmin(w http.ResponseWriter, r *http.Request) {
-	if !remoteIsLoopback(r) {
+	if !s.remoteIsLoopback(r) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "first-run bootstrap is available on loopback only")
 		return
 	}
@@ -54,7 +58,8 @@ func (s *Server) handleBootstrapAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "origin not allowed")
 		return
 	}
-	if !s.limit.allow("bootstrap", peerIP(r), remoteIsLoopback(r)) {
+	if !s.limit.allow("bootstrap", s.peerIP(r), s.remoteIsLoopback(r)) {
+		s.authLockout(r.Context(), "bootstrap", s.peerIP(r))
 		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts")
 		return
 	}
@@ -72,6 +77,7 @@ func (s *Server) handleBootstrapAdmin(w http.ResponseWriter, r *http.Request) {
 	switch err := s.auth.bootstrap(r.Context(), req.Token, req.Password); {
 	case err == nil:
 	case errors.Is(err, errBadToken):
+		s.authFailure(r.Context(), "bootstrap", s.peerIP(r))
 		writeError(w, http.StatusForbidden, CodeForbidden, "invalid or already used bootstrap token")
 		return
 	default:
@@ -79,7 +85,7 @@ func (s *Server) handleBootstrapAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.limit.reset("bootstrap", peerIP(r))
+	s.limit.reset("bootstrap", s.peerIP(r))
 	s.startSession(w, r)
 }
 
@@ -93,7 +99,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, CodeForbidden, "origin not allowed")
 		return
 	}
-	if !s.limit.allow("login", peerIP(r), remoteIsLoopback(r)) {
+	if !s.limit.allow("login", s.peerIP(r), s.remoteIsLoopback(r)) {
+		s.authLockout(r.Context(), "login", s.peerIP(r))
 		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts")
 		return
 	}
@@ -106,6 +113,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	switch err := s.auth.checkPassword(r.Context(), req.Password); {
 	case err == nil:
 	case errors.Is(err, errBadCredentials), errors.Is(err, errNoAdmin):
+		s.authFailure(r.Context(), "login", s.peerIP(r))
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid credentials")
 		return
 	default:
@@ -119,7 +127,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			_ = s.auth.delete(r.Context(), old.ID)
 		}
 	}
-	s.limit.reset("login", peerIP(r))
+	s.limit.reset("login", s.peerIP(r))
 	s.startSession(w, r)
 }
 
@@ -155,7 +163,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleReauth records a fresh password confirmation. Credential changes require one
 // within the configured window.
 func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {
-	if !s.limit.allow("reauth", peerIP(r), remoteIsLoopback(r)) {
+	if !s.limit.allow("reauth", s.peerIP(r), s.remoteIsLoopback(r)) {
+		s.authLockout(r.Context(), "reauth", s.peerIP(r))
 		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts")
 		return
 	}
@@ -164,6 +173,7 @@ func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.auth.checkPassword(r.Context(), req.Password); err != nil {
+		s.authFailure(r.Context(), "reauth", s.peerIP(r))
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid credentials")
 		return
 	}
@@ -172,7 +182,7 @@ func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "reauth", err)
 		return
 	}
-	s.limit.reset("reauth", peerIP(r))
+	s.limit.reset("reauth", s.peerIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"reauthenticatedUntil": s.now().UTC().Add(s.deps.Config.Session.ReauthWindow),
 	})
@@ -187,7 +197,8 @@ type changePasswordRequest struct {
 // in the same request rather than leaning on the reauth window, so the change is always
 // bound to a fresh proof of knowledge. Every other session is signed out.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
-	if !s.limit.allow("password", peerIP(r), remoteIsLoopback(r)) {
+	if !s.limit.allow("password", s.peerIP(r), s.remoteIsLoopback(r)) {
+		s.authLockout(r.Context(), "password", s.peerIP(r))
 		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many attempts")
 		return
 	}
@@ -210,6 +221,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	switch err := s.auth.checkPassword(r.Context(), req.CurrentPassword); {
 	case err == nil:
 	case errors.Is(err, errBadCredentials), errors.Is(err, errNoAdmin):
+		s.authFailure(r.Context(), "password", s.peerIP(r))
 		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "invalid credentials")
 		return
 	default:
@@ -221,7 +233,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "change password", err)
 		return
 	}
-	s.limit.reset("password", peerIP(r))
+	s.limit.reset("password", s.peerIP(r))
 
 	// A password change also revokes every other device's session.
 	sess := sessionFrom(r.Context())
@@ -254,6 +266,49 @@ func clearSessionCookie(w http.ResponseWriter) {
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// authFailure records a rejected authentication attempt.
+//
+// Until this existed, a failed login left no trace anywhere: nothing in the log, nothing
+// in the event stream, nothing in the inbox. Exposed to the internet that is the
+// difference between "I am locked out" and "I am being attacked", and there was no way to
+// tell them apart. Publishing an event rather than only logging puts it through the
+// notification rules the administrator has already configured.
+//
+// The peer address is the only detail carried. The submitted password is never recorded,
+// not even its length, because a near miss on the real password is worth more to an
+// attacker who later reads the log than the record is worth to the administrator.
+func (s *Server) authFailure(ctx context.Context, endpoint, peer string) {
+	slog.Warn("web: authentication failed", "endpoint", endpoint, "peer", peer)
+	s.publishAuth(ctx, events.TypeAuthFailed, endpoint, peer,
+		"A "+endpoint+" attempt from "+peer+" was rejected.")
+}
+
+// authLockout records an attempt refused by the limiter rather than by the password. It
+// is a separate event because it means something different: somebody is hammering, and
+// with the per-peer ceiling reached they have already spent their budget.
+func (s *Server) authLockout(ctx context.Context, endpoint, peer string) {
+	slog.Warn("web: authentication rate limited", "endpoint", endpoint, "peer", peer)
+	s.publishAuth(ctx, events.TypeAuthLockedOut, endpoint, peer,
+		"Too many "+endpoint+" attempts from "+peer+". Further attempts are being refused.")
+}
+
+func (s *Server) publishAuth(ctx context.Context, typ, endpoint, peer, body string) {
+	if s.deps.Events == nil {
+		return
+	}
+	// A detached context: the request that triggered this is about to be answered with a
+	// rejection, and cancelling it must not drop the record of why.
+	ctx = context.WithoutCancel(ctx)
+	if _, err := s.deps.Events.Publish(ctx, events.Input{
+		Type:    typ,
+		Source:  events.SourceWeb,
+		Subject: endpoint,
+		Payload: map[string]any{"endpoint": endpoint, "peer": peer, "body": body},
+	}); err != nil {
+		slog.Error("web: publish auth event", "type", typ, "err", err)
+	}
 }
 
 // attemptLimiter is a fixed-window limiter for the unauthenticated auth endpoints.

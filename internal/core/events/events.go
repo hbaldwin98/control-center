@@ -203,6 +203,9 @@ const (
 
 	TypeSubscriptionPaused = "core.event.subscription_paused"
 
+	TypeAuthFailed    = "core.auth.failed"
+	TypeAuthLockedOut = "core.auth.locked_out"
+
 	TypeNotificationReady           = "core.notification.ready"
 	TypeNotificationDeliveryChanged = "core.notification.delivery_changed"
 	TypeNotificationConfigChanged   = "core.notification.config_changed"
@@ -219,4 +222,5 @@ const (
 	SourceCredentials   = "core.credentials"
 	SourceNotifications = "core.notifications"
 	SourcePluginHost    = "core.pluginhost"
+	SourceWeb           = "core.web"
 )

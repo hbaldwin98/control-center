@@ -41,6 +41,14 @@ func coreCatalogEvents() []catalogEvent {
 		Name: "body", Type: "string", Purpose: "Plain-text details for the inbox and ntfy.",
 		Path: "event.payload.body",
 	}
+	authEndpoint := eventFieldView{
+		Name: "endpoint", Type: "string", Purpose: "Which attempt it was: login, reauth, password, or bootstrap.",
+		Path: "event.payload.endpoint",
+	}
+	authPeer := eventFieldView{
+		Name: "peer", Type: "string", Purpose: "The address the attempt came from.",
+		Path: "event.payload.peer",
+	}
 	return []catalogEvent{
 		{
 			Source: "*", Name: "Plugins", Type: "*.alert", Match: "*.alert",
@@ -66,6 +74,16 @@ func coreCatalogEvents() []catalogEvent {
 		{
 			Source: "core", Name: "Events", Type: events.TypeSubscriptionPaused, Match: events.TypeSubscriptionPaused,
 			Purpose: "A durable subscriber stopped on a poison event.",
+		},
+		{
+			Source: "core", Name: "Auth", Type: events.TypeAuthFailed, Match: events.TypeAuthFailed,
+			Purpose: "An authentication attempt was rejected.",
+			Fields:  []eventFieldView{body, authEndpoint, authPeer},
+		},
+		{
+			Source: "core", Name: "Auth", Type: events.TypeAuthLockedOut, Match: events.TypeAuthLockedOut,
+			Purpose: "Authentication attempts from one address hit the rate limit.",
+			Fields:  []eventFieldView{body, authEndpoint, authPeer},
 		},
 	}
 }

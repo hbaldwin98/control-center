@@ -42,6 +42,17 @@ type Server struct {
 	// Origins lists additional acceptable Origin header values for mutations, beyond the
 	// one implied by Addr. Use this when serving behind a name that differs from Addr.
 	Origins []string `yaml:"origins"`
+
+	// TrustedProxy says a reverse proxy terminates connections in front of this server
+	// and that its X-Forwarded-* headers may be believed.
+	//
+	// Set it only when something you control is the *only* way to reach the listener,
+	// because it changes who the server thinks it is talking to. With it set, the peer
+	// address for rate limiting is read from X-Forwarded-For instead of the connection,
+	// no peer counts as loopback (a proxied request is never the operator at the
+	// console, however local the socket looks), and X-Forwarded-Proto decides whether
+	// the response carries HSTS.
+	TrustedProxy bool `yaml:"trustedProxy"`
 }
 
 // Data describes where persistent state lives.
@@ -58,8 +69,13 @@ type Data struct {
 
 // Session describes the administrator session policy.
 type Session struct {
+	// Absolute is the longest a session may live, however active it is.
 	Absolute time.Duration `yaml:"absolute"`
-	Idle     time.Duration `yaml:"idle"`
+
+	// Idle is how long a session survives without a request. It must be shorter than
+	// Absolute to mean anything: set equal, an abandoned session lasts exactly as long
+	// as a used one, and a stolen cookie keeps its full value until the day is out.
+	Idle time.Duration `yaml:"idle"`
 
 	// ReauthWindow is how long a password reauthentication stays valid for credential
 	// changes.
@@ -128,7 +144,7 @@ func Default() Config {
 		},
 		Session: Session{
 			Absolute:     12 * time.Hour,
-			Idle:         12 * time.Hour,
+			Idle:         time.Hour,
 			ReauthWindow: 5 * time.Minute,
 		},
 		Blobs: Blobs{
@@ -188,6 +204,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("CC_SEARCH_SEARXNG_URL"); v != "" {
 		c.Search.SearXNG.URL = v
 	}
+	if v := os.Getenv("CC_TRUSTED_PROXY"); v != "" {
+		c.Server.TrustedProxy = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+	}
 	if v := os.Getenv("CC_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
@@ -217,7 +236,7 @@ func (c *Config) derive() {
 		c.Session.Absolute = 12 * time.Hour
 	}
 	if c.Session.Idle <= 0 {
-		c.Session.Idle = 12 * time.Hour
+		c.Session.Idle = time.Hour
 	}
 	if c.Session.ReauthWindow <= 0 {
 		c.Session.ReauthWindow = 5 * time.Minute

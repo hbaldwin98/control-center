@@ -143,6 +143,29 @@ describe("Sessions", () => {
     expect(h.calls.some((call) => call.path === "/api/harness" && call.method === "POST")).toBe(true);
   });
 
+  // Starting a session runs a program on the box, so the server asks for the password
+  // again. The prompt has to appear on this screen: sending the operator to Settings and
+  // back would lose the form they just filled in.
+  it("confirms the password when the server asks, then starts the session", async () => {
+    serve([]);
+    await h.render(<Sessions />);
+    // Set after the snapshot loads: the gate is on creating a session, not reading them.
+    h.failures.set("/api/harness", { status: 403, code: "reauth_required" });
+    await fill(h.container, 'input[placeholder="."]', "control-center");
+    await h.click("Start session");
+
+    expect(h.text()).toContain("Administrator password");
+
+    // With the password confirmed the create is retried, rather than made to be
+    // filled in and submitted a second time.
+    h.failures.delete("/api/harness");
+    await fill(h.container, 'input[type="password"]', "correct horse battery staple");
+    await h.click("Confirm and start");
+
+    expect(h.calls.some((call) => call.path === "/api/auth/reauth" && call.method === "POST")).toBe(true);
+    expect(h.calls.filter((call) => call.path === "/api/harness" && call.method === "POST")).toHaveLength(2);
+  });
+
   it("stops a running session", async () => {
     serve();
     await h.render(<Sessions />);

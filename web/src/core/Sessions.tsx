@@ -82,6 +82,11 @@ function CreateSession({ profiles, onCreated }: { profiles: Profile[]; onCreated
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the server asked for the password again. Starting a session runs a program
+  // on the box, so the confirmation is asked for here rather than sending the operator to
+  // Settings and back with the form they filled in lost on the way.
+  const [confirming, setConfirming] = useState(false);
+  const [password, setPassword] = useState("");
   const selectedId = profileId || profiles[0]?.id || "";
   const selected = profiles.find((profile) => profile.id === selectedId);
 
@@ -89,16 +94,42 @@ function CreateSession({ profiles, onCreated }: { profiles: Profile[]; onCreated
     return <Callout tone="warn">No harness profiles are configured. Add one under <code>harness.profiles</code>.</Callout>;
   }
 
+  const create = () =>
+    api.post<Session>("/api/harness", { profileId: selectedId, workspace, title, instruction }).then(() => {
+      setTitle("");
+      setInstruction("");
+      setConfirming(false);
+      setPassword("");
+      onCreated();
+    });
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    // With the window already open, the first attempt goes through and nothing is asked.
+    // The reauthentication lasts five minutes, so starting several sessions in a row
+    // prompts once rather than every time.
+    void create()
+      .catch((err) => {
+        if (needsReauth(err)) {
+          setConfirming(true);
+          return;
+        }
+        setError(errorMessage(err));
+      })
+      .finally(() => setBusy(false));
+  };
+
+  const confirm = () => {
+    setBusy(true);
+    setError(null);
     void api
-      .post<Session>("/api/harness", { profileId: selectedId, workspace, title, instruction })
+      .post("/api/auth/reauth", { password })
+      // The password is not kept beyond the retry it authorises.
       .then(() => {
-        setTitle("");
-        setInstruction("");
-        onCreated();
+        setPassword("");
+        return create();
       })
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setBusy(false));
@@ -131,8 +162,30 @@ function CreateSession({ profiles, onCreated }: { profiles: Profile[]; onCreated
               />
             </Field>
           ) : null}
+          {confirming ? (
+            <Field label="Administrator password" hint="Starting a session runs a program on this machine">
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.currentTarget.value)}
+                autoFocus
+              />
+            </Field>
+          ) : null}
           <Row>
-            <Button type="submit" variant="primary" disabled={busy}>{busy ? "Starting…" : "Start session"}</Button>
+            {confirming ? (
+              <Button
+                type="button"
+                variant="primary"
+                disabled={busy || password === ""}
+                onClick={confirm}
+              >
+                {busy ? "Starting…" : "Confirm and start"}
+              </Button>
+            ) : (
+              <Button type="submit" variant="primary" disabled={busy}>{busy ? "Starting…" : "Start session"}</Button>
+            )}
           </Row>
           {error ? <Callout tone="danger">{error}</Callout> : null}
         </Stack>
@@ -218,6 +271,10 @@ function StateBadge({ state }: { state: string }) {
   if (state === "failed" || state === "interrupted") return <Badge tone="danger">{state}</Badge>;
   if (state === "running" || state === "starting" || state === "stopping") return <Badge tone="warn">{state}</Badge>;
   return <Badge>{state}</Badge>;
+}
+
+function needsReauth(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "reauth_required";
 }
 
 function errorMessage(err: unknown): string {

@@ -52,8 +52,14 @@ export type Harness = {
   container: HTMLDivElement;
   /** Responses by path, without query string. Mutate between renders to change them. */
   routes: Map<string, unknown>;
-  /** Paths that must answer with an error status, so failure branches can be reached. */
-  failures: Map<string, number>;
+  /**
+   * Paths that must answer with an error status, so failure branches can be reached.
+   *
+   * A bare status is enough when the screen only reports the failure. Give the object
+   * form when it branches on the error code instead -- a screen that has to tell
+   * `reauth_required` from an ordinary 403 cannot be tested with a status alone.
+   */
+  failures: Map<string, number | { status: number; code: string }>;
   /** Every request the screens made, in order. */
   calls: Call[];
   /** Mounts an element, then flushes the snapshot loads it started. */
@@ -111,9 +117,11 @@ export function setupHarness(): Harness {
 
         const failure = h.failures.get(path);
         if (failure !== undefined) {
+          const status = typeof failure === "number" ? failure : failure.status;
+          const code = typeof failure === "number" ? "failed" : failure.code;
           return Promise.resolve(
-            new Response(JSON.stringify({ error: "failed", message: "failed" }), {
-              status: failure,
+            new Response(JSON.stringify({ error: { code, message: "failed" } }), {
+              status,
               headers: { "Content-Type": "application/json" },
             }),
           );

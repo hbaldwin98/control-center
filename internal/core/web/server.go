@@ -185,7 +185,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.authenticated(s.handleJobCancel))
 
 	s.mux.HandleFunc("GET /api/harness", s.authenticated(s.handleHarnessList))
-	s.mux.HandleFunc("POST /api/harness", s.authenticated(s.handleHarnessCreate))
+	// Starting a session runs a configured program on this machine, which is the
+	// heaviest thing any route here does. It asks for the password again so that a
+	// stolen session cookie alone cannot spawn processes; stopping one does not, since
+	// the safe direction needs to stay easy.
+	s.mux.HandleFunc("POST /api/harness", s.reauthenticated(s.handleHarnessCreate))
 	s.mux.HandleFunc("GET /api/harness/{id}", s.authenticated(s.handleHarnessGet))
 	s.mux.HandleFunc("POST /api/harness/{id}/stop", s.authenticated(s.handleHarnessStop))
 
@@ -236,12 +240,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/admin/notifications/health", s.authenticated(s.handleNotifHealth))
 	s.mux.HandleFunc("GET /api/admin/notifications/catalog", s.authenticated(s.handleNotifCatalog))
 
+	// Liveness, for a proxy or an uptime check. It is the one route with no session,
+	// because a monitor cannot hold one, so it reports nothing whatever about the state
+	// of this server beyond the fact that it is answering.
+	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
 	s.mux.HandleFunc("/", s.serveStatic)
 }
 
 // Handler returns the fully wrapped handler: security headers, then routing.
 func (s *Server) Handler() http.Handler {
-	return securityHeaders(s.mux)
+	return s.securityHeaders(s.mux)
 }
 
 // ListenAndServe runs the server until ctx is cancelled, then drains connections.
@@ -281,9 +292,17 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 // ---- middleware ----
 
+// hstsMaxAge is a year, the value below which preload lists and most guidance stop
+// treating the header as meant.
+const hstsMaxAge = "max-age=31536000; includeSubDomains"
+
 // securityHeaders applies defence-in-depth headers to every response. The CSP is strict
 // because the shell ships no inline script and loads no third-party origin.
-func securityHeaders(next http.Handler) http.Handler {
+//
+// HSTS is sent only on a request that actually arrived over TLS. On plain HTTP the header
+// is ignored by browsers anyway, and sending it from a loopback development server would
+// be a promise about a scheme that server does not speak.
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
@@ -293,6 +312,9 @@ func securityHeaders(next http.Handler) http.Handler {
 			"default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "+
 				"script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "+
 				"form-action 'self'; object-src 'none'")
+		if s.requestIsTLS(r) {
+			h.Set("Strict-Transport-Security", hstsMaxAge)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -343,17 +365,28 @@ func (s *Server) withActor(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireReauth is authenticated plus a fresh password reauthentication. Credential
-// changes go through here so a stolen session cookie is not enough.
+// requireReauth is authenticated plus a fresh password reauthentication, with the
+// credential actor stamped. Credential changes go through here so a stolen session cookie
+// is not enough.
 func (s *Server) requireReauth(next http.HandlerFunc) http.HandlerFunc {
-	return s.authenticated(s.withActor(func(w http.ResponseWriter, r *http.Request) {
+	return s.authenticated(s.withActor(s.freshReauth(next)))
+}
+
+// reauthenticated is requireReauth without the credential actor, for the routes that need
+// the same proof of the password but are not touching a stored secret.
+func (s *Server) reauthenticated(next http.HandlerFunc) http.HandlerFunc {
+	return s.authenticated(s.freshReauth(next))
+}
+
+func (s *Server) freshReauth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		sess := sessionFrom(r.Context())
 		if sess == nil || !sess.reauthFresh(s.now().UTC(), s.deps.Config.Session.ReauthWindow) {
 			writeError(w, http.StatusForbidden, CodeReauthRequired, "password reauthentication required")
 			return
 		}
 		next(w, r)
-	}))
+	}
 }
 
 func isMutation(method string) bool {
@@ -417,13 +450,39 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// requestIsTLS reports whether the browser reached this server over HTTPS, which is not
+// the same question as whether this process terminated the TLS. Behind a configured proxy
+// the connection here is plain and the proxy states the original scheme.
+func (s *Server) requestIsTLS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if s.deps.Config.Server.TrustedProxy {
+		return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	}
+	return false
+}
+
 // peerIP is the rate-limiting identity of a request: the address the connection came
 // from, with the port stripped so a client's every attempt lands in one bucket.
 //
-// It is read from RemoteAddr and never from a forwarded header, because nothing here
-// knows whether a proxy it can trust put one there. Behind a reverse proxy every request
-// therefore shares the loopback bucket -- see docs on exposing this server.
-func peerIP(r *http.Request) string {
+// A forwarded header is believed only when the configuration says a proxy this operator
+// controls is the sole way in. Otherwise anyone could choose their own rate-limit bucket
+// by setting a header, which is worse than having no per-peer limiting at all.
+func (s *Server) peerIP(r *http.Request) string {
+	if s.deps.Config.Server.TrustedProxy {
+		// The rightmost entry is the one our own proxy appended, so it is the only one
+		// in the list a client could not have written. Everything to its left is
+		// hearsay forwarded from further out.
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			if i := strings.LastIndex(fwd, ","); i >= 0 {
+				fwd = fwd[i+1:]
+			}
+			if fwd = strings.Trim(strings.TrimSpace(fwd), "[]"); fwd != "" {
+				return fwd
+			}
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -431,9 +490,17 @@ func peerIP(r *http.Request) string {
 	return strings.Trim(host, "[]")
 }
 
-// remoteIsLoopback reports whether the peer is on this machine. First-run bootstrap is
-// offered only to such peers.
-func remoteIsLoopback(r *http.Request) bool {
+// remoteIsLoopback reports whether the peer is genuinely on this machine. First-run
+// bootstrap is offered only to such peers, and only they are exempt from the shared
+// attempt ceiling.
+//
+// With a proxy in front, no request qualifies. Every one of them arrives from the proxy's
+// own socket, which is usually loopback, so believing the connection would hand the whole
+// internet a privilege meant for whoever is sitting at the console.
+func (s *Server) remoteIsLoopback(r *http.Request) bool {
+	if s.deps.Config.Server.TrustedProxy {
+		return false
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr

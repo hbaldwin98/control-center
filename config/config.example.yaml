@@ -31,6 +31,13 @@ server:
   # needed when the server is reached under a name that differs from addr.
   origins: []
 
+  # Set only when a reverse proxy you control is the *only* way to reach the listener.
+  # It makes the server read the peer address from X-Forwarded-For, take the original
+  # scheme from X-Forwarded-Proto, and stop treating any request as local -- a proxy on
+  # this host makes every request look loopback, and privileges hang off that. Left
+  # false, forwarded headers are ignored entirely. See docs/exposure.md.
+  trustedProxy: false
+
 data:
   dir: "data"
   # Default to <dir>/control-center.db and <dir>/blobs.
@@ -40,8 +47,11 @@ data:
   readPool: 8
 
 session:
+  # The longest a session may live, however active it is.
   absolute: 12h
-  idle: 12h
+  # How long a session survives without a request. Keep it shorter than absolute, or it
+  # can never close first and an abandoned session lasts as long as a used one.
+  idle: 1h
   # How long a password reauthentication stays valid for credential changes.
   reauthWindow: 5m
 
