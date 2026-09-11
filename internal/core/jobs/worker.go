@@ -36,12 +36,14 @@ func (q *Queue) claimOne(ctx context.Context) (bool, error) {
 	nowStr := rfc(now)
 	var claimed jobRow
 	var owner string
+	var retry bool
 	err := q.db.Tx(ctx, func(tx storage.Tx) error {
 		j, err := scanJob(tx.QueryRow(ctx, jobSelect+`
 			 WHERE (
 			         (state = 'pending' AND run_at <= ?)
 			      OR (state = 'retry_wait' AND next_retry_at <= ?)
 			      OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+			      OR (state = 'cancel_requested' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
 			       )
 			   AND (
 			         SELECT count(*) FROM core_jobs r
@@ -51,7 +53,7 @@ func (q *Queue) claimOne(ctx context.Context) (bool, error) {
 			            AND r.id != core_jobs.id
 			       ) < core_jobs.concurrency
 			 ORDER BY priority DESC, coalesce(next_retry_at, run_at) ASC, id ASC
-			 LIMIT 1`, nowStr, nowStr, nowStr))
+			 LIMIT 1`, nowStr, nowStr, nowStr, nowStr))
 		if storage.IsNoRows(err) {
 			return errSkip
 		}
@@ -59,12 +61,31 @@ func (q *Queue) claimOne(ctx context.Context) (bool, error) {
 			return err
 		}
 
+		// Both branches below finish the job instead of claiming it, then look for
+		// another. They return nil so the transaction commits: any error rolls it back
+		// and the same row would be picked again forever.
+
+		// A cancel whose worker stopped renewing the lease will never be acknowledged.
+		// Finish it here, or it holds its concurrency slot forever.
+		if j.state == StateCancelRequested {
+			reason := j.cancelReason
+			if reason == "" {
+				reason = ReasonUser
+			}
+			if err := q.fenceCancel(ctx, tx, j, reason); err != nil {
+				return err
+			}
+			retry = true
+			return nil
+		}
+
 		if err := q.gate.CheckWorkTx(ctx, tx, j.pluginID); err != nil {
 			if errors.Is(err, policy.ErrPluginDisabled) || errors.Is(err, policy.ErrUnknownPlugin) {
 				if err := q.fenceCancel(ctx, tx, j, ReasonPluginDisabled); err != nil {
 					return err
 				}
-				return errAgain
+				retry = true
+				return nil
 			}
 			return err
 		}
@@ -104,11 +125,11 @@ func (q *Queue) claimOne(ctx context.Context) (bool, error) {
 	if errors.Is(err, errSkip) {
 		return false, nil
 	}
-	if errors.Is(err, errAgain) {
-		return true, nil
-	}
 	if err != nil {
 		return false, err
+	}
+	if retry {
+		return true, nil
 	}
 
 	def, ok := q.lookupDef(claimed.pluginID, claimed.name)
@@ -122,7 +143,6 @@ func (q *Queue) claimOne(ctx context.Context) (bool, error) {
 }
 
 var errSkip = errors.New("jobs: skip claim")
-var errAgain = errors.New("jobs: try another claim")
 
 func (q *Queue) runAttempt(job jobRow, def Def, owner string) {
 	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), def.Timeout)

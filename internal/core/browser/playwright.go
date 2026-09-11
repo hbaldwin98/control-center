@@ -534,18 +534,39 @@ func (p *pwPage) Content(ctx context.Context) (string, error) {
 		return "", err
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.closed {
+		p.mu.Unlock()
 		return "", ErrClosed
 	}
-	doc, err := p.page.Content()
-	if err != nil {
-		if p.sessClosed() {
-			return "", ErrClosed
-		}
-		return "", err
+	page := p.page
+	p.mu.Unlock()
+
+	// The driver call must run without p.mu held. playwright-go delivers its reply on
+	// the same goroutine that runs onRoute and onResponse, and both of those take p.mu,
+	// so holding the lock across the call deadlocks the moment a response lands
+	// mid-call. It also takes no context, so waiting on ctx is what lets a cancelled
+	// or timed-out job get out.
+	type result struct {
+		doc string
+		err error
 	}
-	return doc, nil
+	done := make(chan result, 1)
+	go func() {
+		doc, err := page.Content()
+		done <- result{doc, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case r := <-done:
+		if r.err != nil {
+			if p.sessClosed() {
+				return "", ErrClosed
+			}
+			return "", r.err
+		}
+		return r.doc, nil
+	}
 }
 
 func (p *pwPage) Fill(ctx context.Context, selector, value string) error {
