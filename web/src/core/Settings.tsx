@@ -18,6 +18,7 @@ import {
   api,
   useSnapshot,
 } from "@cc/ui";
+import { AlertSoundCard } from "./AlertSound";
 import { NotificationSettings } from "./NotificationSettings";
 
 type Credential = {
@@ -79,6 +80,7 @@ export function Settings() {
         <OAuthCard onChanged={creds.reload} />
         <CreateKeyCard onChanged={creds.reload} />
         <NotificationSettings />
+        <AlertSoundCard />
 
         <div className="cc-group__title">Credentials</div>
         <Async

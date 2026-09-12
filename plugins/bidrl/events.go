@@ -133,7 +133,7 @@ type alerted struct {
 
 func publishedEvents() []host.EventSpec {
 	return []host.EventSpec{
-		event("alert", "A new watchlist finding, or a favorited lot closing within 24 hours. Matched by the default plugin-alert rule.",
+		event("alert", "A new watchlist finding, or a favorited lot closing — once a day ahead, and again in the last half hour. Matched by the default plugin-alert rule.",
 			alerted{}, map[string]string{
 				"title":       "Short headline.",
 				"body":        "What happened, ready to send.",

@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Button, api, useSnapshot } from "@cc/ui";
 import type { PluginDescriptor, PluginModule } from "@cc/ui";
+import { useAlertChime } from "../core/AlertSound";
 import { useSession } from "./session";
 
 const coreNav = [
@@ -27,6 +28,9 @@ export function Layout({
   descriptors: PluginDescriptor[];
 }) {
   const { logout } = useSession();
+  // One listener for the whole authenticated session, so an alert rings once however
+  // many screens are mounted.
+  useAlertChime();
   const live = useSnapshot<PluginState[]>(
     useCallback((signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }), []),
     { events: "core.plugin.**" },

@@ -174,9 +174,21 @@ func notesAndTerms(termsJSON, notes string) string {
 	return strings.TrimSpace(strings.Join(terms, " ") + " " + notes)
 }
 
-const endingSoonWindow = 24 * time.Hour
+const (
+	endingSoonWindow = 24 * time.Hour
+	// lastCallWindow is the "about to end" warning: close enough that bidding now is
+	// the only thing you can still do about it. It has to be comfortably longer than
+	// the warn tick, or a lot could close between two ticks without ever ringing.
+	lastCallWindow = 30 * time.Minute
+)
 
 func endingSoon(endsAt string, now time.Time) bool {
+	return endingWithin(endsAt, now, endingSoonWindow)
+}
+
+// endingWithin is true when a close time is still ahead and no further away than
+// window. An unparseable or already-passed close time is never "ending".
+func endingWithin(endsAt string, now time.Time, window time.Duration) bool {
 	t, ok := parseEndsAt(endsAt)
 	if !ok {
 		return false
@@ -184,7 +196,7 @@ func endingSoon(endsAt string, now time.Time) bool {
 	if t.Before(now) {
 		return false
 	}
-	return !t.After(now.Add(endingSoonWindow))
+	return !t.After(now.Add(window))
 }
 
 func hasEnded(endsAt string, now time.Time) bool {
