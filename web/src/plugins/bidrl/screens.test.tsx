@@ -11,6 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bidrl from "./index";
+import { LotBrowser } from "./lots";
 import type { Finding, Lot } from "./model";
 
 const WATCHLIST = {
@@ -521,6 +522,43 @@ describe("bidrl screens", () => {
   it("shows a lot's auction location on the catalog, so it can be ruled out without opening it", async () => {
     await renderAt("/bidrl/lots");
     expect(container.textContent).toContain("Turlock");
+  });
+
+  it("shares one countdown clock across a large lot grid", async () => {
+    const timer = vi.spyOn(globalThis, "setInterval");
+    const lots = Array.from({ length: 100 }, (_, index) =>
+      lot({
+        id: String(index + 1),
+        title: `Unique lot ${index + 1}`,
+        identification: `Unique identification ${index + 1}`,
+        modelOrSku: `model-${index + 1}`,
+      }),
+    );
+    try {
+      await act(async () => {
+        root.render(
+          <MemoryRouter>
+            <LotBrowser lots={lots} empty="none" view="grid" />
+          </MemoryRouter>,
+        );
+      });
+      expect(timer.mock.calls.filter((call) => call[1] === 1_000)).toHaveLength(1);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
+  it("lazy-loads lot thumbnails and decodes them asynchronously", async () => {
+    const before = routes.get("/api/plugins/bidrl/lots");
+    routes.set("/api/plugins/bidrl/lots", { lots: [lot({ thumbUrl: "/api/blobs/lot-thumb" })], latestEventId: 1 });
+    try {
+      await renderAt("/bidrl/lots");
+      const image = container.querySelector<HTMLImageElement>(".bidrl-lot-card__img");
+      expect(image?.loading).toBe("lazy");
+      expect(image?.decoding).toBe("async");
+    } finally {
+      routes.set("/api/plugins/bidrl/lots", before);
+    }
   });
 
   it("puts time, location, and chips in a fixed 2×2 on catalog cards", async () => {

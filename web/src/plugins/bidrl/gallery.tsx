@@ -89,7 +89,7 @@ export function LotPhotos({ urls }: { urls: string[] }) {
         onClick={() => setExpanded(true)}
         aria-label={`Photo ${index + 1} of ${count}. Enlarge`}
       >
-        <img src={current} alt="" />
+        <img src={current} alt="" decoding="async" />
       </button>
       {count > 1 ? (
         <Button
@@ -125,7 +125,7 @@ export function LotPhotos({ urls }: { urls: string[] }) {
                   aria-label={`Photo ${i + 1}`}
                   onClick={() => setIndex(i)}
                 >
-                  <img src={src} alt="" />
+                  <img src={src} alt="" loading="lazy" decoding="async" />
                 </button>
               ))}
             </div>
@@ -166,6 +166,7 @@ export function LotPhotos({ urls }: { urls: string[] }) {
           <img
             src={current}
             alt=""
+            decoding="async"
             onClick={(e) => {
               e.stopPropagation();
               if (count > 1) step(1);

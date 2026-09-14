@@ -46,6 +46,10 @@ export class FakeEventSource {
     const event = { data: JSON.stringify({ topic, data }) };
     for (const fn of this.#listeners.get(type) ?? []) fn(event);
   }
+  emitEvent(data: unknown): void {
+    const event = { data: JSON.stringify(data) };
+    for (const fn of this.#listeners.get("event") ?? []) fn(event);
+  }
 }
 
 export type Harness = {

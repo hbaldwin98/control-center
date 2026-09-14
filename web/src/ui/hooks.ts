@@ -2,7 +2,7 @@
  * Live-data hooks. A plugin gets live data from these without knowing how the transport
  * works.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { idAbove, stream } from "./stream";
 import type { StreamStatus } from "./stream";
 import type { Event, Snapshot } from "./types";
@@ -62,6 +62,8 @@ export type ApplyEvent<T> = (current: T, event: Event) => T | undefined;
 export type UseSnapshotOptions<T> = {
   /** Stream pattern, or patterns, whose events update this snapshot. */
   events?: string | readonly string[];
+  /** Narrows matching events, for a resource addressed by the event subject. */
+  filter?: (event: Event) => boolean;
   /** Folds one later event into the current state. Omit to refetch instead. */
   apply?: ApplyEvent<T>;
 };
@@ -96,7 +98,7 @@ export function useSnapshot<T>(
   loader: (signal: AbortSignal) => Promise<Snapshot<T>>,
   options: UseSnapshotOptions<T> = {},
 ): UseSnapshotResult<T> {
-  const { events, apply } = options;
+  const { events, filter, apply } = options;
   const patternKey = patternList(events).join("\n");
   const [state, setState] = useState<SnapshotState<T>>({
     status: "loading",
@@ -110,6 +112,8 @@ export function useSnapshot<T>(
   loaderRef.current = loader;
   const applyRef = useRef(apply);
   applyRef.current = apply;
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
 
   const reload = useCallback(() => setGeneration((n) => n + 1), []);
 
@@ -133,6 +137,7 @@ export function useSnapshot<T>(
         // Apply only what the snapshot does not already reflect, in stream order.
         const pending = buffers
           .flatMap((b) => b.drain())
+          .filter((event) => !filterRef.current || filterRef.current(event))
           .sort((a, b) => (idAbove(a.id, b.id) ? 1 : idAbove(b.id, a.id) ? -1 : 0));
         const seen = new Set<string>();
         for (const event of pending) {
@@ -152,6 +157,7 @@ export function useSnapshot<T>(
 
         if (patterns.length > 0) {
           const onEvent = (event: Event) => {
+            if (filterRef.current && !filterRef.current(event)) return;
             if (!idAbove(event.id, snap.asOfEventId)) return;
             const fold = applyRef.current;
             if (!fold) {
@@ -193,6 +199,44 @@ export function useSnapshot<T>(
   }, [patternKey, generation, epoch, reload, loader]);
 
   return { ...state, reload };
+}
+
+type Clock = {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => number;
+};
+
+const clocks = new Map<number, Clock>();
+
+function clockFor(intervalMs: number): Clock {
+  const existing = clocks.get(intervalMs);
+  if (existing) return existing;
+
+  let now = Date.now();
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const listeners = new Set<() => void>();
+  const clock: Clock = {
+    getSnapshot: () => now,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      if (listeners.size === 1) {
+        now = Date.now();
+        timer = setInterval(() => {
+          now = Date.now();
+          for (const notify of [...listeners]) notify();
+        }, intervalMs);
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0 && timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+    },
+  };
+  clocks.set(intervalMs, clock);
+  return clock;
 }
 
 /**
@@ -314,14 +358,11 @@ export function useActivity(
 }
 
 /**
- * A clock that ticks only while something is rendering relative times. Returns epoch
- * milliseconds, re-rendering on the given interval.
+ * A clock that ticks only while something is rendering relative times. One interval is
+ * shared by every consumer at the same cadence, so a lot catalog with hundreds of
+ * countdowns does not create hundreds of browser timers.
  */
 export function useNow(intervalMs = 1_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
+  const clock = clockFor(intervalMs);
+  return useSyncExternalStore(clock.subscribe, clock.getSnapshot, clock.getSnapshot);
 }

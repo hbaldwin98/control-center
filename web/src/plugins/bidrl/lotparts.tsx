@@ -88,7 +88,17 @@ export function LotThumb({ lot, className }: { lot: Lot; className?: string | un
     /* A box, not a dash: a missing photo must not shorten the row it sits in. */
     return <div className={className ? `${className}-empty` : "cc-lot-thumb bidrl-thumb-empty"}><Dash /></div>;
   }
-  return <img className={className ?? "cc-lot-thumb"} src={lot.thumbUrl} alt="" width={className ? 220 : 48} height={className ? 220 : 48} />;
+  return (
+    <img
+      className={className ?? "cc-lot-thumb"}
+      src={lot.thumbUrl}
+      alt=""
+      width={className ? 220 : 48}
+      height={className ? 220 : 48}
+      loading="lazy"
+      decoding="async"
+    />
+  );
 }
 
 export function LotThumbLink({ lot, className }: { lot: Lot; className?: string | undefined }) {

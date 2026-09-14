@@ -23,6 +23,7 @@ import {
   api,
   useSnapshot,
 } from "@cc/ui";
+import type { Event } from "@cc/ui";
 
 type Profile = {
   id: string;
@@ -50,12 +51,24 @@ type Session = {
 
 type HarnessSnapshot = { profiles: Profile[]; sessions: Session[] };
 
+const HARNESS_LIFECYCLE_EVENTS = [
+  "core.harness.created",
+  "core.harness.started",
+  "core.harness.stopping",
+  "core.harness.exited",
+  "core.harness.failed",
+  "core.harness.stopped",
+  "core.harness.interrupted",
+] as const;
+
 export function Sessions() {
   const load = useCallback(
     (signal: AbortSignal) => api.snapshot<HarnessSnapshot>("/api/harness", { signal }),
     [],
   );
-  const snapshot = useSnapshot(load, { events: "core.harness.**" });
+  // Output is published independently while a process writes. It cannot change this
+  // table's rows, so do not reload the whole list for every output heartbeat.
+  const snapshot = useSnapshot(load, { events: HARNESS_LIFECYCLE_EVENTS });
 
   return (
     <Page>
@@ -251,7 +264,11 @@ function StopButton({ id, onChanged }: { id: number; onChanged: () => void }) {
 
 function SessionDetail({ id }: { id: number }) {
   const load = useCallback((signal: AbortSignal) => api.snapshot<Session>(`/api/harness/${id}`, { signal }), [id]);
-  const detail = useSnapshot(load, { events: "core.harness.**" });
+  const filter = useCallback((event: Event) => event.subject === String(id), [id]);
+  // Several sessions may be writing at once. A detail panel follows only its own
+  // subject; the broad type pattern is still needed because lifecycle and output are
+  // separate event types.
+  const detail = useSnapshot(load, { events: "core.harness.**", filter });
   return <Async state={detail} loading="Loading output…">{(session) => {
     const output = session.output ?? [];
     return <Stack>

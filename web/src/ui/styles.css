@@ -168,7 +168,11 @@ kbd {
 .cc-shell {
   display: grid;
   grid-template-columns: var(--nav-width) 1fr;
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cc-nav {
@@ -251,7 +255,10 @@ kbd {
 }
 
 .cc-main {
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .cc-main a {

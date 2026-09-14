@@ -8,6 +8,7 @@
  * screens whose write paths need more than that.
  */
 import { describe, expect, it } from "vitest";
+import { stream } from "@cc/ui";
 import { Costs } from "./Costs";
 import { Events } from "./Events";
 import { Inbox } from "./Inbox";
@@ -17,7 +18,7 @@ import { PluginDetail } from "./PluginDetail";
 import { Plugins } from "./Plugins";
 import { Settings } from "./Settings";
 import { Sessions } from "./Sessions";
-import { setupHarness, fill } from "./testing/harness";
+import { FakeEventSource, setupHarness, fill } from "./testing/harness";
 import { job, notification, pluginState, snapshot, storedCredential, eventCatalog, eventSpec } from "./testing/fixtures";
 
 const h = setupHarness();
@@ -171,6 +172,62 @@ describe("Sessions", () => {
     await h.render(<Sessions />);
     await h.click("Stop");
     expect(h.calls.some((call) => call.path === "/api/harness/7/stop" && call.method === "POST")).toBe(true);
+  });
+
+  it("does not reload the session list for output heartbeat events", async () => {
+    serve();
+    await h.render(<Sessions />);
+    const before = h.calls.filter((call) => call.path === "/api/harness" && call.method === "GET").length;
+    try {
+      stream.start("1");
+      FakeEventSource.instances.at(-1)?.emitEvent({
+        id: "2",
+        type: "core.harness.output",
+        source: "harness",
+        subject: "7",
+        payload: { sessionId: 7 },
+        createdAt: "2026-09-01T00:00:02Z",
+      });
+      await h.settle();
+      expect(h.calls.filter((call) => call.path === "/api/harness" && call.method === "GET")).toHaveLength(before);
+    } finally {
+      stream.stop();
+    }
+  });
+
+  it("only reloads an open output panel for its own session events", async () => {
+    serve();
+    h.routes.set("/api/harness/7", snapshot({ ...session, output: [] }));
+    await h.render(<Sessions />);
+    await h.click("Output");
+    const before = h.calls.filter((call) => call.path === "/api/harness/7" && call.method === "GET").length;
+    try {
+      stream.start("1");
+      const source = FakeEventSource.instances.at(-1);
+      source?.emitEvent({
+        id: "2",
+        type: "core.harness.output",
+        source: "harness",
+        subject: "8",
+        payload: { sessionId: 8 },
+        createdAt: "2026-09-01T00:00:02Z",
+      });
+      await h.settle();
+      expect(h.calls.filter((call) => call.path === "/api/harness/7" && call.method === "GET")).toHaveLength(before);
+
+      source?.emitEvent({
+        id: "3",
+        type: "core.harness.output",
+        source: "harness",
+        subject: "7",
+        payload: { sessionId: 7 },
+        createdAt: "2026-09-01T00:00:03Z",
+      });
+      await h.settle();
+      expect(h.calls.filter((call) => call.path === "/api/harness/7" && call.method === "GET")).toHaveLength(before + 1);
+    } finally {
+      stream.stop();
+    }
   });
 
   it("explains when no profiles are configured", async () => {

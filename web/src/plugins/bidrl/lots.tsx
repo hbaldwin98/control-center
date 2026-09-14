@@ -1,5 +1,6 @@
 /** A list of lots, as cards or as a table, with near-identical lots folded together. */
 import {
+  memo,
   useMemo,
   useState,
 } from "react";
@@ -69,7 +70,7 @@ export function LotTableRows({
  * plugin exists to produce — and the bid sits under it as the figure you would act on;
  * everything else is secondary text below the fold of the eye.
  */
-export function LotCard({ lot }: { lot: Lot }) {
+export const LotCard = memo(function LotCard({ lot }: { lot: Lot }) {
   const now = useNow();
   const ended = hasEnded(lot.endsAt, now);
   return (
@@ -110,7 +111,7 @@ export function LotCard({ lot }: { lot: Lot }) {
       {lot.matchReason ? <p className="bidrl-intent-reason">{lot.matchReason}</p> : null}
     </>
   );
-}
+});
 
 export function SimilarList({ lots }: { lots: Lot[] }) {
   return (
@@ -207,7 +208,12 @@ export function LotBrowser({
   );
 }
 
-export function LotGroupCard({
+function sameGroup(left: SimilarGroup, right: SimilarGroup): boolean {
+  if (left.key !== right.key || left.lots.length !== right.lots.length) return false;
+  return left.lots.every((lot, index) => lot === right.lots[index]);
+}
+
+export const LotGroupCard = memo(function LotGroupCard({
   group,
   open,
   onToggle,
@@ -232,9 +238,9 @@ export function LotGroupCard({
       ) : null}
     </article>
   );
-}
+}, (left, right) => left.open === right.open && sameGroup(left.group, right.group));
 
-export function LotGroupRows({
+export const LotGroupRows = memo(function LotGroupRows({
   group,
   open,
   onToggle,
@@ -286,4 +292,9 @@ export function LotGroupRows({
       ) : null}
     </>
   );
-}
+}, (left, right) =>
+  left.open === right.open &&
+  left.showWhy === right.showWhy &&
+  left.showSaved === right.showSaved &&
+  sameGroup(left.group, right.group),
+);
