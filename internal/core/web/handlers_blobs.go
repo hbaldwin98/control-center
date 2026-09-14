@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/hbaldwin98/control-center/internal/core/storage"
 )
@@ -12,9 +13,10 @@ import (
 // handleBlob serves one stored object. The request is authenticated by the wrapper; this
 // handler authorizes the scope before opening the file.
 //
-// Responses use the validated stored MIME type with nosniff, and Content-Disposition:
-// attachment by default. Only an explicit safe-image allowlist may be served inline; SVG,
-// HTML, and other active content remain attachments.
+// Responses use the validated stored MIME type with nosniff, a private one-day cache
+// validated by the content digest, and Content-Disposition: attachment by default. Only
+// an explicit safe-image allowlist may be served inline; SVG, HTML, and other active
+// content remain attachments.
 func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Blobs == nil {
 		writeError(w, http.StatusServiceUnavailable, CodeInternal, "blob storage unavailable")
@@ -53,10 +55,18 @@ func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Disposition", disposition)
 	h.Set("Content-Length", strconv.FormatInt(meta.Size, 10))
-	h.Set("Cache-Control", "private, no-store")
+	// Blob keys are stable for a stored photo and replacements are explicit writes.
+	// Keep them in the administrator's private browser cache, then use the digest
+	// to validate cheaply if a key is replaced after the cache expires.
+	h.Set("Cache-Control", "private, max-age=86400")
+	h.Set("ETag", `"`+meta.SHA256+`"`)
 	// The digest lets a client verify integrity without a second round trip.
 	h.Set("X-Content-SHA256", meta.SHA256)
 
+	if etagMatches(r.Header.Get("If-None-Match"), `"`+meta.SHA256+`"`) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -65,6 +75,16 @@ func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 		// The client went away mid-transfer; nothing useful to report to it.
 		return
 	}
+}
+
+func etagMatches(header, etag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // blobScopeAllowed decides whether the authenticated administrator may read this scope.

@@ -115,7 +115,7 @@ regardless. They exist for the screen.
 |---|---|---|
 | Connections per plugin | 64 | A browser opens one per screen showing live data; this is tabs, not users. |
 | Topics per connection | 512 | A list view watching a page of rows is the shape this has to fit. |
-| Buffer per connection | 64 messages | How far one client may fall behind before it is dropped. |
+| Buffer per connection | 64 messages minimum | How far one client may fall behind before it is dropped; the opening buffer grows to hold `ready` plus one availability result per requested topic. |
 | Payload per message | 64 KiB | Live delivery carries changes, not documents. |
 
 Disabling a plugin drops its connections and releases every topic it held, so a killed

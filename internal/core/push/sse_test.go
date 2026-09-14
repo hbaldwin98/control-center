@@ -2,6 +2,7 @@ package push
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -197,4 +198,78 @@ func TestServeSSEKeepsDeliveringAcrossIdleGaps(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestServeSSEClearsWriteDeadlineAfterFrame(t *testing.T) {
+	h := newHarness(t, Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	w := &deadlineWriter{
+		deadlines: make(chan time.Time, 2),
+		writes:    make(chan string, 1),
+	}
+	done := make(chan struct{})
+	go func() {
+		r := httptest.NewRequest(http.MethodGet, "/?topics=lot:1", nil).WithContext(ctx)
+		h.svc.ServeSSE(w, r, "hello")
+		close(done)
+	}()
+
+	select {
+	case got := <-w.writes:
+		if !strings.Contains(got, "event: ready") {
+			t.Fatalf("first write = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SSE did not write the ready frame")
+	}
+	select {
+	case deadline := <-w.deadlines:
+		if deadline.IsZero() {
+			t.Fatal("SSE did not set a write deadline")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SSE did not set a write deadline")
+	}
+	select {
+	case deadline := <-w.deadlines:
+		if !deadline.IsZero() {
+			t.Fatalf("write deadline = %v, want cleared", deadline)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SSE left the write deadline active")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("SSE handler did not stop after cancellation")
+	}
+}
+
+type deadlineWriter struct {
+	header    http.Header
+	deadlines chan time.Time
+	writes    chan string
+}
+
+func (w *deadlineWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *deadlineWriter) Write(p []byte) (int, error) {
+	w.writes <- string(p)
+	return len(p), nil
+}
+
+func (w *deadlineWriter) WriteHeader(int) {}
+func (w *deadlineWriter) Flush()          {}
+
+func (w *deadlineWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines <- deadline
+	return nil
 }

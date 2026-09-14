@@ -60,6 +60,12 @@ func (s *Service) ServeSSE(w http.ResponseWriter, r *http.Request, pluginID stri
 			return false
 		}
 		flusher.Flush()
+		// SetWriteDeadline is a connection-level deadline, not a per-call
+		// timeout. Clear it after the flush or an idle stream expires when the
+		// next heartbeat arrives after WriteTimeout.
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			return false
+		}
 		return true
 	}
 

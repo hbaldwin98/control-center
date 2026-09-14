@@ -143,9 +143,11 @@ core_blobs(scope, key, physical_name, mime, size, sha256, created_at, updated_at
 
 `URL` returns an application route. The serving handler authenticates the request and
 authorizes access to the blob's scope before opening it. Responses use the validated
-stored MIME type, `X-Content-Type-Options: nosniff`, and `Content-Disposition:
-attachment` by default. Only an explicit safe-image allowlist may be served inline; SVG,
-HTML, and other active content remain attachments.
+stored MIME type, `X-Content-Type-Options: nosniff`, a private one-day browser cache, and
+an `ETag` derived from the SHA-256 digest so a changed logical key is revalidated without
+resending unchanged bytes. `Content-Disposition` is `attachment` by default. Only an
+explicit safe-image allowlist may be served inline; SVG, HTML, and other active content
+remain attachments.
 
 ---
 

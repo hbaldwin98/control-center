@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -448,6 +449,34 @@ func TestOpenResyncsTopicsAlreadyBeingFed(t *testing.T) {
 	case stray := <-first.Messages():
 		t.Fatalf("existing connection got a resync it did not need: %+v", stray)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestOpenResyncsEveryTopicWithoutDroppingALargeWatchSet(t *testing.T) {
+	h := newHarness(t, Options{})
+	rec := &recorder{
+		joined: make(chan string, 100),
+		left:   make(chan string, 100),
+	}
+	defer h.svc.SetWatcher("hello", rec)()
+
+	topics := make([]string, 100)
+	for i := range topics {
+		topics[i] = fmt.Sprintf("lot:%d", i)
+	}
+	first := mustOpen(t, h, "hello", topics...)
+	drainReady(t, first)
+	second := mustOpen(t, h, "hello", topics...)
+	drainReady(t, second)
+
+	// The resync is ready plus one availability frame per topic. The default
+	// buffer is smaller than this, so the old implementation dropped this
+	// connection while it was still opening and EventSource retried forever.
+	for _, topic := range topics {
+		msg := next(t, second)
+		if msg.Event != "available" || msg.Topic != topic {
+			t.Fatalf("frame = %+v, want available for %s", msg, topic)
+		}
 	}
 }
 

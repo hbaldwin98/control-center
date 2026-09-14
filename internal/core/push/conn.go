@@ -36,11 +36,19 @@ func (s *Service) Open(ctx context.Context, pluginID string, topics []string) (*
 		return nil, err
 	}
 
+	// Opening a connection emits one ready frame and one availability (or
+	// unavailability) frame per topic. The steady-state backpressure buffer must
+	// not drop that initial snapshot, or a large watch set will reconnect forever
+	// before it can become live.
+	buffer := s.opts.Buffer
+	if initial := len(wanted) + 1; buffer < initial {
+		buffer = initial
+	}
 	c := &Conn{
 		svc:      s,
 		pluginID: pluginID,
 		topics:   wanted,
-		out:      make(chan Message, s.opts.Buffer),
+		out:      make(chan Message, buffer),
 	}
 
 	s.mu.Lock()

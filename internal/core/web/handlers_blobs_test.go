@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,6 +67,12 @@ func TestBlobServesAttachmentAndInlineAllowlist(t *testing.T) {
 	if rec.Header().Get("X-Content-SHA256") == "" {
 		t.Fatal("missing digest")
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=86400" {
+		t.Fatalf("cache control = %q, want private one-day cache", got)
+	}
+	if etag := rec.Header().Get("ETag"); etag == "" {
+		t.Fatal("missing ETag")
+	}
 
 	rec = h.do(http.MethodGet, "/api/blobs/core/img/dot.png", nil)
 	if rec.Code != http.StatusOK {
@@ -73,6 +80,22 @@ func TestBlobServesAttachmentAndInlineAllowlist(t *testing.T) {
 	}
 	if rec.Header().Get("Content-Disposition") != "inline" {
 		t.Fatalf("png disposition = %q, want inline", rec.Header().Get("Content-Disposition"))
+	}
+	pngETag := rec.Header().Get("ETag")
+	if pngETag == "" {
+		t.Fatal("missing PNG ETag")
+	}
+
+	conditional := httptest.NewRequest(http.MethodGet, "/api/blobs/core/img/dot.png", nil)
+	conditional.Header.Set("Cookie", sessionCookie+"="+h.cookie)
+	conditional.Header.Set("If-None-Match", pngETag)
+	conditionalRec := httptest.NewRecorder()
+	h.http.ServeHTTP(conditionalRec, conditional)
+	if conditionalRec.Code != http.StatusNotModified {
+		t.Fatalf("conditional blob: got %d, want 304", conditionalRec.Code)
+	}
+	if conditionalRec.Body.Len() != 0 {
+		t.Fatalf("conditional blob wrote %d bytes", conditionalRec.Body.Len())
 	}
 
 	head := h.do(http.MethodHead, "/api/blobs/core/notes/readme.txt", nil)
