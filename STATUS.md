@@ -218,9 +218,9 @@ administrator-owned providers, live model discovery, and a second way to authori
 | User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
 | Missing-price enrichment | ✅ | If snippets omit prices, read at most two ranked result pages; extracted model and amount must remain literal evidence. |
-| Operator UI | ✅ | Treasure-hunting feed, SITES-first search, auction view, lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
+| Operator UI | ✅ | Treasure-hunting feed, SITES-first search, sortable decision-focused triage tables, mobile scan rows, auction view, and lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
 | Automation UI | ✅ | An Automation screen: what each tick would do next and what it last did, the latch with a resume control, the Findings backlog, and the settings it runs on. Turning it on stays on the plugin's configuration screen — only the administration API writes config, so a plugin page reports its settings and links to them. |
-| Plugin alerts | ✅ | New watchlist findings publish `bidrl.alert`. A 15-minute `warn` job publishes once when a saved lot is inside 24 hours of closing. |
+| Plugin alerts | ✅ | New watchlist findings publish `bidrl.alert`; saved lots alert once a day ahead and once in the final 30 minutes, with a browser chime and mute/test control. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ## Milestone 13 — `push` ✅
