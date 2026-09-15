@@ -884,7 +884,7 @@ describe("bidrl screens", () => {
     expect(container.textContent).toContain("Turlock");
   });
 
-  it("keeps every lot as a separate row in table view", async () => {
+  it("collapses same lots in table view and expands their similar rows", async () => {
     const lots = [
       lot({
         id: "1001",
@@ -910,8 +910,21 @@ describe("bidrl screens", () => {
     });
     expect(
       container.querySelectorAll(".bidrl-lot-table tbody > tr"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(container.textContent).toContain("Opportunity");
+    expect(container.textContent).toContain("1 similar");
+
+    const similar = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "1 similar",
+    );
+    expect(similar).toBeDefined();
+    await act(async () => {
+      similar?.click();
+      await Promise.resolve();
+    });
+    expect(
+      container.querySelectorAll(".bidrl-lot-table tbody > tr"),
+    ).toHaveLength(2);
     expect(container.textContent).toContain("Lot 1001");
     expect(container.textContent).toContain("Lot 1002");
   });

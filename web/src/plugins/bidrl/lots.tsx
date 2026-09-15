@@ -311,10 +311,7 @@ export function LotBrowser({
   const sort = controlledSort === undefined ? local.sort : controlledSort;
   const onSort = controlledOnSort ?? local.onSort;
   const groups = useMemo(() => {
-    // Similarity is useful for a visual grid, but hiding rows in a table makes exact
-    // lot-by-lot comparison slower. Every table row is therefore always a real lot.
-    const shouldGroup = groupSimilar && view === "grid";
-    const grouped = shouldGroup
+    const grouped = groupSimilar
       ? groupSimilarLots(lots)
       : lots.map((lot) => ({
           key: `id:${lot.id}`,
