@@ -32,23 +32,28 @@ export function Overview() {
     <Page>
       <PageHeader
         title="BIDRL"
-        lede="Lots scored from photographs. A comparable appears only when a model or barcode is read and a search hit writes a dollar amount — eBay sold listings first."
+        lede="Score lots from photos, then review the best opportunities."
       />
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
         <AutomationStrip />
         {snap.status === "loading" ? <Loading label="Loading…" /> : null}
-        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
+        {snap.status === "error" && !disabled ? (
+          <Callout tone="danger">{snap.error.message}</Callout>
+        ) : null}
         {stats != null && stats.lots === 0 ? (
           <Card title="Start here">
             <Stack>
               <Hint>
-                Nothing is collected yet. Collect an auction, then scan it — scanning is what reads
-                the photographs and produces comparables.
+                Nothing is collected yet. Collect an auction, then scan it —
+                scanning is what reads the photographs and produces comparables.
               </Hint>
               <div className="bidrl-actions">
-                <Link to="/bidrl/auctions" className="cc-button cc-button--primary">
+                <Link
+                  to="/bidrl/auctions"
+                  className="cc-button cc-button--primary"
+                >
                   Collect an auction
                 </Link>
               </div>
@@ -58,13 +63,26 @@ export function Overview() {
         {stats != null && stats.lots > 0 ? (
           <>
             <Grid density="metric">
-              <StatLink to="/bidrl/auctions" label="Auctions" value={String(stats.auctions)} />
-              <StatLink to="/bidrl/lots" label="Lots" value={String(stats.lots)} hint={`${stats.live} still open`} />
+              <StatLink
+                to="/bidrl/auctions"
+                label="Auctions"
+                value={String(stats.auctions)}
+              />
+              <StatLink
+                to="/bidrl/lots"
+                label="Lots"
+                value={String(stats.lots)}
+                hint={`${stats.live} still open`}
+              />
               <StatLink
                 to="/bidrl/lots?filter=deals"
                 label="Priced"
                 value={String(stats.priced)}
-                hint={stats.unscanned > 0 ? `${stats.unscanned} never scanned` : "all scanned"}
+                hint={
+                  stats.unscanned > 0
+                    ? `${stats.unscanned} never scanned`
+                    : "all scanned"
+                }
                 tone={stats.priced > 0 ? "ok" : "neutral"}
               />
               <StatLink
@@ -76,7 +94,9 @@ export function Overview() {
             </Grid>
             <Card
               title="Widest gaps"
-              actions={<Link to="/bidrl/lots?filter=deals">See all priced lots</Link>}
+              actions={
+                <Link to="/bidrl/lots?filter=deals">See all priced lots</Link>
+              }
             >
               <LotBrowser
                 lots={deals}
@@ -85,7 +105,12 @@ export function Overview() {
                 groupSimilar={false}
               />
             </Card>
-            <Card title="Closing next" actions={<Link to="/bidrl/lots?ending=soon">See everything ending</Link>}>
+            <Card
+              title="Closing next"
+              actions={
+                <Link to="/bidrl/lots?ending=soon">See everything ending</Link>
+              }
+            >
               <LotBrowser
                 lots={closing}
                 empty="Nothing collected closes in the next week."

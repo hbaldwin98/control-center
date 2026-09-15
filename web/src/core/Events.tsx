@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionsHeader,
   Badge,
@@ -22,6 +22,7 @@ import {
   isValidPattern,
   matchesPattern,
   useEvents,
+  useQueryState,
   useSnapshot,
   type Event,
 } from "@cc/ui";
@@ -56,15 +57,21 @@ const PRESETS: readonly (readonly [string, string])[] = [
 
 /** The live event log, filterable by dot-segment pattern. */
 export function Events() {
-  const [draft, setDraft] = useState("**");
-  const [pattern, setPattern] = useState("**");
+  const [patternParam, setPatternParam] = useQueryState("pattern", "**");
+  const pattern = isValidPattern(patternParam) ? patternParam : "**";
+  const [draft, setDraft] = useState(patternParam);
   const draftValid = isValidPattern(draft);
+
+  useEffect(() => setDraft(patternParam), [patternParam]);
 
   const loadPage = useCallback(
     (signal: AbortSignal) =>
-      api.snapshot<EventsPage>(`/api/events?pattern=${encodeURIComponent(pattern)}&limit=200`, {
-        signal,
-      }),
+      api.snapshot<EventsPage>(
+        `/api/events?pattern=${encodeURIComponent(pattern)}&limit=200`,
+        {
+          signal,
+        },
+      ),
     [pattern],
   );
 
@@ -91,7 +98,9 @@ export function Events() {
     return all.reverse();
   }, [history.data, live, pattern]);
 
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -101,7 +110,7 @@ export function Events() {
 
   const apply = (next: string) => {
     setDraft(next);
-    setPattern(next);
+    setPatternParam(next);
   };
 
   return (
@@ -115,10 +124,13 @@ export function Events() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (draftValid) setPattern(draft);
+            if (draftValid) setPatternParam(draft);
           }}
         >
-          <Field label="Pattern" hint="* matches one segment, ** matches zero or more.">
+          <Field
+            label="Pattern"
+            hint="* matches one segment, ** matches zero or more."
+          >
             <Row>
               <Input
                 mono
@@ -129,7 +141,11 @@ export function Events() {
                 spellCheck={false}
                 className="cc-input--pattern"
               />
-              <Button type="submit" variant="primary" disabled={!draftValid || draft === pattern}>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!draftValid || draft === pattern}
+              >
                 Filter
               </Button>
             </Row>
@@ -137,7 +153,13 @@ export function Events() {
         </form>
         <Row>
           {PRESETS.map(([p, label]) => (
-            <Button key={p} type="button" size="sm" pressed={pattern === p} onClick={() => apply(p)}>
+            <Button
+              key={p}
+              type="button"
+              size="sm"
+              pressed={pattern === p}
+              onClick={() => apply(p)}
+            >
               {label}
             </Button>
           ))}
@@ -145,8 +167,8 @@ export function Events() {
 
         {!draftValid ? (
           <Callout tone="danger">
-            <code>{draft}</code> is not a valid pattern. Use dot-separated segments, <code>*</code>,
-            or <code>**</code>.
+            <code>{draft}</code> is not a valid pattern. Use dot-separated
+            segments, <code>*</code>, or <code>**</code>.
           </Callout>
         ) : null}
 
@@ -207,7 +229,9 @@ export function Events() {
                     {open ? (
                       <tr className="cc-table__detail">
                         <td colSpan={6}>
-                          <LogBlock>{JSON.stringify(e.payload, null, 2)}</LogBlock>
+                          <LogBlock>
+                            {JSON.stringify(e.payload, null, 2)}
+                          </LogBlock>
                         </td>
                       </tr>
                     ) : null}
@@ -228,7 +252,8 @@ export function Events() {
  */
 function Subscribers() {
   const load = useCallback(
-    (signal: AbortSignal) => api.snapshot<SubscriberStatus[]>("/api/events/subscribers", { signal }),
+    (signal: AbortSignal) =>
+      api.snapshot<SubscriberStatus[]>("/api/events/subscribers", { signal }),
     [],
   );
   const subs = useSnapshot<SubscriberStatus[]>(load, {
@@ -239,7 +264,9 @@ function Subscribers() {
   const act = async (name: string, action: "retry" | "skip") => {
     setBusy(name);
     try {
-      await api.post(`/api/events/subscribers/${encodeURIComponent(name)}/${action}`);
+      await api.post(
+        `/api/events/subscribers/${encodeURIComponent(name)}/${action}`,
+      );
       subs.reload();
     } finally {
       setBusy(null);
@@ -255,9 +282,7 @@ function Subscribers() {
       title="Durable subscribers"
       actions={
         unhealthy > 0 ? (
-          <Badge tone="danger">
-            {unhealthy} paused
-          </Badge>
+          <Badge tone="danger">{unhealthy} paused</Badge>
         ) : (
           <Badge tone="ok">all active</Badge>
         )
@@ -294,10 +319,18 @@ function Subscribers() {
             <td className="cc-table__actions">
               {s.healthy ? null : (
                 <Row>
-                  <Button size="sm" disabled={busy === s.name} onClick={() => void act(s.name, "retry")}>
+                  <Button
+                    size="sm"
+                    disabled={busy === s.name}
+                    onClick={() => void act(s.name, "retry")}
+                  >
                     Retry
                   </Button>
-                  <Button size="sm" disabled={busy === s.name} onClick={() => void act(s.name, "skip")}>
+                  <Button
+                    size="sm"
+                    disabled={busy === s.name}
+                    onClick={() => void act(s.name, "skip")}
+                  >
                     Skip
                   </Button>
                 </Row>

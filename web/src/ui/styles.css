@@ -27,7 +27,8 @@
   --radius-sm: 5px;
   --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%);
 
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 
   --nav-width: 208px;
@@ -175,6 +176,23 @@ kbd {
   overflow: hidden;
 }
 
+.cc-skip-link {
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 100;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  transform: translateY(-160%);
+  transition: transform 120ms ease;
+}
+
+.cc-skip-link:focus {
+  transform: translateY(0);
+}
+
 .cc-nav {
   display: flex;
   flex-direction: column;
@@ -183,6 +201,11 @@ kbd {
   background: var(--bg-sunken);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+}
+
+/* Groups are structural on desktop and flatten into the nav strip on small screens. */
+.cc-nav__group {
+  display: contents;
 }
 
 .cc-nav__brand {
@@ -313,16 +336,27 @@ kbd {
   .cc-nav {
     flex-direction: row;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: var(--space-1);
     padding: 10px var(--space-3);
     border-right: none;
     border-bottom: 1px solid var(--border);
-    overflow-y: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .cc-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .cc-nav__brand {
+    flex: 0 0 auto;
     padding: 0 var(--space-2) 0 0;
+  }
+
+  .cc-nav__link {
+    flex: 0 0 auto;
   }
 
   /* The strip is short enough to read end to end; the group headings only muddle it. */
@@ -331,10 +365,12 @@ kbd {
   }
 
   .cc-nav__spacer {
-    min-height: 0;
+    display: none;
   }
 
   .cc-nav__footer {
+    flex: 0 0 auto;
+    margin-left: auto;
     padding-top: 0;
     border-top: none;
   }
@@ -348,6 +384,11 @@ kbd {
     gap: var(--space-3);
   }
 
+  .cc-page__header > .cc-row {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   /* A filter bar's 180px floor produces a ragged two-up at phone widths, where the second
      control is always too narrow to read. One control per row instead. */
   .cc-toolbar {
@@ -358,6 +399,10 @@ kbd {
   .cc-toolbar .cc-input {
     width: 100%;
     min-width: 0;
+  }
+
+  .cc-toolbar > .cc-button {
+    flex: 1 1 auto;
   }
 
   /* Four sections do not fit across a phone; the strip scrolls rather than wrapping into
@@ -443,6 +488,48 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.cc-focus-list {
+  display: grid;
+  gap: 0;
+}
+
+.cc-focus-list__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.cc-focus-list__item:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.cc-focus-list__item:last-child {
+  padding-bottom: 0;
+}
+
+.cc-focus-list__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cc-focus-list__main > a,
+.cc-focus-list__main > strong {
+  overflow-wrap: anywhere;
+}
+
+.cc-focus-list__item > time {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 .cc-row {
@@ -679,9 +766,12 @@ kbd {
 .cc-select {
   appearance: none;
   padding-right: 28px;
-  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%),
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
     linear-gradient(135deg, currentcolor 50%, transparent 50%);
-  background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%;
+  background-position:
+    calc(100% - 15px) 52%,
+    calc(100% - 10px) 52%;
   background-size: 5px 5px;
   background-repeat: no-repeat;
   cursor: pointer;
@@ -1140,7 +1230,11 @@ kbd {
 /* The reserved-but-not-committed part: present, but visibly not yet spent. */
 .cc-meter__held {
   width: var(--meter-held);
-  background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 4px);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--border-strong) 0 2px,
+    transparent 2px 4px
+  );
 }
 
 .cc-spark {
@@ -1303,6 +1397,37 @@ a.cc-catalog {
 
 .cc-card[open] > summary {
   margin-bottom: 10px;
+}
+
+.cc-jumpnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+
+.cc-jumpnav a {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.cc-jumpnav a:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.cc-anchor-section {
+  display: grid;
+  gap: var(--space-3);
+  scroll-margin-top: var(--space-4);
 }
 
 .cc-tabs {

@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   Async,
   Badge,
+  Button,
   Card,
   Dash,
   Field,
@@ -15,6 +16,7 @@ import {
   Time,
   Toolbar,
   api,
+  useQueryState,
   useSnapshot,
 } from "@cc/ui";
 
@@ -39,15 +41,23 @@ type CallPage = {
 
 type PluginState = { pluginId: string; name?: string };
 
-type ModelSpend = { logicalModel: string; reserved: number; settled: number; n: number };
+type ModelSpend = {
+  logicalModel: string;
+  reserved: number;
+  settled: number;
+  n: number;
+};
 type JobSpend = { jobId: string; models: ModelSpend[] };
 type PluginSpend = { pluginId: string; jobs: JobSpend[] };
 
 /** Spend by plugin, then job, then logical model. REST is the snapshot; usage events invalidate. */
 export function Costs() {
-  const [plugin, setPlugin] = useState("");
+  const [plugin, setPlugin] = useQueryState("plugin");
   const plugins = useSnapshot<PluginState[]>(
-    useCallback((signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }), []),
+    useCallback(
+      (signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }),
+      [],
+    ),
     { events: "core.plugin.**" },
   );
   const load = useCallback(
@@ -62,7 +72,10 @@ export function Costs() {
 
   return (
     <Page>
-      <PageHeader title="Costs" lede="Spend by plugin, then job, then logical model, over time." />
+      <PageHeader
+        title="Costs"
+        lede="Spend by plugin, then job, then logical model, over time."
+      />
       <Stack>
         <Toolbar>
           <Field label="Plugin">
@@ -79,13 +92,20 @@ export function Costs() {
               ))}
             </Select>
           </Field>
+          {plugin ? (
+            <Button type="button" onClick={() => setPlugin("")}>
+              Clear filter
+            </Button>
+          ) : null}
         </Toolbar>
 
         <Async
           state={page}
           loading="Loading AI calls…"
           empty={
-            plugin ? "No AI calls recorded for this plugin yet." : "No AI calls recorded yet."
+            plugin
+              ? "No AI calls recorded for this plugin yet."
+              : "No AI calls recorded yet."
           }
           isEmpty={(p) => p.calls.length === 0}
         >
@@ -96,7 +116,13 @@ export function Costs() {
   );
 }
 
-function Spend({ calls, plugins }: { calls: CallRecord[]; plugins: PluginState[] }) {
+function Spend({
+  calls,
+  plugins,
+}: {
+  calls: CallRecord[];
+  plugins: PluginState[];
+}) {
   const groups = useMemo(() => groupCalls(calls), [calls]);
   return (
     <Stack>
@@ -180,7 +206,15 @@ function Spend({ calls, plugins }: { calls: CallRecord[]; plugins: PluginState[]
                 <code>{c.logicalModel}</code>
               </td>
               <td>
-                <Badge tone={c.status === "succeeded" ? "ok" : c.status === "failed" ? "danger" : "neutral"}>
+                <Badge
+                  tone={
+                    c.status === "succeeded"
+                      ? "ok"
+                      : c.status === "failed"
+                        ? "danger"
+                        : "neutral"
+                  }
+                >
                   {c.status}
                 </Badge>
               </td>
@@ -214,7 +248,12 @@ function groupCalls(calls: CallRecord[]): PluginSpend[] {
     const jobKey = c.jobId || "";
     if (!jobs.has(jobKey)) jobs.set(jobKey, new Map());
     const models = jobs.get(jobKey)!;
-    const cur = models.get(c.logicalModel) ?? { logicalModel: c.logicalModel, reserved: 0, settled: 0, n: 0 };
+    const cur = models.get(c.logicalModel) ?? {
+      logicalModel: c.logicalModel,
+      reserved: 0,
+      settled: 0,
+      n: 0,
+    };
     cur.reserved += c.reservedMicroUsd;
     cur.settled += c.settledMicroUsd;
     cur.n += 1;

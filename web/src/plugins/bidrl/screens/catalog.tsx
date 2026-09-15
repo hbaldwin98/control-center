@@ -1,7 +1,4 @@
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Callout,
@@ -61,15 +58,32 @@ export function LotsCatalog() {
   );
   const sort = parseLotSort(sortParam, defaultLotSort(filter, bucket, ending));
   const sortQuery = lotSortParam(sort);
-  const snap = useInfiniteLots(filter, q, bucket, category, ending, affiliate, sortQuery);
+  const snap = useInfiniteLots(
+    filter,
+    q,
+    bucket,
+    category,
+    ending,
+    affiliate,
+    sortQuery,
+  );
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
-  const live = useLiveBids(snap.status === "ready" ? snap.lots : undefined, !disabled);
+  const live = useLiveBids(
+    snap.status === "ready" ? snap.lots : undefined,
+    !disabled,
+  );
   const selected = parseAffiliateParam(affiliate);
   const narrowed =
-    Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
-  const advancedCount = [bucket !== "all", category !== "all", ending === "soon", selected.length > 0]
-    .filter(Boolean).length;
+    Boolean(filter || q || ending || affiliate) ||
+    bucket !== "all" ||
+    category !== "all";
+  const advancedCount = [
+    bucket !== "all",
+    category !== "all",
+    ending === "soon",
+    selected.length > 0,
+  ].filter(Boolean).length;
   usePlace("/bidrl/lots", snap.status === "ready");
 
   const changeSort = (column: LotSortColumn) => {
@@ -79,7 +93,11 @@ export function LotsCatalog() {
 
   const toggleLocation = (id: string) => {
     setAffiliate(
-      affiliateParam(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]),
+      affiliateParam(
+        selected.includes(id)
+          ? selected.filter((x) => x !== id)
+          : [...selected, id],
+      ),
     );
   };
 
@@ -101,7 +119,7 @@ export function LotsCatalog() {
     <Page>
       <PageHeader
         title="Lots"
-        lede="Every collected lot. Start from a preset, then narrow by text, bucket, category, or the locations you can actually drive to. Looking for something by purpose rather than by word? Ask on the Intent tab."
+        lede="Search collected lots by opportunity, deadline, category, or location."
         actions={<LiveDot status={live.status} />}
       />
       <Stack>
@@ -122,9 +140,15 @@ export function LotsCatalog() {
         >
           <Toolbar>
             <Field label="Show">
-              <Select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Preset">
+              <Select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                aria-label="Preset"
+              >
                 {LOT_PRESETS.map((preset) => (
-                  <option key={preset.value} value={preset.value}>{preset.label}</option>
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
                 ))}
               </Select>
             </Field>
@@ -164,12 +188,17 @@ export function LotsCatalog() {
             onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
           >
             <summary>
-              More filters{advancedCount > 0 ? ` · ${advancedCount} active` : ""}
+              More filters
+              {advancedCount > 0 ? ` · ${advancedCount} active` : ""}
             </summary>
             <div className="bidrl-advanced-filters__body">
               <Toolbar>
                 <Field label="Bucket">
-                  <Select value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Bucket">
+                  <Select
+                    value={bucket}
+                    onChange={(e) => setBucket(e.target.value)}
+                    aria-label="Bucket"
+                  >
                     <option value="all">All buckets</option>
                     <option value="priced">Priced</option>
                     <option value="worth_opening">Worth opening</option>
@@ -180,10 +209,16 @@ export function LotsCatalog() {
                   </Select>
                 </Field>
                 <Field label="Category">
-                  <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+                  <Select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    aria-label="Category"
+                  >
                     <option value="all">All categories</option>
                     {LOT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
                     ))}
                   </Select>
                 </Field>
@@ -194,7 +229,8 @@ export function LotsCatalog() {
                   disabled={disabled}
                 />
               </Toolbar>
-              {locations.status === "ready" && locations.data.locations.length > 0 ? (
+              {locations.status === "ready" &&
+              locations.data.locations.length > 0 ? (
                 <Field label="Locations">
                   <div className="bidrl-loc-filter">
                     {locations.data.locations.map((loc) => (
@@ -220,10 +256,16 @@ export function LotsCatalog() {
           </details>
           <Hint>
             {filterLabel(filter)}
-            {snap.status === "ready" ? ` · ${snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} shown`}` : ""}
+            {snap.status === "ready"
+              ? ` · ${snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} shown`}`
+              : ""}
           </Hint>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
-          {snap.error && !disabled ? <Callout tone="danger">{snap.error.message || "Could not load lots."}</Callout> : null}
+          {snap.error && !disabled ? (
+            <Callout tone="danger">
+              {snap.error.message || "Could not load lots."}
+            </Callout>
+          ) : null}
           {snap.status === "ready" ? (
             <>
               <div className="bidrl-lot-results">

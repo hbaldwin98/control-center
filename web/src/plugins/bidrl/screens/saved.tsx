@@ -1,7 +1,4 @@
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Callout,
@@ -61,10 +58,15 @@ export function SavedLots() {
   const snap = useInfiniteFavorites(q, category, affiliate, lotSortParam(sort));
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
-  const live = useLiveBids(snap.status === "ready" ? snap.lots : undefined, !disabled);
+  const live = useLiveBids(
+    snap.status === "ready" ? snap.lots : undefined,
+    !disabled,
+  );
   const selected = parseAffiliateParam(affiliate);
   const narrowed = Boolean(q || affiliate) || category !== "all";
-  const advancedCount = [category !== "all", selected.length > 0].filter(Boolean).length;
+  const advancedCount = [category !== "all", selected.length > 0].filter(
+    Boolean,
+  ).length;
   usePlace("/bidrl/saved", snap.status === "ready");
 
   const changeSort = (column: LotSortColumn) => {
@@ -76,7 +78,11 @@ export function SavedLots() {
 
   const toggleLocation = (id: string) => {
     setAffiliate(
-      affiliateParam(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]),
+      affiliateParam(
+        selected.includes(id)
+          ? selected.filter((x) => x !== id)
+          : [...selected, id],
+      ),
     );
   };
 
@@ -84,7 +90,7 @@ export function SavedLots() {
     <Page>
       <PageHeader
         title="Saved"
-        lede="Lots you starred, newest first. Nothing here is removed by “Remove ended” — a saved lot keeps its photos, comparable, and location after the auction closes."
+        lede="Your starred lots, with photos and comparables kept after auctions close."
         actions={<LiveDot status={live.status} />}
       />
       <Stack>
@@ -148,7 +154,8 @@ export function SavedLots() {
             onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
           >
             <summary>
-              More filters{advancedCount > 0 ? ` · ${advancedCount} active` : ""}
+              More filters
+              {advancedCount > 0 ? ` · ${advancedCount} active` : ""}
             </summary>
             <div className="bidrl-advanced-filters__body">
               <Toolbar>
@@ -160,12 +167,15 @@ export function SavedLots() {
                   >
                     <option value="all">All categories</option>
                     {LOT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
                     ))}
                   </Select>
                 </Field>
               </Toolbar>
-              {locations.status === "ready" && locations.data.locations.length > 0 ? (
+              {locations.status === "ready" &&
+              locations.data.locations.length > 0 ? (
                 <Field label="Locations">
                   <div className="bidrl-loc-filter">
                     {locations.data.locations.map((loc) => (
@@ -190,11 +200,19 @@ export function SavedLots() {
             </div>
           </details>
           {snap.status === "ready" ? (
-            <Hint>{snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} saved`}</Hint>
+            <Hint>
+              {snap.hasMore
+                ? `${snap.lots.length} of ${snap.total} loaded`
+                : `${snap.lots.length} saved`}
+            </Hint>
           ) : null}
-          {snap.status === "loading" ? <Loading label="Loading saved lots…" /> : null}
+          {snap.status === "loading" ? (
+            <Loading label="Loading saved lots…" />
+          ) : null}
           {snap.error && !disabled ? (
-            <Callout tone="danger">{snap.error.message || "Could not load saved lots."}</Callout>
+            <Callout tone="danger">
+              {snap.error.message || "Could not load saved lots."}
+            </Callout>
           ) : null}
           {snap.status === "ready" ? (
             // Unstarring a row takes it off this list, so the list reloads the moment a

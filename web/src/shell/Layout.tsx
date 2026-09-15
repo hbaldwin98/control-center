@@ -6,17 +6,27 @@ import type { PluginDescriptor, PluginModule } from "@cc/ui";
 import { useAlertChime } from "../core/AlertSound";
 import { useSession } from "./session";
 
-const coreNav = [
-  { path: "/", label: "Dashboard" },
-  { path: "/plugins", label: "Plugins" },
-  { path: "/jobs", label: "Jobs" },
-  { path: "/sessions", label: "Sessions" },
-  { path: "/events", label: "Events" },
-  { path: "/inbox", label: "Inbox" },
-  { path: "/costs", label: "Costs" },
-  { path: "/models", label: "Models" },
-  { path: "/settings", label: "Settings" },
-];
+const navSections = [
+  {
+    label: "Work",
+    items: [
+      { path: "/", label: "Dashboard" },
+      { path: "/plugins", label: "Plugins" },
+      { path: "/jobs", label: "Jobs" },
+      { path: "/sessions", label: "Sessions" },
+      { path: "/inbox", label: "Inbox" },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { path: "/events", label: "Events" },
+      { path: "/costs", label: "Costs" },
+      { path: "/models", label: "Models" },
+      { path: "/settings", label: "Settings" },
+    ],
+  },
+] as const;
 
 type PluginState = { pluginId: string; enabled: boolean };
 
@@ -32,7 +42,10 @@ export function Layout({
   // many screens are mounted.
   useAlertChime();
   const live = useSnapshot<PluginState[]>(
-    useCallback((signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }), []),
+    useCallback(
+      (signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }),
+      [],
+    ),
     { events: "core.plugin.**" },
   );
   const enabled = new Map(
@@ -40,20 +53,34 @@ export function Layout({
       ? live.data.map((p) => [p.pluginId, p.enabled] as const)
       : descriptors.map((d) => [d.id, d.enabled] as const),
   );
-  const pluginNav = plugins.flatMap((p) => p.nav.map((n) => ({ ...n, pluginId: p.id })));
+  const pluginNav = plugins.flatMap((p) =>
+    p.nav.map((n) => ({ ...n, pluginId: p.id })),
+  );
 
   return (
     <div className="cc-shell">
+      <a className="cc-skip-link" href="#main-content">
+        Skip to content
+      </a>
       <nav className="cc-nav" aria-label="Primary">
         <div className="cc-nav__brand">
           Control Center <small>v1</small>
         </div>
 
-        <div className="cc-nav__section">Core</div>
-        {coreNav.map((item) => (
-          <NavLink key={item.path} to={item.path} end={item.path === "/"} className="cc-nav__link">
-            {item.label}
-          </NavLink>
+        {navSections.map((section) => (
+          <div key={section.label} className="cc-nav__group">
+            <div className="cc-nav__section">{section.label}</div>
+            {section.items.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                end={item.path === "/"}
+                className="cc-nav__link"
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
 
         {pluginNav.length > 0 ? (
@@ -65,7 +92,9 @@ export function Layout({
                 <NavLink
                   key={`${item.pluginId}:${item.path}`}
                   to={item.path}
-                  className={off ? "cc-nav__link cc-nav__link--off" : "cc-nav__link"}
+                  className={
+                    off ? "cc-nav__link cc-nav__link--off" : "cc-nav__link"
+                  }
                   title={off ? `${item.label} is disabled` : undefined}
                 >
                   {item.label}
@@ -83,7 +112,7 @@ export function Layout({
         </div>
       </nav>
 
-      <main className="cc-main">
+      <main id="main-content" className="cc-main" tabIndex={-1}>
         <Outlet />
       </main>
     </div>

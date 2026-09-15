@@ -5,7 +5,7 @@ Tracks [`DESIGN.md`](DESIGN.md) §8 build order. Updated with every milestone co
 Legend: ✅ complete · 🔨 in progress · ⬜ todo
 
 | # | Milestone | State | Done when |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | Skeleton | ✅ | `cmd`, config, SQLite, migrations, TLS-aware HTTP server, first-run bootstrap, session auth, CSRF, React shell boot. |
 | 2 | `storage` + `events` | ✅ | Transactional event insertion works; durable delivery is serial and at-least-once; SSE replay and reset work. |
 | 3 | `policy` | ✅ | Disable admission/cancellation works; persisted integer micro-USD reservations settle and release atomically. |
@@ -27,7 +27,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 1 — Skeleton ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `storage`: serialized writer + bounded reader pool, WAL, finite busy timeout | ✅ | `internal/core/storage/sqlite.go` |
 | `storage`: `DB.Tx` commit/rollback on error, cancellation, panic | ✅ | |
 | `storage`: nested transaction fails fast with `ErrNestedTx` | ✅ | Would otherwise deadlock on the writer. |
@@ -45,7 +45,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 2 — `storage` + `events` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `storage`: filesystem blobs with authoritative SQLite metadata | ✅ | Stage → fsync → rename → atomic metadata swap. |
 | `storage`: blob key grammar validated before filesystem access | ✅ | |
 | `storage`: per-object limit and per-scope quota, delta-charged | ✅ | A failed write leaves the existing blob untouched. |
@@ -72,7 +72,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 3 — `policy` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Plugin enabled state, registration, automated-plugin daily-budget invariant | ✅ | `internal/core/policy` |
 | `CheckWork` / `CheckWorkTx` admission | ✅ | Unknown IDs denied as disabled. |
 | Atomic micro-USD reserve / settle / release | ✅ | Reservations pin UTC hour/day/month; concurrent holds cannot share capacity. |
@@ -85,7 +85,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 4 — `jobs` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Enqueue with policy check in the insert transaction | ✅ | Idempotency key is unique among nonterminal rows. |
 | Claim, leases, fencing, heartbeat | ✅ | Expired leases are stolen with a new generation. |
 | Retries, permanent failure, timeout, panic recovery | ✅ | `failed` is permanent; `dead` is retry exhaustion. |
@@ -97,7 +97,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 5 — `credentials` + `ai` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | AES-256-GCM envelopes; startup fails closed on a missing or wrong master key | ✅ | `CC_MASTER_KEY` is 64 hex characters. |
 | API-key create / replace / rotate; Admin never returns secrets | ✅ | Actor stamped from the session; mutations require reauth. |
 | OAuth authorization-code + PKCE S256; state bound to session; consume-once | ✅ | Callback is a top-level GET; SameSite=Lax carries the session. |
@@ -108,7 +108,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 6 — `pluginhost` + `host` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `host` module: Plugin, Host, Manifest, and capability packages | ✅ | Plugins depend on `host` only; core adapts. |
 | Registration validates all plugins before any migrate or Init | ✅ | Invalid or colliding declarations reject `RegisterAll` as a whole. Event specs are validated like model needs. |
 | Scoped facade: identity stamp + L4 admission wrappers | ✅ | `events.Scoped`, `jobs.Scoped`, `ai.Scoped`, `storage.Prefixed` + authorizer. |
@@ -122,7 +122,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 7 — `hello` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Separate `plugins/hello` module depending only on `host` | ✅ | Registered from `cmd/controlcenter/plugins.go` alone. |
 | Cron tick, AI chat, event, durable handler, SQL, blob, config, browser | ✅ | `hello.ticked` writes `hello_ticks`; UI lists history live. Manifest declares the event and payload. |
 | Kill-switch acceptance | ✅ | Cancel running job, skip cron, 503, Chat denied, admitted Chat settles, reads remain. |
@@ -131,7 +131,7 @@ Legend: ✅ complete · 🔨 in progress · ⬜ todo
 ## Milestone 8 — `browser` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `host/browser` SDK: Open, Session, Page, allowlist, sentinels | ✅ | Plugins never import Playwright/chromedp/rod. |
 | Fake engine | ✅ | In-process `http.Handler` per DNS name; no sockets, no Chromium. |
 | Playwright engine | ✅ | `browser.engine: playwright`; Chromium + connect-time SSRF proxy. |
@@ -148,7 +148,7 @@ Not a numbered milestone; it completes the Dashboard row of
 [`docs/frontend.md`](docs/frontend.md) §"Core screens".
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `PluginModule.dashboard`: `summary`, `live`, `tile`, `detail` | ✅ | All optional. A plugin that contributes nothing still gets a host-built tile. |
 | Registration rejects an unmatchable `live` pattern | ✅ | A silently wrong live indicator is worse than none. `web/src/shell/registry.ts` |
 | Dashboard grid: one live tile per plugin | ✅ | State, spend against daily budget, open and failed work, activity, plugin surface. |
@@ -160,13 +160,23 @@ Not a numbered milestone; it completes the Dashboard row of
 | Jobs screen filters by plugin from the URL | ✅ | `/jobs?plugin=<id>`, so a detail screen can link to its own queue. |
 | Plugin tiles and detail panels | ✅ | `hello` and `pagewatch` fold complete plugin events into snapshots; no polling or refetch per event. |
 
+## Frontend — operator UX simplification ✅
+
+| Feature | State | Notes |
+| --- | --- | --- |
+| Grouped shell navigation and mobile scrolling strip | ✅ | Work and Admin are separated; keyboard users get a skip link; the strip no longer wraps into a second row. |
+| Attention-first dashboard | ✅ | Alerts, flagged plugins, running jobs, and queued work share one capped queue before the plugin catalog. |
+| Shareable core filters | ✅ | Jobs, Events, Costs, and Inbox keep their active filters in the URL. |
+| Long admin screens | ✅ | Settings, Models, and plugin settings expose compact section jump links instead of forcing a long scan. |
+| BIDRL navigation hierarchy | ✅ | Intent and Automation read as utility tabs; page ledes are shorter and mobile controls remain touch-friendly. |
+
 ## Provider administration and subscription auth ✅
 
 Not a numbered milestone: it replaces the compiled-in half of milestone 5's routing with
 administrator-owned providers, live model discovery, and a second way to authorize.
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Providers are database rows, created and edited from the UI | ✅ | `core_ai_providers`; `config/models.yaml` seeds an empty install and is ignored after. |
 | Model discovery per provider, cached until refreshed | ✅ | `core_ai_catalog`; OpenRouter's published prices are converted, an unpriced model stays unpriced rather than free. |
 | Routes are editable at runtime; a broken one is reported, not fatal | ✅ | Kept with `lastError`, unhealthy in the UI, `ErrRouteUncompiled` on dispatch. |
@@ -181,7 +191,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 ## Milestone 9 — `notifications` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Durable `core.notifications` subscriber, `FromNow` after defaults | ✅ | `SubscribeDurableTx`; `core.notification.*` never re-evaluated |
 | Default rules for alerts, dead jobs, budget, accounting, reauth, paused subscribers | ✅ | Inbox channel seeded |
 | Throttle windows collapse same subject; ready after window close | ✅ | Structured uniqueness keys (JSON) |
@@ -192,7 +202,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 ## Milestone 10 — `tid` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Separate `plugins/tid` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
 | Daily and manual energy sync | ✅ | Host-managed My TID browser flow plus CSV upload. New daily readings publish `tid.alert`. |
 | Usage metrics and insight | ✅ | Daily kWh history, month comparisons, estimated cost, and a bounded model-written insight. |
@@ -201,7 +211,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 ## Milestone 11 — `pagewatch` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Separate `plugins/pagewatch` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
 | Scheduled and manual public-page check | ✅ | Every six hours; HTTPS DNS target validation; fake and Playwright browser engines. |
 | Drift and expected-text results | ✅ | Baseline, unchanged, changed, and attention states; latest normalized snapshot stored as a blob. |
@@ -213,7 +223,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 ## Milestone 12 — `bidrl` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Separate `plugins/bidrl` module depending only on `host` | ✅ | Compiled in from the one backend registration file. |
 | User-triggered collect, scan, reprice, and bid refresh | ✅ | Enqueue-only jobs; `Automated: false`; compiled HTTPS host allowlist. |
 | Identification basis gates valuation | ✅ | Numeric prices only for `exact_text` / `barcode` with a cited source. |
@@ -226,7 +236,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 ## Milestone 13 — `push` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `internal/core/push` hub | ✅ | Connections, per-plugin topic namespaces, fan-out, per-connection buffers, and teardown on plugin disable. |
 | `host/push` SDK: `Publish`, `Available`, `Unavailable`, `Subscribers`, `Watch` | ✅ | Plugins write no transport code; topic names and payloads are opaque to the host. |
 | Refcounted demand | ✅ | `Join` on a topic's first subscriber, `Leave` on its last, serialized per topic so the two strictly alternate. Ten screens on one topic are one lot of upstream work. |
@@ -239,7 +249,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 ## Milestone 14 — `harness` ✅
 
 | Feature | State | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Closed command profiles | ✅ | The API selects a configured profile and relative workspace; it cannot provide an executable, flags, environment, or absolute path. |
 | Process lifecycle | ✅ | Start, graceful interrupt, timeout kill, shutdown drain, and restart reconciliation. |
 | Durable bounded output | ✅ | stdout and stderr are stored outside the event log and pruned to the configured per-session byte cap. |

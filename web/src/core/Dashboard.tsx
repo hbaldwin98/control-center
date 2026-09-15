@@ -25,7 +25,6 @@ import {
   RelativeTime,
   Sparkline,
   Stack,
-  Table,
   api,
   formatProgress,
   useActivity,
@@ -36,7 +35,13 @@ import type { PluginModule, StreamStatus } from "@cc/ui";
 import { PluginSurface } from "./PluginSurface";
 import { liveLabel, liveState } from "./live";
 import { VERDICTS } from "./status";
-import { idlePulse, jobsByPlugin, needsAttention, pulseOf, verdictOf } from "./types";
+import {
+  idlePulse,
+  jobsByPlugin,
+  needsAttention,
+  pulseOf,
+  verdictOf,
+} from "./types";
 import type { Job, JobPulse, PluginState } from "./types";
 
 type InboxPage = {
@@ -54,21 +59,34 @@ type InboxPage = {
 
 export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   const states = useSnapshot<PluginState[]>(
-    useCallback((signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }), []),
+    useCallback(
+      (signal) => api.snapshot<PluginState[]>("/api/admin/plugins", { signal }),
+      [],
+    ),
     { events: ["core.plugin.**", "core.ai.usage"] },
   );
   // Job events are invalidations, so the list refetches rather than reconstructing rows
   // from partial payloads — the shape the rest of the UI already uses for jobs.
   const jobs = useSnapshot<Job[]>(
-    useCallback((signal) => api.snapshot<Job[]>("/api/jobs?limit=200", { signal }), []),
+    useCallback(
+      (signal) => api.snapshot<Job[]>("/api/jobs?limit=200", { signal }),
+      [],
+    ),
     { events: "core.job.**" },
   );
   const inbox = useSnapshot<InboxPage>(
-    useCallback((signal) => api.snapshot<InboxPage>("/api/notifications?limit=20", { signal }), []),
+    useCallback(
+      (signal) =>
+        api.snapshot<InboxPage>("/api/notifications?limit=20", { signal }),
+      [],
+    ),
     { events: "core.notification.**" },
   );
 
-  const modules = useMemo(() => new Map(plugins.map((m) => [m.id, m])), [plugins]);
+  const modules = useMemo(
+    () => new Map(plugins.map((m) => [m.id, m])),
+    [plugins],
+  );
   const rows = states.status === "ready" ? states.data : [];
   const jobRows = jobs.status === "ready" ? jobs.data : [];
 
@@ -80,7 +98,9 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   }, [jobRows]);
 
   const running = jobRows.filter((j) => j.state === "running");
-  const queued = jobRows.filter((j) => j.state === "pending" || j.state === "retry_wait");
+  const queued = jobRows.filter(
+    (j) => j.state === "pending" || j.state === "retry_wait",
+  );
   const spentToday = rows.reduce((sum, p) => sum + p.committedDay, 0);
   const heldToday = rows.reduce((sum, p) => sum + p.reservedDay, 0);
   const enabledCount = rows.filter((p) => p.enabled).length;
@@ -94,20 +114,32 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
     <Page>
       <PageHeader
         title="Dashboard"
-        lede="Every plugin, live. Spend against budget, open work, and recent alerts. Open a tile for the full view."
+        lede="Start with what needs attention, then open a plugin for the full view."
         actions={<StreamIndicator />}
       />
       <Stack>
         <Grid density="metric">
           <Metric
             label="Plugins"
-            value={states.status === "ready" ? `${enabledCount}/${rows.length}` : <Dash />}
+            value={
+              states.status === "ready" ? (
+                `${enabledCount}/${rows.length}`
+              ) : (
+                <Dash />
+              )
+            }
             hint={attention > 0 ? `${attention} need attention` : "all healthy"}
             tone={attention > 0 ? "warn" : "neutral"}
           />
           <Metric
             label="Spent today"
-            value={states.status === "ready" ? <Money microUsd={spentToday} compact /> : <Dash />}
+            value={
+              states.status === "ready" ? (
+                <Money microUsd={spentToday} compact />
+              ) : (
+                <Dash />
+              )
+            }
             hint={
               heldToday > 0 ? (
                 <>
@@ -121,7 +153,9 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
           <Metric
             label="Running"
             value={jobs.status === "ready" ? running.length : <Dash />}
-            hint={queued.length > 0 ? `${queued.length} waiting` : "nothing waiting"}
+            hint={
+              queued.length > 0 ? `${queued.length} waiting` : "nothing waiting"
+            }
           />
           <Metric
             label="Alerts"
@@ -130,14 +164,30 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
               lastAlert ? (
                 <RelativeTime at={lastAlert.createdAt} prefix="last" />
               ) : (
-              "in the inbox"
-            )
+                "in the inbox"
+              )
             }
             tone={alerts.length > 0 ? "warn" : "neutral"}
           />
         </Grid>
 
-        <Async state={states} loading="Loading plugins…" empty="No plugins are registered yet.">
+        {states.status === "ready" &&
+        jobs.status === "ready" &&
+        inbox.status === "ready" ? (
+          <DashboardFocus
+            pluginStates={rows}
+            pulses={pulses}
+            running={running}
+            waiting={queued}
+            alerts={alerts}
+          />
+        ) : null}
+
+        <Async
+          state={states}
+          loading="Loading plugins…"
+          empty="No plugins are registered yet."
+        >
           {(list) => (
             <Grid density="tile">
               {list.map((state) => (
@@ -151,80 +201,145 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
             </Grid>
           )}
         </Async>
-
-        <Card title="Running now" actions={<Hint>{running.length}</Hint>}>
-          <Async
-            state={jobs}
-            loading="Loading jobs…"
-            empty="Nothing is running."
-            isEmpty={() => running.length === 0}
-          >
-            {() => (
-              <Table
-                head={
-                  <>
-                    <th className="cc-num">ID</th>
-                    <th>Job</th>
-                    <th>Progress</th>
-                    <th>Started</th>
-                  </>
-                }
-              >
-                {running.map((j) => (
-                  <tr key={j.id}>
-                    <td className="cc-num">
-                      <Link to={`/jobs?id=${j.id}`}>{j.id}</Link>
-                    </td>
-                    <td>
-                      <Link to={`/plugins/${encodeURIComponent(j.pluginId)}`}>{j.pluginId}</Link>
-                      <span className="cc-hint">.{j.name}</span>
-                    </td>
-                    <td>
-                      <Meter value={j.progress} max={1} tone="accent" label={`${j.name} progress`} />
-                      <span className="cc-hint">
-                        {formatProgress(j.progress, j.progressMessage ?? "")}
-                      </span>
-                    </td>
-                    <td>{j.startedAt ? <RelativeTime at={j.startedAt} /> : <Dash />}</td>
-                  </tr>
-                ))}
-              </Table>
-            )}
-          </Async>
-        </Card>
-
-        <Card title="Recent alerts" actions={<Hint><Link to="/inbox">inbox</Link></Hint>}>
-          {inbox.status !== "ready" ? (
-            <EmptyState>Loading inbox…</EmptyState>
-          ) : alerts.length === 0 ? (
-            <EmptyState>No alerts yet.</EmptyState>
-          ) : (
-            <Table
-              head={
-                <>
-                  <th>When</th>
-                  <th>Title</th>
-                  <th>Subject</th>
-                </>
-              }
-            >
-              {alerts.map((n) => (
-                <tr key={n.id}>
-                  <td>
-                    <RelativeTime at={n.createdAt} />
-                  </td>
-                  <td>
-                    {n.url ? <Link to={n.url}>{n.title}</Link> : n.title}
-                    {n.body ? <div className="cc-hint">{n.body}</div> : null}
-                  </td>
-                  <td>{n.subject || <Dash />}</td>
-                </tr>
-              ))}
-            </Table>
-          )}
-        </Card>
       </Stack>
     </Page>
+  );
+}
+
+/**
+ * One compact queue for the things that deserve a look. The dashboard used to put
+ * running jobs and alerts in separate panels below the plugin grid; putting them first
+ * makes the next action obvious and avoids making the operator scan three surfaces.
+ */
+function DashboardFocus({
+  pluginStates,
+  pulses,
+  running,
+  waiting,
+  alerts,
+}: {
+  pluginStates: PluginState[];
+  pulses: Map<string, JobPulse>;
+  running: Job[];
+  waiting: Job[];
+  alerts: InboxPage["notifications"];
+}) {
+  const flagged = pluginStates.filter((state) =>
+    needsAttention(verdictOf(state, pulses.get(state.pluginId) ?? idlePulse)),
+  );
+  const shownRunning = running.slice(0, 5);
+  const shownWaiting = waiting.slice(0, 5);
+  const shownAlerts = alerts.slice(0, 5);
+  const hasItems =
+    flagged.length > 0 ||
+    running.length > 0 ||
+    waiting.length > 0 ||
+    alerts.length > 0;
+
+  return (
+    <Card title="Needs attention" actions={<Link to="/inbox">Open inbox</Link>}>
+      {!hasItems ? (
+        <EmptyState>
+          All clear. No alerts, failed plugins, or open work.
+        </EmptyState>
+      ) : (
+        <div className="cc-focus-list">
+          {flagged.map((state) => {
+            const verdict =
+              VERDICTS[
+                verdictOf(state, pulses.get(state.pluginId) ?? idlePulse)
+              ];
+            const reason =
+              state.accountingFailed ||
+              state.health?.lastError ||
+              state.disabledReason;
+            return (
+              <div
+                className="cc-focus-list__item"
+                key={`plugin:${state.pluginId}`}
+              >
+                <div className="cc-focus-list__main">
+                  <Link to={`/plugins/${encodeURIComponent(state.pluginId)}`}>
+                    {state.name || state.pluginId}
+                  </Link>
+                  {reason ? <Hint>{reason}</Hint> : null}
+                </div>
+                <Badge tone={verdict.tone}>{verdict.label}</Badge>
+              </div>
+            );
+          })}
+
+          {shownRunning.map((job) => (
+            <div className="cc-focus-list__item" key={`job:${job.id}`}>
+              <div className="cc-focus-list__main">
+                <Link to={`/jobs?id=${job.id}`}>
+                  {job.pluginId}.{job.name}
+                </Link>
+                <Hint>
+                  {formatProgress(job.progress, job.progressMessage ?? "")}
+                  {job.startedAt ? (
+                    <span>
+                      {" "}
+                      · started <RelativeTime at={job.startedAt} />
+                    </span>
+                  ) : null}
+                </Hint>
+              </div>
+              <Badge tone="ok">running</Badge>
+            </div>
+          ))}
+
+          {shownWaiting.map((job) => (
+            <div className="cc-focus-list__item" key={`waiting:${job.id}`}>
+              <div className="cc-focus-list__main">
+                <Link to={`/jobs?id=${job.id}`}>
+                  {job.pluginId}.{job.name}
+                </Link>
+                <Hint>
+                  {job.state === "retry_wait" ? "retrying soon" : "queued"}
+                </Hint>
+              </div>
+              <Badge>
+                {job.state === "retry_wait" ? "retrying" : "waiting"}
+              </Badge>
+            </div>
+          ))}
+
+          {shownAlerts.map((notification) => (
+            <div
+              className="cc-focus-list__item"
+              key={`alert:${notification.id}`}
+            >
+              <div className="cc-focus-list__main">
+                {notification.url ? (
+                  <Link to={notification.url}>{notification.title}</Link>
+                ) : (
+                  <strong>{notification.title}</strong>
+                )}
+                {notification.body ? <Hint>{notification.body}</Hint> : null}
+              </div>
+              <RelativeTime at={notification.createdAt} />
+            </div>
+          ))}
+
+          {running.length > shownRunning.length ? (
+            <Hint>
+              <Link to="/jobs">View all {running.length} running jobs</Link>
+            </Hint>
+          ) : null}
+          {waiting.length > shownWaiting.length ? (
+            <Hint>
+              <Link to="/jobs">View all {waiting.length} waiting jobs</Link>
+            </Hint>
+          ) : null}
+          {alerts.length > shownAlerts.length ? (
+            <Hint>
+              <Link to="/inbox">View all {alerts.length} alerts</Link>
+            </Hint>
+          ) : null}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -245,8 +360,6 @@ function PluginTile({
 
   const badge = VERDICTS[verdictOf(state, pulse)];
   const detail = `/plugins/${encodeURIComponent(state.pluginId)}`;
-  const own = module?.nav[0];
-
   return (
     <Card
       muted={!state.enabled}
@@ -274,7 +387,9 @@ function PluginTile({
           <Hint>{dashboard?.summary || state.description}</Hint>
         ) : null}
 
-        {!state.enabled && state.disabledReason ? <Hint>{state.disabledReason}</Hint> : null}
+        {!state.enabled && state.disabledReason ? (
+          <Hint>{state.disabledReason}</Hint>
+        ) : null}
 
         <div className="cc-tile__stats">
           <div>
@@ -303,7 +418,9 @@ function PluginTile({
             <div className="cc-tile__stat-label">Work</div>
             <div className="cc-tile__stat-value">{pulse.running}</div>
             <Hint>
-              {pulse.waiting > 0 ? `${pulse.waiting} waiting` : "nothing waiting"}
+              {pulse.waiting > 0
+                ? `${pulse.waiting} waiting`
+                : "nothing waiting"}
               {pulse.failing && pulse.running === 0 ? " · last job failed" : ""}
             </Hint>
           </div>
@@ -318,7 +435,8 @@ function PluginTile({
             <Hint>
               {activity.last ? (
                 <>
-                  <code>{activity.last.type}</code> <RelativeTime at={activity.lastAt} />
+                  <code>{activity.last.type}</code>{" "}
+                  <RelativeTime at={activity.lastAt} />
                 </>
               ) : (
                 `watching ${live.join(", ")}`
@@ -327,18 +445,24 @@ function PluginTile({
           </div>
         ) : null}
 
-        <PluginSurface pluginId={state.pluginId} enabled={state.enabled} surface={dashboard?.tile} />
+        <PluginSurface
+          pluginId={state.pluginId}
+          enabled={state.enabled}
+          surface={dashboard?.tile}
+        />
 
         <div className="cc-tile__foot">
-          <Link to={detail}>Open</Link>
-          {own ? <Link to={own.path}>{own.label} screen</Link> : null}
+          <Link to={detail}>Open plugin</Link>
         </div>
       </Stack>
     </Card>
   );
 }
 
-const STREAM: Record<StreamStatus, { tone: "ok" | "warn" | "danger" | "neutral"; label: string }> = {
+const STREAM: Record<
+  StreamStatus,
+  { tone: "ok" | "warn" | "danger" | "neutral"; label: string }
+> = {
   live: { tone: "ok", label: "live" },
   connecting: { tone: "warn", label: "connecting" },
   reconnecting: { tone: "warn", label: "reconnecting" },
@@ -358,7 +482,10 @@ function StreamIndicator() {
   const { tone, label } = STREAM[status];
   return (
     <Badge tone={tone}>
-      <LiveDot state={status === "live" ? "live" : "off"} label={`event stream ${label}`} />
+      <LiveDot
+        state={status === "live" ? "live" : "off"}
+        label={`event stream ${label}`}
+      />
       {label}
     </Badge>
   );

@@ -12,8 +12,12 @@
 
 # Local config & secrets
 /config/config.local.yaml
+/deploy/searxng/settings.local.yml
 .env
 .env.local
+
+# Local exports
+/requests_over_time_*.csv
 
 # Frontend
 node_modules/

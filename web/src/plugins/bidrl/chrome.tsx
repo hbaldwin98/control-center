@@ -1,31 +1,34 @@
 /** Navigation and layout shared across screens. */
-import {
-  type ReactNode,
-} from "react";
-import {
-  Button,
-  EmptyState,
-  Link,
-  Metric,
-  Tabs,
-  usePath,
-} from "@cc/ui";
-import {
-  type LocationGroup,
-} from "./model";
+import { type ReactNode } from "react";
+import { Button, EmptyState, Link, Metric, Tabs, usePath } from "@cc/ui";
+import { type LocationGroup } from "./model";
 import { remembered } from "./place";
 
 /**
  * Grid and table are two views of one list, not two actions, so they sit in a single
  * joined control where the pressed half reads as the current view.
  */
-export function ViewToggle({ value, onChange }: { value: "grid" | "table"; onChange: (view: "grid" | "table") => void }) {
+export function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: "grid" | "table";
+  onChange: (view: "grid" | "table") => void;
+}) {
   return (
     <div className="bidrl-seg" role="group" aria-label="Lot view">
-      <Button size="sm" pressed={value === "grid"} onClick={() => onChange("grid")}>
+      <Button
+        size="sm"
+        pressed={value === "grid"}
+        onClick={() => onChange("grid")}
+      >
         Grid
       </Button>
-      <Button size="sm" pressed={value === "table"} onClick={() => onChange("table")}>
+      <Button
+        size="sm"
+        pressed={value === "table"}
+        onClick={() => onChange("table")}
+      >
         Table
       </Button>
     </div>
@@ -64,7 +67,11 @@ export function LocationSections<T>({
   return (
     <div className="bidrl-locations">
       {groups.map((group, i) => (
-        <details key={group.key} className="bidrl-location" open={i === 0 || groups.length <= 3}>
+        <details
+          key={group.key}
+          className="bidrl-location"
+          open={i === 0 || groups.length <= 3}
+        >
           <summary>
             <span className="bidrl-location__name">{group.label}</span>
             <span className="bidrl-location__meta">
@@ -79,32 +86,50 @@ export function LocationSections<T>({
 }
 
 /**
- * The four sections, and which one a detail screen belongs to: a lot page is still the
+ * The main sections, and which one a detail screen belongs to: a lot page is still the
  * catalog, an auction page is still Auctions, so the tab strip never goes blank under a
  * record you drilled into.
  */
 const BIDRL_TABS = [
-  { to: "/bidrl", label: "Overview", owns: (path: string) => path === "/bidrl" },
+  {
+    to: "/bidrl",
+    label: "Overview",
+    owns: (path: string) => path === "/bidrl",
+  },
   {
     to: "/bidrl/auctions",
     label: "Auctions",
-    owns: (path: string) => path === "/bidrl/auctions" || path.startsWith("/bidrl/auction/"),
+    owns: (path: string) =>
+      path === "/bidrl/auctions" || path.startsWith("/bidrl/auction/"),
   },
   {
     to: "/bidrl/lots",
     label: "Lots",
-    owns: (path: string) => path === "/bidrl/lots" || path.startsWith("/bidrl/lot/"),
+    owns: (path: string) =>
+      path === "/bidrl/lots" || path.startsWith("/bidrl/lot/"),
   },
   {
     to: "/bidrl/findings",
     label: "Findings",
-    owns: (path: string) => path === "/bidrl/findings" || path === "/bidrl/watchlists",
+    owns: (path: string) =>
+      path === "/bidrl/findings" || path === "/bidrl/watchlists",
   },
-  { to: "/bidrl/saved", label: "Saved", owns: (path: string) => path === "/bidrl/saved" },
-  { to: "/bidrl/intent", label: "Intent", owns: (path: string) => path === "/bidrl/intent" },
+  {
+    to: "/bidrl/saved",
+    label: "Saved",
+    owns: (path: string) => path === "/bidrl/saved",
+  },
+  {
+    to: "/bidrl/intent",
+    label: "Intent",
+    utility: true,
+    separator: true,
+    owns: (path: string) => path === "/bidrl/intent",
+  },
   {
     to: "/bidrl/automation",
     label: "Automation",
+    utility: true,
     owns: (path: string) => path === "/bidrl/automation",
   },
 ] as const;
@@ -117,6 +142,11 @@ export function BidrlTabs() {
         <Link
           key={item.to}
           to={remembered(item.to)}
+          className={
+            "utility" in item && item.utility
+              ? `bidrl-tab--utility${"separator" in item && item.separator ? " bidrl-tab--utility-start" : ""}`
+              : undefined
+          }
           aria-current={item.owns(path) ? "page" : undefined}
         >
           {item.label}
@@ -142,7 +172,12 @@ export function StatLink({
 }) {
   return (
     <Link to={to} className="bidrl-stat">
-      <Metric label={label} value={value} hint={hint} tone={tone ?? "neutral"} />
+      <Metric
+        label={label}
+        value={value}
+        hint={hint}
+        tone={tone ?? "neutral"}
+      />
     </Link>
   );
 }

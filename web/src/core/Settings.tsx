@@ -47,22 +47,37 @@ type OAuthProvider = {
 /** Credentials: the administrator password gate, API keys, and OAuth logins. */
 export function Settings() {
   const creds = useSnapshot<Credential[]>(
-    useCallback((signal) => api.snapshot<Credential[]>("/api/admin/credentials", { signal }), []),
+    useCallback(
+      (signal) =>
+        api.snapshot<Credential[]>("/api/admin/credentials", { signal }),
+      [],
+    ),
     { events: "core.credential.**" },
   );
 
-  const [oauthFlash, setOauthFlash] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
+  const [oauthFlash, setOauthFlash] = useState<{
+    tone: "ok" | "danger";
+    text: string;
+  } | null>(null);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const oauth = q.get("oauth");
-    if (oauth === "ok") setOauthFlash({ tone: "ok", text: "OAuth credential saved." });
+    if (oauth === "ok")
+      setOauthFlash({ tone: "ok", text: "OAuth credential saved." });
     if (oauth === "error") {
-      setOauthFlash({ tone: "danger", text: "OAuth did not complete. Begin again from Settings." });
+      setOauthFlash({
+        tone: "danger",
+        text: "OAuth did not complete. Begin again from Settings.",
+      });
     }
     if (oauth) {
       q.delete("oauth");
       const next = q.toString();
-      window.history.replaceState(null, "", next ? `/settings?${next}` : "/settings");
+      window.history.replaceState(
+        null,
+        "",
+        next ? `/settings?${next}` : "/settings",
+      );
     }
   }, []);
 
@@ -73,29 +88,50 @@ export function Settings() {
         lede="API keys and logins. After you save a key, connect it as a provider under Models — that is what plugins use."
       />
       <Stack>
-        {oauthFlash ? <Callout tone={oauthFlash.tone}>{oauthFlash.text}</Callout> : null}
+        {oauthFlash ? (
+          <Callout tone={oauthFlash.tone}>{oauthFlash.text}</Callout>
+        ) : null}
 
-        <ChangePasswordCard />
-        <ReauthCard />
-        <OAuthCard onChanged={creds.reload} />
-        <CreateKeyCard onChanged={creds.reload} />
-        <NotificationSettings />
-        <AlertSoundCard />
+        <nav className="cc-jumpnav" aria-label="Settings sections">
+          <a href="#settings-security">Security</a>
+          <a href="#settings-credentials">Credentials</a>
+          <a href="#settings-notifications">Notifications</a>
+          <a href="#settings-preferences">Preferences</a>
+        </nav>
 
-        <div className="cc-group__title">Credentials</div>
-        <Async
-          state={creds}
-          loading="Loading credentials…"
-          empty="No credentials yet. Create an API key or complete OAuth."
-        >
-          {(list) => (
-            <Stack>
-              {list.map((c) => (
-                <CredentialCard key={c.id} cred={c} onChanged={creds.reload} />
-              ))}
-            </Stack>
-          )}
-        </Async>
+        <div id="settings-security" className="cc-anchor-section">
+          <ChangePasswordCard />
+          <ReauthCard />
+        </div>
+        <div id="settings-credentials" className="cc-anchor-section">
+          <OAuthCard onChanged={creds.reload} />
+          <CreateKeyCard onChanged={creds.reload} />
+
+          <div className="cc-group__title">Credentials</div>
+          <Async
+            state={creds}
+            loading="Loading credentials…"
+            empty="No credentials yet. Create an API key or complete OAuth."
+          >
+            {(list) => (
+              <Stack>
+                {list.map((c) => (
+                  <CredentialCard
+                    key={c.id}
+                    cred={c}
+                    onChanged={creds.reload}
+                  />
+                ))}
+              </Stack>
+            )}
+          </Async>
+        </div>
+        <div id="settings-notifications" className="cc-anchor-section">
+          <NotificationSettings />
+        </div>
+        <div id="settings-preferences" className="cc-anchor-section">
+          <AlertSoundCard />
+        </div>
       </Stack>
     </Page>
   );
@@ -106,7 +142,26 @@ function isReauth(err: unknown): boolean {
 }
 
 function formatErr(err: unknown): string {
-  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+  return err instanceof ApiError
+    ? err.message
+    : err instanceof Error
+      ? err.message
+      : String(err);
+}
+
+/** OAuth URLs come from the server, but still need a browser-side scheme guard. */
+function checkedAuthURL(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw, window.location.origin);
+  } catch {
+    throw new Error("The provider returned an invalid sign-in URL.");
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error("The provider returned an unsafe sign-in URL.");
+  }
+  return url.toString();
 }
 
 /** The one place a mutation card says "reauthenticate first", worded the same way. */
@@ -159,7 +214,10 @@ function ChangePasswordCard() {
     }
     setBusy(true);
     try {
-      await api.post("/api/auth/password", { currentPassword: current, newPassword: next });
+      await api.post("/api/auth/password", {
+        currentPassword: current,
+        newPassword: next,
+      });
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -175,9 +233,16 @@ function ChangePasswordCard() {
     <Card title="Administrator password">
       <form onSubmit={onSubmit}>
         <Stack>
-          <Hint>Changing the password signs out every other device. This session stays signed in.</Hint>
+          <Hint>
+            Changing the password signs out every other device. This session
+            stays signed in.
+          </Hint>
           {error ? <Callout tone="danger">{error}</Callout> : null}
-          {ok ? <Callout tone="ok">Password changed. Other sessions were signed out.</Callout> : null}
+          {ok ? (
+            <Callout tone="ok">
+              Password changed. Other sessions were signed out.
+            </Callout>
+          ) : null}
           <Field label="Current password">
             <Input
               type="password"
@@ -187,7 +252,10 @@ function ChangePasswordCard() {
               required
             />
           </Field>
-          <Field label="New password" hint="At least 12 characters. There is no reset flow.">
+          <Field
+            label="New password"
+            hint="At least 12 characters. There is no reset flow."
+          >
             <Input
               type="password"
               autoComplete="new-password"
@@ -244,10 +312,15 @@ function ReauthCard() {
       <form onSubmit={onSubmit}>
         <Stack>
           <Hint>
-            Credential changes require the administrator password within the last five minutes.
+            Credential changes require the administrator password within the
+            last five minutes.
           </Hint>
           {error ? <Callout tone="danger">{error}</Callout> : null}
-          {ok ? <Callout tone="ok">Reauthenticated. Mutations are allowed for five minutes.</Callout> : null}
+          {ok ? (
+            <Callout tone="ok">
+              Reauthenticated. Mutations are allowed for five minutes.
+            </Callout>
+          ) : null}
           <Field label="Password">
             <Input
               id={reauthFieldID}
@@ -302,11 +375,24 @@ function CreateKeyCard({ onChanged }: { onChanged: () => void }) {
         <Stack>
           {needReauth ? <ReauthNotice /> : null}
           {error ? <Callout tone="danger">{error}</Callout> : null}
-          <Field label="ID" hint="Lowercase letters, digits, hyphen, underscore.">
-            <Input mono value={id} onChange={(e) => setId(e.target.value)} required />
+          <Field
+            label="ID"
+            hint="Lowercase letters, digits, hyphen, underscore."
+          >
+            <Input
+              mono
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+              required
+            />
           </Field>
           <Field label="Provider">
-            <Input mono value={provider} onChange={(e) => setProvider(e.target.value)} required />
+            <Input
+              mono
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              required
+            />
           </Field>
           <Field label="Secret" hint="Never displayed again after you save.">
             <Input
@@ -352,9 +438,10 @@ function OAuthCard({ onChanged }: { onChanged: () => void }) {
     <Card title="OAuth">
       <Stack>
         <Hint>
-          Starting a sign-in needs your administrator password from the last five minutes;
-          finishing one does not, because the login itself can take longer than that. Tokens are
-          never displayed, and the state is bound to this session and spent on first use.
+          Starting a sign-in needs your administrator password from the last
+          five minutes; finishing one does not, because the login itself can
+          take longer than that. Tokens are never displayed, and the state is
+          bound to this session and spent on first use.
         </Hint>
         {providers.map((p) => (
           <OAuthProviderBlock key={p.name} provider={p} onChanged={onChanged} />
@@ -407,13 +494,14 @@ function OAuthProviderBlock({
         `/api/admin/credentials/oauth/${encodeURIComponent(provider.name)}/begin`,
       );
       onChanged();
+      const authURL = checkedAuthURL(res.authUrl);
       if (!provider.manual) {
-        window.location.assign(res.authUrl);
+        window.location.assign(authURL);
         return;
       }
       setDone(null);
-      setAuthUrl(res.authUrl);
-      window.open(res.authUrl, "_blank", "noopener,noreferrer");
+      setAuthUrl(authURL);
+      window.open(authURL, "_blank", "noopener,noreferrer");
     });
 
   const complete = () =>
@@ -432,7 +520,11 @@ function OAuthProviderBlock({
     <Card muted title={provider.name}>
       <Stack>
         <Hint>
-          Scopes: {provider.scopes.length > 0 ? provider.scopes.join(" ") : "provider default"}.
+          Scopes:{" "}
+          {provider.scopes.length > 0
+            ? provider.scopes.join(" ")
+            : "provider default"}
+          .
         </Hint>
         {needReauth ? <ReauthNotice /> : null}
         {error ? <Callout tone="danger">{error}</Callout> : null}
@@ -442,7 +534,11 @@ function OAuthProviderBlock({
             {provider.manual ? "Open sign-in page" : `Connect ${provider.name}`}
           </Button>
           {provider.importable ? (
-            <Button type="button" disabled={busy} onClick={() => setImporting((v) => !v)}>
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => setImporting((v) => !v)}
+            >
               {importing ? "Cancel import" : "Paste existing tokens"}
             </Button>
           ) : null}
@@ -456,11 +552,12 @@ function OAuthProviderBlock({
           >
             <Stack>
               <Callout>
-                Your browser finishes at <code>{provider.redirectUri}</code>. If this server is what
-                answers there, you land back here signed in and there is nothing to paste. Otherwise
-                the page will not load — that address is a port on your own machine, not this
-                server — and the failed page is the point: copy the whole address out of the address
-                bar and paste it below.
+                Your browser finishes at <code>{provider.redirectUri}</code>. If
+                this server is what answers there, you land back here signed in
+                and there is nothing to paste. Otherwise the page will not load
+                — that address is a port on your own machine, not this server —
+                and the failed page is the point: copy the whole address out of
+                the address bar and paste it below.
               </Callout>
               {authUrl ? (
                 <Hint>
@@ -513,7 +610,12 @@ function OAuthProviderBlock({
   );
 }
 
-type ImportBody = { accessToken: string; refreshToken: string; idToken: string; expiresIn: number };
+type ImportBody = {
+  accessToken: string;
+  refreshToken: string;
+  idToken: string;
+  expiresIn: number;
+};
 
 /**
  * Adopts tokens another client already minted, such as a local `codex login`. The refresh
@@ -542,9 +644,10 @@ function ImportTokensForm({
     >
       <Stack>
         <Hint>
-          Paste the tokens a local sign-in already produced for {provider}. Both clients then share
-          one refresh token, and whichever renews first may invalidate the other — sign in above
-          instead if you would rather not have that.
+          Paste the tokens a local sign-in already produced for {provider}. Both
+          clients then share one refresh token, and whichever renews first may
+          invalidate the other — sign in above instead if you would rather not
+          have that.
         </Hint>
         <Field label="Access token">
           <Textarea
@@ -554,7 +657,10 @@ function ImportTokensForm({
             required
           />
         </Field>
-        <Field label="Refresh token" hint="Required. Without it the credential cannot renew itself.">
+        <Field
+          label="Refresh token"
+          hint="Required. Without it the credential cannot renew itself."
+        >
           <Textarea
             mono
             value={refreshToken}
@@ -562,8 +668,15 @@ function ImportTokensForm({
             required
           />
         </Field>
-        <Field label="ID token" hint="Optional. Names the account the plan belongs to.">
-          <Textarea mono value={idToken} onChange={(e) => setIdToken(e.target.value)} />
+        <Field
+          label="ID token"
+          hint="Optional. Names the account the plan belongs to."
+        >
+          <Textarea
+            mono
+            value={idToken}
+            onChange={(e) => setIdToken(e.target.value)}
+          />
         </Field>
         <Row>
           <Button type="submit" variant="primary" disabled={busy}>
@@ -575,7 +688,13 @@ function ImportTokensForm({
   );
 }
 
-function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () => void }) {
+function CredentialCard({
+  cred,
+  onChanged,
+}: {
+  cred: Credential;
+  onChanged: () => void;
+}) {
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -600,14 +719,18 @@ function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () =
 
   useEffect(() => {
     let cancelled = false;
-    api.get<string[]>(`/api/admin/credentials/${encodeURIComponent(cred.id)}/references`).then(
-      (list) => {
-        if (!cancelled) setRefs(list);
-      },
-      () => {
-        if (!cancelled) setRefs([]);
-      },
-    );
+    api
+      .get<string[]>(
+        `/api/admin/credentials/${encodeURIComponent(cred.id)}/references`,
+      )
+      .then(
+        (list) => {
+          if (!cancelled) setRefs(list);
+        },
+        () => {
+          if (!cancelled) setRefs([]);
+        },
+      );
     return () => {
       cancelled = true;
     };
@@ -622,7 +745,9 @@ function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () =
         <>
           <Badge>{cred.kind}</Badge>
           <Badge>{cred.provider}</Badge>
-          <Badge tone={cred.status === "ok" ? "ok" : "danger"}>{cred.status}</Badge>
+          <Badge tone={cred.status === "ok" ? "ok" : "danger"}>
+            {cred.status}
+          </Badge>
         </>
       }
     >
@@ -638,7 +763,9 @@ function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () =
           {cred.scopes.length > 0 ? ` · ${cred.scopes.join(", ")}` : ""}
         </Hint>
         {referenced ? (
-          <Hint>Referenced by {refs.join(", ")}. Remove those before deleting.</Hint>
+          <Hint>
+            Referenced by {refs.join(", ")}. Remove those before deleting.
+          </Hint>
         ) : null}
         {needReauth ? <ReauthNotice /> : null}
         {error ? <Callout tone="danger">{error}</Callout> : null}
@@ -646,11 +773,19 @@ function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () =
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void act(() => api.put(`/api/admin/credentials/${encodeURIComponent(cred.id)}`, { secret }));
+              void act(() =>
+                api.put(
+                  `/api/admin/credentials/${encodeURIComponent(cred.id)}`,
+                  { secret },
+                ),
+              );
             }}
           >
             <Stack>
-              <Field label="Replacement secret" hint="Never displayed after save.">
+              <Field
+                label="Replacement secret"
+                hint="Never displayed after save."
+              >
                 <Input
                   type="password"
                   autoComplete="new-password"
@@ -668,7 +803,10 @@ function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () =
                   disabled={busy}
                   onClick={() =>
                     void act(() =>
-                      api.post(`/api/admin/credentials/${encodeURIComponent(cred.id)}/rotate`, { secret }),
+                      api.post(
+                        `/api/admin/credentials/${encodeURIComponent(cred.id)}/rotate`,
+                        { secret },
+                      ),
                     )
                   }
                 >
@@ -683,8 +821,18 @@ function CredentialCard({ cred, onChanged }: { cred: Credential; onChanged: () =
             type="button"
             variant="danger"
             disabled={busy || referenced}
-            title={referenced ? "Remove the references above before deleting." : undefined}
-            onClick={() => void act(() => api.del(`/api/admin/credentials/${encodeURIComponent(cred.id)}`))}
+            title={
+              referenced
+                ? "Remove the references above before deleting."
+                : undefined
+            }
+            onClick={() =>
+              void act(() =>
+                api.del(
+                  `/api/admin/credentials/${encodeURIComponent(cred.id)}`,
+                ),
+              )
+            }
           >
             Delete
           </Button>

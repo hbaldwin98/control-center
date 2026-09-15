@@ -79,7 +79,11 @@ const KINDS: { value: ProviderKind; label: string; hint: string }[] = [
     label: "ChatGPT subscription (Codex)",
     hint: "The backend the Codex CLI talks to. Needs an OAuth credential and bills against the plan.",
   },
-  { value: "fake", label: "Fake (local echo)", hint: "In process. Never contacts a network." },
+  {
+    value: "fake",
+    label: "Fake (local echo)",
+    hint: "In process. Never contacts a network.",
+  },
 ];
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
@@ -92,14 +96,25 @@ const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
  */
 export function Models() {
   const providers = useSnapshot<Provider[]>(
-    useCallback((signal) => api.snapshot<Provider[]>("/api/admin/ai/providers", { signal }), []),
+    useCallback(
+      (signal) =>
+        api.snapshot<Provider[]>("/api/admin/ai/providers", { signal }),
+      [],
+    ),
   );
   const routes = useSnapshot<Route[]>(
-    useCallback((signal) => api.snapshot<Route[]>("/api/admin/ai/routes", { signal }), []),
+    useCallback(
+      (signal) => api.snapshot<Route[]>("/api/admin/ai/routes", { signal }),
+      [],
+    ),
     { events: "core.ai.**" },
   );
   const creds = useSnapshot<Credential[]>(
-    useCallback((signal) => api.snapshot<Credential[]>("/api/admin/credentials", { signal }), []),
+    useCallback(
+      (signal) =>
+        api.snapshot<Credential[]>("/api/admin/credentials", { signal }),
+      [],
+    ),
     { events: "core.credential.**" },
   );
   const catalogs = useCatalogs();
@@ -118,23 +133,43 @@ export function Models() {
         lede="Connect a provider, then pick a model for each thing a plugin needs. Fallbacks, prices, and extra routes live further down."
       />
       <Stack>
+        <nav className="cc-jumpnav" aria-label="Model administration sections">
+          <a href="#models-needs">Plugin needs</a>
+          {providerList.length > 0 ? (
+            <a href="#models-providers">Providers</a>
+          ) : null}
+          <a href="#models-routes">Routes</a>
+        </nav>
+
         {providerList.length === 0 ? (
           <Card title="Connect a provider">
-            <ConnectProvider credentials={credentialList} onConnected={reloadAll} />
+            <ConnectProvider
+              credentials={credentialList}
+              onConnected={reloadAll}
+            />
           </Card>
         ) : null}
 
-        <div className="cc-group__title">What plugins need</div>
+        <div id="models-needs" className="cc-group__title">
+          What plugins need
+        </div>
         <PluginNeedsPanel providers={providerList} onChanged={reloadAll} />
 
         {providerList.length > 0 ? (
           <>
-            <div className="cc-group__title">Providers</div>
+            <div id="models-providers" className="cc-group__title">
+              Providers
+            </div>
             <Hint>
-              A provider is a base URL, a credential, and how it charges. Plugins never see one: they
-              name a route, and the route names these.
+              A provider is a base URL, a credential, and how it charges.
+              Plugins never see one: they name a route, and the route names
+              these.
             </Hint>
-            <Async state={providers} loading="Loading providers…" empty={<NoProviders />}>
+            <Async
+              state={providers}
+              loading="Loading providers…"
+              empty={<NoProviders />}
+            >
               {(list) => (
                 <Stack>
                   {list.map((p) => (
@@ -143,12 +178,17 @@ export function Models() {
                       provider={p}
                       credentials={credentialList}
                       catalog={catalogs.get(p.id)}
-                      onLoadCatalog={(refresh) => void catalogs.load(p.id, refresh)}
+                      onLoadCatalog={(refresh) =>
+                        void catalogs.load(p.id, refresh)
+                      }
                       onChanged={reloadAll}
                     />
                   ))}
                   <Card title="Connect another provider">
-                    <ConnectProvider credentials={credentialList} onConnected={reloadAll} />
+                    <ConnectProvider
+                      credentials={credentialList}
+                      onConnected={reloadAll}
+                    />
                   </Card>
                 </Stack>
               )}
@@ -156,13 +196,19 @@ export function Models() {
           </>
         ) : null}
 
-        <div className="cc-group__title">Advanced routes</div>
+        <div id="models-routes" className="cc-group__title">
+          Advanced routes
+        </div>
         <Hint>
-          A route is the name a plugin asks for and the ordered attempts behind it. The prices here
-          are the ones a call is admitted against; refreshing a catalog never reprices a route on
-          its own.
+          A route is the name a plugin asks for and the ordered attempts behind
+          it. The prices here are the ones a call is admitted against;
+          refreshing a catalog never reprices a route on its own.
         </Hint>
-        <Async state={routes} loading="Loading routes…" empty="No routes yet. Add one below.">
+        <Async
+          state={routes}
+          loading="Loading routes…"
+          empty="No routes yet. Add one below."
+        >
           {(list) => (
             <Stack>
               {list.map((r) => (
@@ -177,14 +223,22 @@ export function Models() {
             </Stack>
           )}
         </Async>
-        <NewRouteCard providers={providerList} catalogs={catalogs} onChanged={routes.reload} />
+        <NewRouteCard
+          providers={providerList}
+          catalogs={catalogs}
+          onChanged={routes.reload}
+        />
       </Stack>
     </Page>
   );
 }
 
 function NoProviders() {
-  return <EmptyState>No providers yet. Add one below, then build a route on it.</EmptyState>;
+  return (
+    <EmptyState>
+      No providers yet. Add one below, then build a route on it.
+    </EmptyState>
+  );
 }
 
 /* ---- catalogs ---- */
@@ -215,12 +269,16 @@ function useCatalogs(): Catalogs {
       );
       setState((s) => ({ ...s, [providerID]: { status: "ready", models } }));
     } catch (err) {
-      setState((s) => ({ ...s, [providerID]: { status: "error", message: formatErr(err) } }));
+      setState((s) => ({
+        ...s,
+        [providerID]: { status: "error", message: formatErr(err) },
+      }));
     }
   }, []);
 
   const get = useCallback(
-    (providerID: string): CatalogState => state[providerID] ?? { status: "idle" },
+    (providerID: string): CatalogState =>
+      state[providerID] ?? { status: "idle" },
     [state],
   );
 
@@ -251,7 +309,9 @@ function ProviderCard({
     setBusy(true);
     setError(null);
     try {
-      await api.del(`/api/admin/ai/providers/${encodeURIComponent(provider.id)}`);
+      await api.del(
+        `/api/admin/ai/providers/${encodeURIComponent(provider.id)}`,
+      );
       onChanged();
     } catch (err) {
       setError(formatErr(err));
@@ -272,7 +332,9 @@ function ProviderCard({
       actions={
         <>
           <Badge>{kindLabel(provider.kind)}</Badge>
-          <Badge tone={provider.billing === "subscription" ? "warn" : "neutral"}>
+          <Badge
+            tone={provider.billing === "subscription" ? "warn" : "neutral"}
+          >
             {provider.billing}
           </Badge>
         </>
@@ -280,8 +342,8 @@ function ProviderCard({
     >
       <Stack>
         <Hint>
-          {provider.baseUrl ? <code>{provider.baseUrl}</code> : "in process"} · credential{" "}
-          <code>{provider.credentialId}</code>
+          {provider.baseUrl ? <code>{provider.baseUrl}</code> : "in process"} ·
+          credential <code>{provider.credentialId}</code>
         </Hint>
         {error ? <Callout tone="danger">{error}</Callout> : null}
         <Row>
@@ -295,10 +357,19 @@ function ProviderCard({
           >
             {catalog.status === "loading" ? "Asking…" : "Refresh from provider"}
           </Button>
-          <Button type="button" pressed={editing} onClick={() => setEditing((v) => !v)}>
+          <Button
+            type="button"
+            pressed={editing}
+            onClick={() => setEditing((v) => !v)}
+          >
             {editing ? "Cancel" : "Edit"}
           </Button>
-          <Button type="button" variant="danger" disabled={busy} onClick={() => void remove()}>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={busy}
+            onClick={() => void remove()}
+          >
             {busy ? "Deleting…" : "Delete"}
           </Button>
         </Row>
@@ -312,16 +383,26 @@ function ProviderCard({
             }}
           />
         ) : null}
-        {showModels ? <CatalogTable catalog={catalog} billing={provider.billing} /> : null}
+        {showModels ? (
+          <CatalogTable catalog={catalog} billing={provider.billing} />
+        ) : null}
       </Stack>
     </Card>
   );
 }
 
-function CatalogTable({ catalog, billing }: { catalog: CatalogState; billing: Billing }) {
+function CatalogTable({
+  catalog,
+  billing,
+}: {
+  catalog: CatalogState;
+  billing: Billing;
+}) {
   if (catalog.status === "idle") return null;
-  if (catalog.status === "loading") return <Loading label="Asking the provider…" />;
-  if (catalog.status === "error") return <Callout tone="danger">{catalog.message}</Callout>;
+  if (catalog.status === "loading")
+    return <Loading label="Asking the provider…" />;
+  if (catalog.status === "error")
+    return <Callout tone="danger">{catalog.message}</Callout>;
   if (catalog.models.length === 0) {
     return <EmptyState>The provider returned no models.</EmptyState>;
   }
@@ -341,10 +422,20 @@ function CatalogTable({ catalog, billing }: { catalog: CatalogState; billing: Bi
         <tr key={m.id}>
           <td>
             <code>{m.id}</code>
-            {m.displayName && m.displayName !== m.id ? <Hint>{m.displayName}</Hint> : null}
+            {m.displayName && m.displayName !== m.id ? (
+              <Hint>{m.displayName}</Hint>
+            ) : null}
           </td>
-          <td>{m.contextWindow > 0 ? m.contextWindow.toLocaleString() : <Dash />}</td>
-          <td>{m.maxOutputTokens > 0 ? m.maxOutputTokens.toLocaleString() : <Dash />}</td>
+          <td>
+            {m.contextWindow > 0 ? m.contextWindow.toLocaleString() : <Dash />}
+          </td>
+          <td>
+            {m.maxOutputTokens > 0 ? (
+              m.maxOutputTokens.toLocaleString()
+            ) : (
+              <Dash />
+            )}
+          </td>
           {m.priced ? (
             <>
               <td>
@@ -366,7 +457,9 @@ function CatalogTable({ catalog, billing }: { catalog: CatalogState; billing: Bi
 // priceless says why a model has no price. A provider that publishes none is not free —
 // it is unknown — unless the plan already paid for it.
 function priceless(billing: Billing): string {
-  return billing === "subscription" ? "billed to the plan" : "no price published";
+  return billing === "subscription"
+    ? "billed to the plan"
+    : "no price published";
 }
 
 function ProviderForm({
@@ -379,10 +472,16 @@ function ProviderForm({
   onSaved: () => void;
 }) {
   const [id, setId] = useState(existing?.id ?? "");
-  const [kind, setKind] = useState<ProviderKind>(existing?.kind ?? "openai_compatible");
+  const [kind, setKind] = useState<ProviderKind>(
+    existing?.kind ?? "openai_compatible",
+  );
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? "");
-  const [credentialId, setCredentialId] = useState(existing?.credentialId ?? "");
-  const [billing, setBilling] = useState<Billing>(existing?.billing ?? "metered");
+  const [credentialId, setCredentialId] = useState(
+    existing?.credentialId ?? "",
+  );
+  const [billing, setBilling] = useState<Billing>(
+    existing?.billing ?? "metered",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -420,7 +519,10 @@ function ProviderForm({
     <form onSubmit={submit}>
       <Stack>
         {error ? <Callout tone="danger">{error}</Callout> : null}
-        <Field label="ID" hint="Lowercase letters, digits, hyphen, underscore. Routes name this.">
+        <Field
+          label="ID"
+          hint="Lowercase letters, digits, hyphen, underscore. Routes name this."
+        >
           <Input
             mono
             value={id}
@@ -430,7 +532,10 @@ function ProviderForm({
           />
         </Field>
         <Field label="Kind" hint={kindInfo?.hint}>
-          <Select value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)}>
+          <Select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as ProviderKind)}
+          >
             {KINDS.map((k) => (
               <option key={k.value} value={k.value}>
                 {k.label}
@@ -457,7 +562,11 @@ function ProviderForm({
         ) : null}
         <Field
           label="Credential"
-          hint={codex ? "Must be an OAuth login, not an API key." : "Created under Settings."}
+          hint={
+            codex
+              ? "Must be an OAuth login, not an API key."
+              : "Created under Settings."
+          }
         >
           <Select
             mono
@@ -528,7 +637,9 @@ function RouteCard({
     setBusy(true);
     setError(null);
     try {
-      await api.del(`/api/admin/ai/routes/${encodeURIComponent(route.logicalName)}`);
+      await api.del(
+        `/api/admin/ai/routes/${encodeURIComponent(route.logicalName)}`,
+      );
       onChanged();
     } catch (err) {
       setError(formatErr(err));
@@ -553,9 +664,14 @@ function RouteCard({
     >
       <Stack>
         <Hint>
-          {route.maxInputTokens.toLocaleString()} in / {route.maxOutputTokens.toLocaleString()} out ·{" "}
+          {route.maxInputTokens.toLocaleString()} in /{" "}
+          {route.maxOutputTokens.toLocaleString()} out ·{" "}
           {route.attemptPlan.length > 0 ? (
-            <code>{route.attemptPlan.map((a) => `${a.provider}/${a.model}`).join(" → ")}</code>
+            <code>
+              {route.attemptPlan
+                .map((a) => `${a.provider}/${a.model}`)
+                .join(" → ")}
+            </code>
           ) : (
             "no attempts"
           )}
@@ -565,10 +681,19 @@ function RouteCard({
         ) : null}
         {error ? <Callout tone="danger">{error}</Callout> : null}
         <Row>
-          <Button type="button" pressed={editing} onClick={() => setEditing((v) => !v)}>
+          <Button
+            type="button"
+            pressed={editing}
+            onClick={() => setEditing((v) => !v)}
+          >
             {editing ? "Cancel" : "Edit"}
           </Button>
-          <Button type="button" variant="danger" disabled={busy} onClick={() => void remove()}>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={busy}
+            onClick={() => void remove()}
+          >
             {busy ? "Deleting…" : "Delete"}
           </Button>
         </Row>
@@ -601,7 +726,11 @@ function NewRouteCard({
   if (!open) {
     return (
       <Row>
-        <Button type="button" onClick={() => setOpen(true)} disabled={providers.length === 0}>
+        <Button
+          type="button"
+          onClick={() => setOpen(true)}
+          disabled={providers.length === 0}
+        >
           Add a route
         </Button>
         {providers.length === 0 ? <Hint>Add a provider first.</Hint> : null}
@@ -648,9 +777,15 @@ function RouteForm({
   onSaved: () => void;
 }) {
   const [name, setName] = useState(existing?.logicalName ?? "");
-  const [capabilities, setCapabilities] = useState((existing?.capabilities ?? ["chat"]).join(", "));
-  const [maxInput, setMaxInput] = useState(String(existing?.maxInputTokens ?? 8000));
-  const [maxOutput, setMaxOutput] = useState(String(existing?.maxOutputTokens ?? 2000));
+  const [capabilities, setCapabilities] = useState(
+    (existing?.capabilities ?? ["chat"]).join(", "),
+  );
+  const [maxInput, setMaxInput] = useState(
+    String(existing?.maxInputTokens ?? 8000),
+  );
+  const [maxOutput, setMaxOutput] = useState(
+    String(existing?.maxOutputTokens ?? 2000),
+  );
   const [attempts, setAttempts] = useState<Attempt[]>(
     existing && existing.attemptPlan.length > 0
       ? existing.attemptPlan.map((a) => ({ ...a }))
@@ -661,7 +796,9 @@ function RouteForm({
 
   const byID = new Map(providers.map((p) => [p.id, p]));
   const patch = (i: number, next: Partial<Attempt>) =>
-    setAttempts((list) => list.map((a, j) => (j === i ? { ...a, ...next } : a)));
+    setAttempts((list) =>
+      list.map((a, j) => (j === i ? { ...a, ...next } : a)),
+    );
   const move = (i: number, delta: number) =>
     setAttempts((list) => {
       const j = i + delta;
@@ -675,8 +812,12 @@ function RouteForm({
   // could cost, with a subscription attempt contributing nothing.
   const reserve = attempts.reduce((sum, a) => {
     if (byID.get(a.provider)?.billing === "subscription") return sum;
-    const inCost = Math.ceil(((Number(maxInput) || 0) * a.inputMicroUsdPerMillion) / 1_000_000);
-    const outCost = Math.ceil(((Number(maxOutput) || 0) * a.outputMicroUsdPerMillion) / 1_000_000);
+    const inCost = Math.ceil(
+      ((Number(maxInput) || 0) * a.inputMicroUsdPerMillion) / 1_000_000,
+    );
+    const outCost = Math.ceil(
+      ((Number(maxOutput) || 0) * a.outputMicroUsdPerMillion) / 1_000_000,
+    );
     return sum + inCost + outCost;
   }, 0);
 
@@ -721,11 +862,21 @@ function RouteForm({
             required
           />
         </Field>
-        <Field label="Capabilities" hint="Comma separated. A plugin's request must match one.">
-          <Input value={capabilities} onChange={(e) => setCapabilities(e.target.value)} required />
+        <Field
+          label="Capabilities"
+          hint="Comma separated. A plugin's request must match one."
+        >
+          <Input
+            value={capabilities}
+            onChange={(e) => setCapabilities(e.target.value)}
+            required
+          />
         </Field>
         <Row>
-          <Field label="Max input tokens" hint="Hard limit, and what a reservation assumes.">
+          <Field
+            label="Max input tokens"
+            hint="Hard limit, and what a reservation assumes."
+          >
             <Input
               mono
               inputMode="numeric"
@@ -746,8 +897,8 @@ function RouteForm({
         </Row>
         <Hint>
           Attempts run in order until one succeeds. Every call reserves{" "}
-          <strong>{formatUSD(reserve)}</strong> up front — the most the whole plan could cost — and
-          settles to what was actually used.
+          <strong>{formatUSD(reserve)}</strong> up front — the most the whole
+          plan could cost — and settles to what was actually used.
         </Hint>
         {attempts.map((a, i) => (
           <AttemptRow
@@ -759,13 +910,20 @@ function RouteForm({
             catalogs={catalogs}
             onPatch={(next) => patch(i, next)}
             onMove={(delta) => move(i, delta)}
-            onRemove={() => setAttempts((list) => list.filter((_, j) => j !== i))}
+            onRemove={() =>
+              setAttempts((list) => list.filter((_, j) => j !== i))
+            }
           />
         ))}
         <Row>
           <Button
             type="button"
-            onClick={() => setAttempts((list) => [...list, emptyAttempt(providers[0]?.id ?? "")])}
+            onClick={() =>
+              setAttempts((list) => [
+                ...list,
+                emptyAttempt(providers[0]?.id ?? ""),
+              ])
+            }
           >
             Add attempt
           </Button>
@@ -811,7 +969,9 @@ function AttemptRow({
   // click. They stay editable: the price that governs a call is the one saved here.
   const chooseModel = (model: string) => {
     const known =
-      catalog.status === "ready" ? catalog.models.find((m) => m.id === model) : undefined;
+      catalog.status === "ready"
+        ? catalog.models.find((m) => m.id === model)
+        : undefined;
     if (known?.priced) {
       onPatch({
         model,
@@ -872,7 +1032,9 @@ function AttemptRow({
           <Button
             type="button"
             disabled={!attempt.provider || catalog.status === "loading"}
-            onClick={() => void catalogs.load(attempt.provider, catalog.status === "ready")}
+            onClick={() =>
+              void catalogs.load(attempt.provider, catalog.status === "ready")
+            }
           >
             {catalog.status === "loading"
               ? "Asking…"
@@ -880,20 +1042,34 @@ function AttemptRow({
                 ? "Refresh models"
                 : "Load models"}
           </Button>
-          <Button type="button" disabled={index === 0} onClick={() => onMove(-1)}>
+          <Button
+            type="button"
+            disabled={index === 0}
+            onClick={() => onMove(-1)}
+          >
             Move up
           </Button>
-          <Button type="button" disabled={index === count - 1} onClick={() => onMove(1)}>
+          <Button
+            type="button"
+            disabled={index === count - 1}
+            onClick={() => onMove(1)}
+          >
             Move down
           </Button>
-          <Button type="button" variant="danger" disabled={count === 1} onClick={onRemove}>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={count === 1}
+            onClick={onRemove}
+          >
             Remove
           </Button>
         </Row>
         {subscription ? (
           <Hint>
-            {attempt.provider} bills against a subscription, so this attempt reserves nothing and
-            needs no price. Its own rate limits are the ceiling.
+            {attempt.provider} bills against a subscription, so this attempt
+            reserves nothing and needs no price. Its own rate limits are the
+            ceiling.
           </Hint>
         ) : (
           <Row>
@@ -902,7 +1078,11 @@ function AttemptRow({
                 mono
                 inputMode="decimal"
                 value={usdFromMicro(attempt.inputMicroUsdPerMillion)}
-                onChange={(e) => onPatch({ inputMicroUsdPerMillion: microFromUsd(e.target.value) })}
+                onChange={(e) =>
+                  onPatch({
+                    inputMicroUsdPerMillion: microFromUsd(e.target.value),
+                  })
+                }
               />
             </Field>
             <Field label="Output $ per million tokens">
@@ -910,7 +1090,11 @@ function AttemptRow({
                 mono
                 inputMode="decimal"
                 value={usdFromMicro(attempt.outputMicroUsdPerMillion)}
-                onChange={(e) => onPatch({ outputMicroUsdPerMillion: microFromUsd(e.target.value) })}
+                onChange={(e) =>
+                  onPatch({
+                    outputMicroUsdPerMillion: microFromUsd(e.target.value),
+                  })
+                }
               />
             </Field>
           </Row>
@@ -939,5 +1123,9 @@ function microFromUsd(text: string): number {
 }
 
 function formatErr(err: unknown): string {
-  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+  return err instanceof ApiError
+    ? err.message
+    : err instanceof Error
+      ? err.message
+      : String(err);
 }
