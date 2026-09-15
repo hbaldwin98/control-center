@@ -109,84 +109,100 @@ export function LotView() {
         ) : null}
         {lot ? (
           <>
-            <section
-              className={`bidrl-lot-hero${lot.photoUrls && lot.photoUrls.length > 0 ? "" : " bidrl-lot-hero--no-photo"}`}
-              aria-label="Current lot listing"
-            >
-              {lot.photoUrls && lot.photoUrls.length > 0 ? (
+            {lot.photoUrls && lot.photoUrls.length > 0 ? (
+              <section className="bidrl-lot-hero" aria-label="Lot photos">
                 <div className="bidrl-lot-hero__gallery">
                   <LotPhotos key={lot.id} urls={lot.photoUrls} />
                 </div>
-              ) : null}
-              <div className="bidrl-lot-hero__decision">
-                <div className="bidrl-lot-hero__eyebrow">Current listing</div>
-                <div className="bidrl-lot-hero__primary">
-                  <div>
-                    <span>Current bid</span>
-                    <strong>{cents(lot.currentBidCents)}</strong>
-                    <small>
-                      {lot.bidCount} bid{lot.bidCount === 1 ? "" : "s"}
-                    </small>
-                  </div>
-                  <div>
-                    <span>Time remaining</span>
-                    <strong>
-                      {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
-                    </strong>
-                    <small>
-                      {lot.endsAt ? "Auction close" : "No close time"}
-                    </small>
-                  </div>
+              </section>
+            ) : null}
+            <Card
+              title="Current listing"
+              className="bidrl-lot-current"
+            >
+              <div className="bidrl-lot-current__metrics">
+                <div className="bidrl-lot-current__identity">
+                  <span>Identity</span>
+                  <strong>{lot.title || <Dash />}</strong>
+                  <small>What BidRL says</small>
                 </div>
-                {lot.url ? (
-                  <div className="bidrl-lot-hero__source">
-                    <BidrlLink href={lot.url}>Open on BidRL ↗</BidrlLink>
-                  </div>
-                ) : null}
-                <div className="bidrl-lot-hero__actions">
-                  <div className="bidrl-lot-save">
-                    <FavoriteStar lot={lot} />
-                    <span>Save lot</span>
-                  </div>
-                  <div className="bidrl-lot-hero__jobs">
-                    <Button
-                      variant="primary"
-                      disabled={
-                        disabled ||
-                        busy !== null ||
-                        (lot.basis !== "exact_text" && lot.basis !== "barcode")
-                      }
-                      title={
-                        lot.basis !== "exact_text" && lot.basis !== "barcode"
-                          ? "Repricing needs a model or barcode read from a photo. Enrich first."
-                          : undefined
-                      }
-                      onClick={() =>
-                        void run("reprice", "Reprice", () =>
-                          api.post(`/lots/${encodeURIComponent(id)}/reprice`),
-                        )
-                      }
-                    >
-                      {busy === "reprice" ? "Queueing…" : "Reprice"}
-                    </Button>
-                    <Button
-                      disabled={disabled || busy !== null}
-                      onClick={() =>
-                        void run("enrich", "Enrich", () =>
-                          api.post(`/lots/${encodeURIComponent(id)}/enrich`),
-                        )
-                      }
-                    >
-                      {busy === "enrich" ? "Queueing…" : "Enrich"}
-                    </Button>
-                  </div>
+                <div>
+                  <span>Price</span>
+                  <strong>
+                    {lot.priceCents == null ? <Dash /> : cents(lot.priceCents)}
+                  </strong>
+                  <small>
+                    {lot.priceCents == null
+                      ? "No estimate"
+                      : comparableHint(lot) || "Comparable"}
+                  </small>
+                </div>
+                <div>
+                  <span>Bids</span>
+                  <strong>{lot.bidCount}</strong>
+                  <small>{lot.bidCount === 1 ? "1 bid" : `${lot.bidCount} bids`}</small>
+                </div>
+                <div>
+                  <span>Bid price</span>
+                  <strong>{cents(lot.currentBidCents)}</strong>
+                  <small>Current bid</small>
+                </div>
+                <div>
+                  <span>Time remaining</span>
+                  <strong>
+                    {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+                  </strong>
+                  <small>{lot.endsAt ? "Auction close" : "No close time"}</small>
                 </div>
               </div>
-            </section>
+              {lot.url ? (
+                <div className="bidrl-lot-current__source">
+                  <BidrlLink href={lot.url}>Open on BidRL ↗</BidrlLink>
+                </div>
+              ) : null}
+              <div className="bidrl-lot-hero__actions">
+                <div className="bidrl-lot-save">
+                  <FavoriteStar lot={lot} />
+                  <span>Save lot</span>
+                </div>
+                <div className="bidrl-lot-hero__jobs">
+                  <Button
+                    variant="primary"
+                    disabled={
+                      disabled ||
+                      busy !== null ||
+                      (lot.basis !== "exact_text" && lot.basis !== "barcode")
+                    }
+                    title={
+                      lot.basis !== "exact_text" && lot.basis !== "barcode"
+                        ? "Repricing needs a model or barcode read from a photo. Enrich first."
+                        : undefined
+                    }
+                    onClick={() =>
+                      void run("reprice", "Reprice", () =>
+                        api.post(`/lots/${encodeURIComponent(id)}/reprice`),
+                      )
+                    }
+                  >
+                    {busy === "reprice" ? "Queueing…" : "Reprice"}
+                  </Button>
+                  <Button
+                    disabled={disabled || busy !== null}
+                    onClick={() =>
+                      void run("enrich", "Enrich", () =>
+                        api.post(`/lots/${encodeURIComponent(id)}/enrich`),
+                      )
+                    }
+                  >
+                    {busy === "enrich" ? "Queueing…" : "Enrich"}
+                  </Button>
+                </div>
+              </div>
+            </Card>
             <div className="bidrl-lot-detail-grid">
               <div className="bidrl-lot-detail-grid__main">
                 <Card
-                  title="Identification"
+                  title="Item details"
                   className="bidrl-lot-section bidrl-lot-identification"
                 >
                   <div className="bidrl-lot-identification__content">
@@ -238,7 +254,6 @@ export function LotView() {
                       label="High bidder"
                       value={lot.highBidder || <Dash />}
                     />
-                    <Metric label="Bids" value={String(lot.bidCount)} />
                     <Metric
                       label="Minimum bid"
                       value={cents(lot.minBidCents)}

@@ -803,14 +803,7 @@ tr.bidrl-similar-row td:first-child {
 /* ---- lot detail ---- */
 
 .bidrl-lot-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.85fr);
-  gap: var(--space-4);
-  align-items: stretch;
-}
-
-.bidrl-lot-hero--no-photo {
-  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
 }
 
 .bidrl-lot-hero__gallery {
@@ -852,33 +845,18 @@ tr.bidrl-similar-row td:first-child {
   max-height: min(56vh, 620px);
 }
 
-.bidrl-lot-hero__decision {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-width: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-}
-
-.bidrl-lot-hero__eyebrow,
-.bidrl-lot-section__eyebrow {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.bidrl-lot-hero__primary {
+.bidrl-lot-current {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.bidrl-lot-current__metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
 }
 
-.bidrl-lot-hero__primary > div {
+.bidrl-lot-current__metrics > div {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -888,7 +866,7 @@ tr.bidrl-similar-row td:first-child {
   background: var(--bg-sunken);
 }
 
-.bidrl-lot-hero__primary > div > span {
+.bidrl-lot-current__metrics > div > span {
   color: var(--text-faint);
   font-size: 11px;
   font-weight: 700;
@@ -896,26 +874,46 @@ tr.bidrl-similar-row td:first-child {
   text-transform: uppercase;
 }
 
-.bidrl-lot-hero__primary strong {
+.bidrl-lot-current__metrics strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text);
-  font-size: clamp(28px, 4vw, 42px);
-  line-height: 1;
-  letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
+  font-size: 19px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bidrl-lot-hero__primary .cc-countdown--soon {
-  color: var(--warn);
+.bidrl-lot-current__identity strong {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
-.bidrl-lot-hero__primary small {
+.bidrl-lot-current__metrics small,
+.bidrl-lot-current__source {
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.bidrl-lot-hero__source {
+.bidrl-lot-current__metrics .cc-countdown--soon {
+  color: var(--warn);
+}
+
+.bidrl-lot-current__source {
   font-size: 13px;
   font-weight: 600;
+}
+
+.bidrl-lot-current .bidrl-lot-hero__actions {
+  margin-top: 0;
+}
+
+.bidrl-lot-section__eyebrow {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .bidrl-lot-report {
@@ -1214,6 +1212,29 @@ tr.bidrl-similar-row td:first-child {
    half-width text box is unusable at 360px, and the toolbar's 180px floor guarantees an
    awkward two-up otherwise. */
 @media (max-width: 720px) {
+  /* BIDRL has its own tab strip; keep the page title, live state, and tabs in one
+     compact header rather than spending a full row on the tiny live indicator. */
+  .cc-page:has(.cc-tabs[aria-label="BIDRL sections"]) {
+    padding-top: var(--space-3);
+  }
+
+  .cc-page:has(.cc-tabs[aria-label="BIDRL sections"]) .cc-page__header {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+
+  .cc-page:has(.cc-tabs[aria-label="BIDRL sections"]) .cc-page__header > .cc-row {
+    width: auto;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
+
+  .cc-page:has(.cc-tabs[aria-label="BIDRL sections"]) > .cc-stack {
+    gap: var(--space-2);
+  }
+
   .bidrl-actions,
   .bidrl-examples,
   .bidrl-command,
@@ -1402,18 +1423,15 @@ tr.bidrl-similar-row td:first-child {
     border-top: 1px solid var(--border);
   }
 
-  .bidrl-lot-hero {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
+  .bidrl-lot-current__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .bidrl-lot-hero__decision {
-    order: -1;
-    padding: var(--space-4);
+  .bidrl-lot-current__identity {
+    grid-column: 1 / -1;
   }
 
-  .bidrl-lot-hero__actions {
+  .bidrl-lot-current .bidrl-lot-hero__actions {
     margin-top: 0;
   }
 

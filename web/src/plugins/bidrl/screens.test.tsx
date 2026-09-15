@@ -400,16 +400,37 @@ describe("bidrl screens", () => {
 
   it("puts the current listing ahead of the decision report", async () => {
     await renderAt("/bidrl/lot/1001");
-    const primary = container.querySelector(".bidrl-lot-hero__primary");
+    const current = container.querySelector(".bidrl-lot-current");
+    const metrics = container.querySelector(".bidrl-lot-current__metrics");
     const report = container.querySelector(".bidrl-lot-report");
-    const source = container.querySelector(".bidrl-lot-hero__source a");
-    expect(primary?.textContent).toContain("Current bid");
-    expect(primary?.textContent).toContain("Time remaining");
+    const source = container.querySelector(".bidrl-lot-current__source a");
+    expect(metrics?.textContent).toContain("Identity");
+    expect(metrics?.textContent).toContain("Price");
+    expect(metrics?.textContent).toContain("Bids");
+    expect(metrics?.textContent).toContain("Bid price");
+    expect(metrics?.textContent).toContain("Time remaining");
     expect(source?.textContent).toContain("Open on BidRL");
-    expect(primary?.compareDocumentPosition(report ?? primary)).toBe(
+    expect(current?.compareDocumentPosition(report ?? current)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(report?.textContent).toContain("Comparable");
+  });
+
+  it("keeps the item name and photos above the current listing", async () => {
+    const path = "/api/plugins/bidrl/lots/1001";
+    const before = routes.get(path);
+    routes.set(path, { ...lot(), photoUrls: ["/one.jpg", "/two.jpg"], latestEventId: 1 });
+    try {
+      await renderAt("/bidrl/lot/1001");
+      const photos = container.querySelector(".bidrl-lot-hero");
+      const current = container.querySelector(".bidrl-lot-current");
+      expect(container.querySelector("h1")?.textContent).toContain("Keurig coffee maker");
+      expect(photos?.compareDocumentPosition(current ?? photos)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    } finally {
+      if (before) routes.set(path, before);
+    }
   });
 
   // The screen exists to answer "what happens next, and what happened last" without
