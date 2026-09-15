@@ -117,9 +117,19 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 		}
 		args = append(args, c.id)
 		if err := h.Store().Tx(jc, func(tx hoststorage.Tx) error {
-			if _, err := tx.Exec(jc, `UPDATE bidrl_lots SET `+strings.Join(set, ", ")+
-				` WHERE id = ? AND `+s.column+` = ''`, args...); err != nil {
+			result, err := tx.Exec(jc, `UPDATE bidrl_lots SET `+strings.Join(set, ", ")+
+				` WHERE id = ? AND `+s.column+` = ''`, args...)
+			if err != nil {
 				return err
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected == 0 {
+				// Another worker won the stage between the candidate query and this
+				// transaction. Do not publish a duplicate alert.
+				return nil
 			}
 			return h.Events().PublishTx(jc, tx, "alert", body, alerted{
 				Title: s.title, Body: body, LotID: c.id, EndsAt: c.ends,
