@@ -3,13 +3,43 @@ package bidrl
 import (
 	"net/http"
 	"net/url"
-	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hbaldwin98/control-center/host"
+	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 )
 
 // Lots over HTTP: the catalog, one lot, and the jobs that reprice or enrich it.
+
+const (
+	defaultLotsPerPage = 50
+	maxLotsPerPage     = 100
+	maxLotPage         = 1_000_000
+)
+
+type lotListPage struct {
+	Lots       []lotView
+	Total      int
+	Page       int
+	PerPage    int
+	TotalPages int
+}
+
+const lotSelect = `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, IFNULL(l.description,''), l.current_bid_cents, l.min_bid_cents, l.bid_increment_cents,
+		l.bid_count, l.high_bidder, l.ends_at, l.bidding_extended, l.reserve_met, l.category, l.bucket,
+		IFNULL(a.identification,''), IFNULL(a.basis,''), IFNULL(a.model_or_sku,''), IFNULL(a.title_agreement, 0),
+		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''), IFNULL(v.reused_from_lot_id,''),
+		IFNULL(au.affiliate_id,''), IFNULL(au.affiliate_name,''), IFNULL(au.city,''),
+		IFNULL(f.note,''), IFNULL(f.created_at,''), f.lot_id IS NOT NULL,
+		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)`
+
+const lotFrom = ` FROM bidrl_lots l
+		LEFT JOIN bidrl_auctions au ON au.id = l.auction_id
+		LEFT JOIN bidrl_favorites f ON f.lot_id = l.id
+		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
+		LEFT JOIN bidrl_valuations v ON v.id = (SELECT MAX(id) FROM bidrl_valuations WHERE lot_id = l.id)`
 
 func (p *Plugin) handleReprice(w http.ResponseWriter, r *http.Request) {
 	p.enqueueNamed(w, r, "reprice", repriceArgs{LotID: r.PathValue("id")}, "reprice-"+r.PathValue("id"))
@@ -25,6 +55,11 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
+	page, perPage, err := parseLotPage(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	bucket := r.URL.Query().Get("bucket")
 	category := r.URL.Query().Get("category")
@@ -35,6 +70,7 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var args []any
+	addLotSearch(&where, &args, q)
 	if bucket != "" && bucket != "all" {
 		where += ` AND l.bucket = ?`
 		args = append(args, bucket)
@@ -43,41 +79,28 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		where += ` AND IFNULL(NULLIF(l.category, ''), a.category) = ?`
 		args = append(args, category)
 	}
+	order := "l.id"
 	if ending == "soon" {
-		where += ` AND l.ends_at != ''`
+		now := h.Clock().Now().UTC()
+		where += ` AND l.ends_at > ? AND l.ends_at <= ?`
+		args = append(args, now.Format(time.RFC3339Nano), now.Add(24*time.Hour).Format(time.RFC3339Nano))
+		order = "l.ends_at, l.title, l.id"
 	}
 	if clause, vals := affiliateClause(r.URL.Query()); clause != "" {
 		where += clause
 		args = append(args, vals...)
 	}
-	lots, err := p.queryLots(h, r, where, args...)
+	result, err := p.queryLotsPage(h, r, where, order, page, perPage, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	if p.freshenLots(r.Context(), h, lots) {
-		if refreshed, err := p.queryLots(h, r, where, args...); err == nil {
-			lots = refreshed
+	if p.freshenLots(r.Context(), h, result.Lots) {
+		if refreshed, err := p.queryLotsPage(h, r, where, order, result.Page, perPage, args...); err == nil {
+			result = refreshed
 		}
 	}
-	lots = filterLotsByQuery(lots, q)
-	if ending == "soon" {
-		now := h.Clock().Now()
-		filtered := lots[:0]
-		for _, lot := range lots {
-			if endingSoon(lot.EndsAt, now) {
-				filtered = append(filtered, lot)
-			}
-		}
-		lots = filtered
-		sort.SliceStable(lots, func(i, j int) bool {
-			if lots[i].EndsAt == lots[j].EndsAt {
-				return lots[i].Title < lots[j].Title
-			}
-			return lots[i].EndsAt < lots[j].EndsAt
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+	writeJSON(w, http.StatusOK, lotPagePayload(result, latestEventID(r.Context(), h)))
 }
 
 func (p *Plugin) handleGetLot(w http.ResponseWriter, r *http.Request) {
@@ -113,40 +136,42 @@ func (p *Plugin) handleGetLot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, lotPayload(lot, latestEventID(r.Context(), h)))
 }
 
-func filterLotsByQuery(lots []lotView, q string) []lotView {
-	q = strings.TrimSpace(q)
-	if q == "" {
-		return lots
-	}
-	filtered := lots[:0]
-	for _, lot := range lots {
-		score, _ := matchScore(q, lot.Title, lot.Identification, lot.ModelOrSKU, lot.Category, lot.Description)
-		if score > 0 {
-			filtered = append(filtered, lot)
-		}
-	}
-	return filtered
-}
-
 func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...any) ([]lotView, error) {
-	q := `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, IFNULL(l.description,''), l.current_bid_cents, l.min_bid_cents, l.bid_increment_cents,
-		l.bid_count, l.high_bidder, l.ends_at, l.bidding_extended, l.reserve_met, l.category, l.bucket,
-		IFNULL(a.identification,''), IFNULL(a.basis,''), IFNULL(a.model_or_sku,''), IFNULL(a.title_agreement, 0),
-		v.price_cents, IFNULL(v.kind,''), IFNULL(v.source_url,''), IFNULL(v.cited_text,''), IFNULL(v.source_title,''), IFNULL(v.retrieved_at,''), IFNULL(v.reused_from_lot_id,''),
-		IFNULL(au.affiliate_id,''), IFNULL(au.affiliate_name,''), IFNULL(au.city,''),
-		IFNULL(f.note,''), IFNULL(f.created_at,''), f.lot_id IS NOT NULL,
-		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)
-		FROM bidrl_lots l
-		LEFT JOIN bidrl_auctions au ON au.id = l.auction_id
-		LEFT JOIN bidrl_favorites f ON f.lot_id = l.id
-		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
-		LEFT JOIN bidrl_valuations v ON v.id = (SELECT MAX(id) FROM bidrl_valuations WHERE lot_id = l.id)
-		WHERE ` + where + `
-		ORDER BY l.id`
-	rows, err := h.Store().Query(r.Context(), q, args...)
+	rows, err := h.Store().Query(r.Context(), lotSelect+lotFrom+` WHERE `+where+` ORDER BY l.id`, args...)
 	if err != nil {
 		return nil, err
 	}
+	return scanLotRows(rows, h.Blobs().URL)
+}
+
+func (p *Plugin) queryLotsPage(h host.Host, r *http.Request, where, order string, page, perPage int, args ...any) (lotListPage, error) {
+	var total int
+	if err := h.Store().QueryRow(r.Context(), `SELECT COUNT(*)`+lotFrom+` WHERE `+where, args...).Scan(&total); err != nil {
+		return lotListPage{}, err
+	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + perPage - 1) / perPage
+		if page > totalPages {
+			page = totalPages
+		}
+	}
+	if page < 1 {
+		page = 1
+	}
+	queryArgs := append(append([]any(nil), args...), perPage, (page-1)*perPage)
+	rows, err := h.Store().Query(r.Context(), lotSelect+lotFrom+` WHERE `+where+` ORDER BY `+order+` LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return lotListPage{}, err
+	}
+	lots, err := scanLotRows(rows, h.Blobs().URL)
+	if err != nil {
+		return lotListPage{}, err
+	}
+	return lotListPage{Lots: lots, Total: total, Page: page, PerPage: perPage, TotalPages: totalPages}, nil
+}
+
+func scanLotRows(rows hoststorage.Rows, blobURL func(string) string) ([]lotView, error) {
 	defer rows.Close()
 	out := []lotView{}
 	for rows.Next() {
@@ -176,11 +201,77 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 			l.SourceLabel = src.Label
 		}
 		if thumb != nil && *thumb != "" {
-			l.ThumbURL = h.Blobs().URL(*thumb)
+			l.ThumbURL = blobURL(*thumb)
 		}
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+func parseLotPage(r *http.Request) (int, int, error) {
+	page, err := positiveQueryInt(r, "page", 1)
+	if err != nil {
+		return 0, 0, err
+	}
+	perPage, err := positiveQueryInt(r, "perPage", defaultLotsPerPage)
+	if err != nil {
+		return 0, 0, err
+	}
+	if perPage > maxLotsPerPage {
+		return 0, 0, &queryValueError{message: "perPage must be at most 100"}
+	}
+	return page, perPage, nil
+}
+
+func positiveQueryInt(r *http.Request, name string, fallback int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, &queryValueError{message: name + " must be a positive integer"}
+	}
+	if n > maxLotPage {
+		return 0, &queryValueError{message: name + " is too large"}
+	}
+	return n, nil
+}
+
+type queryValueError struct{ message string }
+
+func (e *queryValueError) Error() string { return e.message }
+
+func lotPagePayload(page lotListPage, eventID int64) map[string]any {
+	return map[string]any{
+		"lots":          page.Lots,
+		"page":          page.Page,
+		"perPage":       page.PerPage,
+		"total":         page.Total,
+		"totalPages":    page.TotalPages,
+		"hasNext":       page.Page < page.TotalPages,
+		"latestEventId": eventID,
+	}
+}
+
+func addLotSearch(where *string, args *[]any, q string) {
+	if strings.TrimSpace(q) == "" {
+		return
+	}
+	tokens := contentTokens(q)
+	if len(tokens) == 0 {
+		*where += ` AND 0`
+		return
+	}
+	terms := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		terms = append(terms, `(LOWER(IFNULL(l.title,'')) LIKE ? OR LOWER(IFNULL(a.identification,'')) LIKE ? OR LOWER(IFNULL(a.model_or_sku,'')) LIKE ? OR LOWER(IFNULL(l.category,'')) LIKE ? OR LOWER(IFNULL(l.description,'')) LIKE ?)`)
+		pattern := "%" + strings.ToLower(token) + "%"
+		for i := 0; i < 5; i++ {
+			*args = append(*args, pattern)
+		}
+	}
+	*where += ` AND (` + strings.Join(terms, " OR ") + `)`
 }
 
 // affiliateClause narrows a lot query to a set of SITES locations. Filtering to

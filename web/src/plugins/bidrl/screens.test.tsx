@@ -12,7 +12,13 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bidrl from "./index";
 import { LotBrowser } from "./lots";
+import { useLiveBids } from "./live";
 import type { Finding, Lot } from "./model";
+
+function LiveProbe({ lots }: { lots: Lot[] }) {
+  const live = useLiveBids(lots);
+  return <span>{live.status}</span>;
+}
 
 const WATCHLIST = {
   id: "wl-1",
@@ -152,6 +158,22 @@ const routes = new Map<string, unknown>([
 ]);
 
 /** Enough of EventSource to see which feeds a screen opens, and that it closes them. */
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = [];
+  private readonly callback: (entries: Array<{ isIntersecting: boolean }>) => void;
+
+  constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) {
+    this.callback = callback;
+    FakeIntersectionObserver.instances.push(this);
+  }
+
+  observe(): void {}
+  disconnect(): void {}
+  trigger(): void {
+    this.callback([{ isIntersecting: true }]);
+  }
+}
+
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   static get opened(): string[] {
@@ -345,6 +367,52 @@ describe("bidrl screens", () => {
     } finally {
       routes.set("/api/plugins/bidrl/lots", { lots: [lot()], latestEventId: 1 });
     }
+  });
+
+  it("bounds live bid topics even if a caller hands it a giant result", async () => {
+    const lots = Array.from({ length: 600 }, (_, index) => lot({ id: String(index + 1) }));
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <LiveProbe lots={lots} />
+        </MemoryRouter>,
+      );
+    });
+    const source = FakeEventSource.opened.find((url) => url.includes("/api/push/bidrl"));
+    expect(source).toBeDefined();
+    const topics = new URL(String(source), "http://x").searchParams.get("topics")?.split(",") ?? [];
+    expect(topics).toHaveLength(100);
+  });
+
+  it("loads the next lot page when its scroll sentinel enters view", async () => {
+    const first = Array.from({ length: 50 }, (_, index) => lot({ id: `page1-${index}`, title: `First ${index}` }));
+    const second = lot({ id: "page2-0", title: "Scrolled lot" });
+    fetchMock.mockImplementation((input: string) => {
+      const url = String(input);
+      const path = url.split("?")[0] ?? "";
+      let body = routes.get(path);
+      if (path === "/api/plugins/bidrl/lots") {
+        body = url.includes("page=2")
+          ? { lots: [second], page: 2, perPage: 50, total: 51, totalPages: 2, hasNext: false, latestEventId: 1 }
+          : { lots: first, page: 1, perPage: 50, total: 51, totalPages: 2, hasNext: true, latestEventId: 1 };
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(body ?? {}), {
+          status: body === undefined ? 404 : 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    await renderAt("/bidrl/lots");
+    expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      FakeIntersectionObserver.instances.at(-1)?.trigger();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("page=2"))).toBe(true);
+    expect(container.textContent).toContain("51 shown");
   });
 
   // A badge that lies is worse than none, so it says nothing until the host reports

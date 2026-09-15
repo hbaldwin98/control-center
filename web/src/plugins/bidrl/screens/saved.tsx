@@ -26,12 +26,12 @@ import {
   overlayBids,
 } from "../model";
 import { usePlace } from "../place";
-import { useFavorites, useLocations, useLotView } from "../data";
+import { useInfiniteFavorites, useLocations, useLotView } from "../data";
 import { useLiveBids, LiveDot } from "../live";
 import { ViewToggle, BidrlTabs } from "../chrome";
 import { Notices } from "../actions";
 import { FavoriteChanged } from "../lotparts";
-import { LotBrowser } from "../lots";
+import { LotBrowser, LotLoadMore } from "../lots";
 
 /**
  * Saved lots. The same card/table browser and the same location and category filters as
@@ -48,10 +48,10 @@ export function SavedLots() {
   const [affiliate, setAffiliate] = useQueryState("affiliate");
   const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
-  const snap = useFavorites(q, category, affiliate);
+  const snap = useInfiniteFavorites(q, category, affiliate);
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
-  const live = useLiveBids(snap.status === "ready" ? snap.data.lots : undefined, !disabled);
+  const live = useLiveBids(snap.status === "ready" ? snap.lots : undefined, !disabled);
   const selected = parseAffiliateParam(affiliate);
   const narrowed = Boolean(q || affiliate) || category !== "all";
   usePlace("/bidrl/saved", snap.status === "ready");
@@ -147,28 +147,35 @@ export function SavedLots() {
             </Field>
           ) : null}
           {snap.status === "ready" ? (
-            <Hint>{snap.data.lots.length} saved</Hint>
+            <Hint>{snap.lots.length}{snap.hasMore ? " loaded" : " saved"}</Hint>
           ) : null}
           {snap.status === "loading" ? <Loading label="Loading saved lots…" /> : null}
           {snap.status === "error" && !disabled ? (
-            <Callout tone="danger">{snap.error.message}</Callout>
+            <Callout tone="danger">{snap.error?.message ?? "Could not load saved lots."}</Callout>
           ) : null}
           {snap.status === "ready" ? (
             // Unstarring a row takes it off this list, so the list reloads the moment a
             // star changes rather than waiting for a refresh to notice.
             <FavoriteChanged.Provider value={snap.reload}>
-              <LotBrowser
-                lots={overlayBids(snap.data.lots, live.bids)}
-                empty={
-                  narrowed
-                    ? "No saved lot matches these filters."
-                    : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
-                }
-                view={view}
-                // Every row here was chosen on purpose, so two similar lots must both
-                // show rather than collapsing into "1 similar".
-                groupSimilar={false}
-              />
+              <>
+                <LotBrowser
+                  lots={overlayBids(snap.lots, live.bids)}
+                  empty={
+                    narrowed
+                      ? "No saved lot matches these filters."
+                      : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
+                  }
+                  view={view}
+                  // Every row here was chosen on purpose, so two similar lots must both
+                  // show rather than collapsing into "1 similar".
+                  groupSimilar={false}
+                />
+                <LotLoadMore
+                  hasMore={snap.hasMore}
+                  loading={snap.loadingMore}
+                  onLoadMore={snap.loadMore}
+                />
+              </>
             </FavoriteChanged.Provider>
           ) : null}
         </Card>

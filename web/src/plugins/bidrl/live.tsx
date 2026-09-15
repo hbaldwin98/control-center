@@ -31,6 +31,7 @@ export type LiveStatus = "off" | "live";
 export type LiveBids = { status: LiveStatus; bids: BidOverlay };
 
 const noBids: BidOverlay = {};
+const maxLiveTopics = 100;
 
 /**
  * Watches the lots on screen through the host's push endpoint.
@@ -41,10 +42,13 @@ const noBids: BidOverlay = {};
  * does is name the topics -- one per lot -- and fold the messages that come back.
  */
 export function useLiveBids(lots: readonly Lot[] | undefined, enabled = true): LiveBids {
-  const key = useMemo(
-    () => Array.from(new Set((lots ?? []).map((lot) => lot.id).filter(Boolean))).sort().join(","),
-    [lots],
-  );
+  const key = useMemo(() => {
+    const ids = Array.from(new Set((lots ?? []).map((lot) => lot.id).filter(Boolean)));
+    // Infinite-scroll screens retain earlier pages in the DOM. Keep the live window
+    // bounded to the newest rows so a long scroll can never recreate the oversized
+    // topics= request this feed used to produce.
+    return ids.slice(-maxLiveTopics).sort().join(",");
+  }, [lots]);
   const [status, setStatus] = useState<LiveStatus>("off");
   const [bids, setBids] = useState<BidOverlay>(noBids);
   useEffect(() => {

@@ -132,22 +132,25 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var args []any
+	addLotSearch(&where, &args, q)
 	if clause, vals := affiliateClause(r.URL.Query()); clause != "" {
 		where += clause
 		args = append(args, vals...)
 	}
-	lots, err := p.queryLots(h, r, where, args...)
+	result, err := p.queryLotsPage(h, r, where, "l.id", 1, overviewRows, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	if p.freshenLots(r.Context(), h, lots) {
-		if refreshed, err := p.queryLots(h, r, where, args...); err == nil {
-			lots = refreshed
+	if p.freshenLots(r.Context(), h, result.Lots) {
+		if refreshed, err := p.queryLotsPage(h, r, where, "l.id", result.Page, overviewRows, args...); err == nil {
+			result = refreshed
 		}
 	}
-	lots = filterLotsByQuery(lots, q)
-	writeJSON(w, http.StatusOK, map[string]any{"filter": filter, "q": q, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+	payload := lotPagePayload(result, latestEventID(r.Context(), h))
+	payload["filter"] = filter
+	payload["q"] = q
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // feedWhere turns a named feed preset into its SQL predicate. The catalog accepts the

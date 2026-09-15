@@ -1,7 +1,9 @@
 /** A list of lots, as cards or as a table, with near-identical lots folded together. */
 import {
   memo,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -10,6 +12,7 @@ import {
   Countdown,
   Dash,
   EmptyState,
+  Hint,
   Link,
   Table,
   useNow,
@@ -130,6 +133,37 @@ export function SimilarList({ lots }: { lots: Lot[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+export function LotLoadMore({
+  hasMore,
+  loading,
+  onLoadMore,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || !hasMore || loading || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) onLoadMore();
+      },
+      { rootMargin: "800px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loading, onLoadMore]);
+
+  if (!hasMore && !loading) return null;
+  return (
+    <div ref={ref} className="bidrl-load-more" aria-live="polite">
+      {loading ? <Hint>Loading more lots…</Hint> : null}
     </div>
   );
 }

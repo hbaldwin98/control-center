@@ -243,7 +243,8 @@ POST   /watchlists/{id}/run        run the funnel now, without waiting for cron
 GET    /findings?state=&watchlist=&affiliate=&sort=
 POST   /findings/{id}/accept       POST  /findings/{id}/reject
 POST   /lots/{id}/favorite         DELETE /lots/{id}/favorite
-GET    /favorites?sort=&affiliate=&category=
+GET    /favorites?affiliate=&category=&q=&page=&perPage=
+       paged response: lots plus page, perPage, total, totalPages, hasNext
 GET    /automation                 status, next tick, throttle latch
 POST   /automation/resume          clear the latch
 ```

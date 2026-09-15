@@ -803,6 +803,14 @@ tr.bidrl-similar-row td:first-child {
   align-items: flex-start;
 }
 
+.bidrl-load-more {
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) 0;
+}
+
 /* Live feed indicator.
    Only rendered while bids are actually streaming, so it needs no "off" state. The dot
    pulses because a static one reads as a status light that might be stale. */

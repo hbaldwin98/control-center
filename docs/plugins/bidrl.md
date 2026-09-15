@@ -289,19 +289,24 @@ right.
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
 | Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — crawl and watchlist matching, both inert while `automation.enabled` is false |
 | Jobs | `warn` (`*/15 * * * *`) — local SQL; publishes `bidrl.alert` once when a saved lot is inside the 24-hour close window |
-| API | `GET/POST /api/plugins/bidrl/auctions`, `GET/DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
+| API | `GET/POST /api/plugins/bidrl/auctions`, `GET /auctions/{id}?page=&perPage=`, `DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
 | Live | `GET /api/push/bidrl?topics=lot:<id>,…` — host-owned; one `lot:<id>` topic per lot on screen, joined to the BidRL feed while anyone is watching |
 | Events | `bids.refreshed` — many lots moved, refetch. One lot's new price is a push message, not an event: it has no history worth replaying. |
 | API | `POST /cleanup` — remove ended auctions, leftover ended lots, and ended SITES listings; never a saved lot, whose auction is hidden instead |
-| API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=` |
+| API | `POST/DELETE /lots/{id}/favorite`, `GET /favorites?q=&category=&affiliate=&page=&perPage=` — bounded pages with `page`, `perPage`, `total`, `totalPages`, and `hasNext` metadata |
 | API | `GET/POST /watchlists`, `PATCH/DELETE /watchlists/{id}`, `POST /watchlists/{id}/run` |
 | API | `GET /findings?state=&watchlist=`, `POST /findings/{id}/accept`, `POST /findings/{id}/reject` |
 | API | `GET /automation`, `POST /automation/resume` — schedule state and clearing the throttle latch |
 | API | `GET /locations` — the SITES locations you have lots at, with lot counts |
-| API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
+| API | `GET /lots?q=&bucket=&category=&ending=soon&affiliate=19,7&page=&perPage=`, `GET /lots/{id}`, `POST /lots/{id}/reprice`, `POST /lots/{id}/enrich`, `GET /feed?filter=` |
 | API | `POST/GET /search`, `POST/GET /intent`, `GET /sites/auctions`, `POST /sites/refresh` |
 | Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned`, `bidrl.finding.created`, `bidrl.alert` |
 | UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/findings`, `/bidrl/watchlists`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
+
+Lot list endpoints default to 50 rows and cap `perPage` at 100. The catalog, Saved, and auction
+screens load the next page automatically when their scroll sentinel enters view; there is no
+Next button. Live bid subscriptions are bounded to the newest 100 loaded rows, so scrolling
+through a large result can never rebuild an oversized comma-separated `topics` URL.
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at

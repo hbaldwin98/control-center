@@ -23,17 +23,17 @@ import {
   overlayBids,
 } from "../model";
 import { api } from "../api";
-import { useAuction, useLotView } from "../data";
+import { useInfiniteAuction, useLotView } from "../data";
 import { useLiveBids, LiveDot } from "../live";
 import { ViewToggle, BidrlLink, BidrlTabs } from "../chrome";
 import { useAction, Notices } from "../actions";
-import { LotBrowser } from "../lots";
+import { LotBrowser, LotLoadMore } from "../lots";
 
 export function AuctionView() {
   const id = useRouteParams().id ?? "";
-  const snap = useAuction(id);
+  const snap = useInfiniteAuction(id);
   const live = useLiveBids(
-    snap.status === "ready" ? snap.data.lots : undefined,
+    snap.status === "ready" ? snap.lots : undefined,
     !(snap.error instanceof PluginDisabledError),
   );
   const [view, setView] = useLotView();
@@ -56,7 +56,7 @@ export function AuctionView() {
   };
   const pending = busy !== null || deleting;
   const disabled = snap.error instanceof PluginDisabledError;
-  const auction = snap.status === "ready" ? snap.data.auction : null;
+  const auction = snap.latest?.auction ?? null;
   return (
     <Page>
       <PageHeader
@@ -73,7 +73,7 @@ export function AuctionView() {
         </div>
         <Notices message={notice} error={error} disabled={disabled} />
         {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
-        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
+        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error?.message ?? "Could not load auction."}</Callout> : null}
         {auction ? (
           <Grid density="metric">
             <Metric label="Lots" value={String(auction.lotCount)} />
@@ -109,11 +109,18 @@ export function AuctionView() {
         </div>
         {snap.status === "ready" ? (
           <Card title="Lots" actions={<ViewToggle value={view} onChange={setView} />}>
-            <LotBrowser
-              lots={overlayBids(snap.data.lots, live.bids)}
-              empty="This auction has no lots yet."
-              view={view}
-            />
+            <>
+              <LotBrowser
+                lots={overlayBids(snap.lots, live.bids)}
+                empty="This auction has no lots yet."
+                view={view}
+              />
+              <LotLoadMore
+                hasMore={snap.hasMore}
+                loading={snap.loadingMore}
+                onLoadMore={snap.loadMore}
+              />
+            </>
           </Card>
         ) : null}
       </Stack>

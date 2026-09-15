@@ -59,12 +59,20 @@ export type Lot = {
   latestEventId?: number;
 };
 
-export type LotsPage = {
+export type LotPageMeta = {
+  page?: number;
+  perPage?: number;
+  total?: number;
+  totalPages?: number;
+  hasNext?: boolean;
+};
+
+export type LotsPage = LotPageMeta & {
   lots: Lot[];
   latestEventId: number;
 };
 
-export type FavoritesPage = {
+export type FavoritesPage = LotPageMeta & {
   lots: Lot[];
   latestEventId: number;
 };
@@ -210,7 +218,7 @@ export function watchlistRules(
   return parts.length > 0 ? parts.join(" · ") : "Anywhere, any category, any price";
 }
 
-export type FeedPage = {
+export type FeedPage = LotPageMeta & {
   filter: string;
   q: string;
   lots: Lot[];
@@ -230,7 +238,7 @@ export const LOT_CATEGORIES = [
   "other",
 ] as const;
 
-export type AuctionPage = {
+export type AuctionPage = LotPageMeta & {
   auction: Auction;
   lots: Lot[];
   latestEventId: number;

@@ -2,7 +2,6 @@ package bidrl
 
 import (
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 )
@@ -68,8 +67,14 @@ func (p *Plugin) handleListFavorites(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "plugin_disabled", "plugin disabled")
 		return
 	}
+	page, perPage, err := parseLotPage(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	where := `f.lot_id IS NOT NULL`
 	var args []any
+	addLotSearch(&where, &args, strings.TrimSpace(r.URL.Query().Get("q")))
 	if category := r.URL.Query().Get("category"); category != "" && category != "all" {
 		where += ` AND IFNULL(NULLIF(l.category, ''), a.category) = ?`
 		args = append(args, category)
@@ -78,17 +83,15 @@ func (p *Plugin) handleListFavorites(w http.ResponseWriter, r *http.Request) {
 		where += clause
 		args = append(args, vals...)
 	}
-	lots, err := p.queryLots(h, r, where, args...)
+	result, err := p.queryLotsPage(h, r, where, "f.created_at DESC, l.id", page, perPage, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	if p.freshenLots(r.Context(), h, lots) {
-		if refreshed, err := p.queryLots(h, r, where, args...); err == nil {
-			lots = refreshed
+	if p.freshenLots(r.Context(), h, result.Lots) {
+		if refreshed, err := p.queryLotsPage(h, r, where, "f.created_at DESC, l.id", result.Page, perPage, args...); err == nil {
+			result = refreshed
 		}
 	}
-	lots = filterLotsByQuery(lots, strings.TrimSpace(r.URL.Query().Get("q")))
-	sort.SliceStable(lots, func(i, j int) bool { return lots[i].SavedAt > lots[j].SavedAt })
-	writeJSON(w, http.StatusOK, map[string]any{"lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+	writeJSON(w, http.StatusOK, lotPagePayload(result, latestEventID(r.Context(), h)))
 }

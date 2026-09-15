@@ -29,11 +29,11 @@ import {
   overlayBids,
 } from "../model";
 import { usePlace } from "../place";
-import { useLots, useLocations, useLotView } from "../data";
+import { useInfiniteLots, useLocations, useLotView } from "../data";
 import { useLiveBids, LiveDot } from "../live";
 import { ViewToggle, BidrlTabs } from "../chrome";
 import { Notices } from "../actions";
-import { LotBrowser } from "../lots";
+import { LotBrowser, LotLoadMore } from "../lots";
 
 /**
  * The one catalog. Its whole state — preset, text, bucket, category, ending, locations — lives in
@@ -49,10 +49,10 @@ export function LotsCatalog() {
   const [affiliate, setAffiliate] = useQueryState("affiliate");
   const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
-  const snap = useLots(filter, q, bucket, category, ending, affiliate);
+  const snap = useInfiniteLots(filter, q, bucket, category, ending, affiliate);
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
-  const live = useLiveBids(snap.status === "ready" ? snap.data.lots : undefined, !disabled);
+  const live = useLiveBids(snap.status === "ready" ? snap.lots : undefined, !disabled);
   const selected = parseAffiliateParam(affiliate);
   const narrowed =
     Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
@@ -173,20 +173,27 @@ export function LotsCatalog() {
           ) : null}
           <Hint>
             {filterLabel(filter)}
-            {snap.status === "ready" ? ` · ${snap.data.lots.length} shown` : ""}
+            {snap.status === "ready" ? ` · ${snap.lots.length}${snap.hasMore ? " loaded" : " shown"}` : ""}
           </Hint>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
-          {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error.message}</Callout> : null}
+          {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error?.message ?? "Could not load lots."}</Callout> : null}
           {snap.status === "ready" ? (
-            <LotBrowser
-              lots={overlayBids(snap.data.lots, live.bids)}
-              empty={
-                narrowed
-                  ? "No lot matches these filters. Clear them to see the whole catalog."
-                  : "No lots collected yet. Collect an auction on the Auctions tab."
-              }
-              view={view}
-            />
+            <>
+              <LotBrowser
+                lots={overlayBids(snap.lots, live.bids)}
+                empty={
+                  narrowed
+                    ? "No lot matches these filters. Clear them to see the whole catalog."
+                    : "No lots collected yet. Collect an auction on the Auctions tab."
+                }
+                view={view}
+              />
+              <LotLoadMore
+                hasMore={snap.hasMore}
+                loading={snap.loadingMore}
+                onLoadMore={snap.loadMore}
+              />
+            </>
           ) : null}
         </Card>
       </Stack>

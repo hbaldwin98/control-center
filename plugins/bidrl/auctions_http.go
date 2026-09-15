@@ -75,15 +75,22 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "auction not found")
 		return
 	}
+	page, perPage, err := parseLotPage(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	// One catalog request covers every lot below, so the page can be current on open
-	// instead of waiting for someone to press refresh.
+	// instead of waiting for someone to press refresh. The response itself stays bounded.
 	p.freshenAuctions(r.Context(), h, []string{id})
-	lots, err := p.queryLots(h, r, `l.auction_id = ?`, id)
+	result, err := p.queryLotsPage(h, r, `l.auction_id = ?`, "l.id", page, perPage, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"auction": a, "lots": lots, "latestEventId": latestEventID(r.Context(), h)})
+	payload := lotPagePayload(result, latestEventID(r.Context(), h))
+	payload["auction"] = a
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // handleGetAuctionIndex serves just enough of an auction's lots to page through them:
