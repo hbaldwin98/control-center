@@ -116,10 +116,7 @@ export function LotView() {
                 </div>
               </section>
             ) : null}
-            <Card
-              title="Current listing"
-              className="bidrl-lot-current"
-            >
+            <Card title="Current listing" className="bidrl-lot-current">
               <div className="bidrl-lot-current__metrics">
                 <div className="bidrl-lot-current__identity">
                   <span>Identity</span>
@@ -140,7 +137,9 @@ export function LotView() {
                 <div>
                   <span>Bids</span>
                   <strong>{lot.bidCount}</strong>
-                  <small>{lot.bidCount === 1 ? "1 bid" : `${lot.bidCount} bids`}</small>
+                  <small>
+                    {lot.bidCount === 1 ? "1 bid" : `${lot.bidCount} bids`}
+                  </small>
                 </div>
                 <div>
                   <span>Bid price</span>
@@ -152,7 +151,9 @@ export function LotView() {
                   <strong>
                     {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
                   </strong>
-                  <small>{lot.endsAt ? "Auction close" : "No close time"}</small>
+                  <small>
+                    {lot.endsAt ? "Auction close" : "No close time"}
+                  </small>
                 </div>
               </div>
               {lot.url ? (

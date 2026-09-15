@@ -419,12 +419,18 @@ describe("bidrl screens", () => {
   it("keeps the item name and photos above the current listing", async () => {
     const path = "/api/plugins/bidrl/lots/1001";
     const before = routes.get(path);
-    routes.set(path, { ...lot(), photoUrls: ["/one.jpg", "/two.jpg"], latestEventId: 1 });
+    routes.set(path, {
+      ...lot(),
+      photoUrls: ["/one.jpg", "/two.jpg"],
+      latestEventId: 1,
+    });
     try {
       await renderAt("/bidrl/lot/1001");
       const photos = container.querySelector(".bidrl-lot-hero");
       const current = container.querySelector(".bidrl-lot-current");
-      expect(container.querySelector("h1")?.textContent).toContain("Keurig coffee maker");
+      expect(container.querySelector("h1")?.textContent).toContain(
+        "Keurig coffee maker",
+      );
       expect(photos?.compareDocumentPosition(current ?? photos)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
       );

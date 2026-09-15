@@ -1225,7 +1225,9 @@ tr.bidrl-similar-row td:first-child {
     margin-bottom: var(--space-2);
   }
 
-  .cc-page:has(.cc-tabs[aria-label="BIDRL sections"]) .cc-page__header > .cc-row {
+  .cc-page:has(.cc-tabs[aria-label="BIDRL sections"])
+    .cc-page__header
+    > .cc-row {
     width: auto;
     flex: 0 0 auto;
     justify-content: flex-end;
