@@ -82,8 +82,13 @@ func (p *Plugin) handleGetAuction(w http.ResponseWriter, r *http.Request) {
 	}
 	// One catalog request covers every lot below, so the page can be current on open
 	// instead of waiting for someone to press refresh. The response itself stays bounded.
+	order, err := lotOrder(r.URL.Query().Get("sort"), "lot.asc")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	p.freshenAuctions(r.Context(), h, []string{id})
-	result, err := p.queryLotsPage(h, r, `l.auction_id = ?`, "l.id", page, perPage, id)
+	result, err := p.queryLotsPage(h, r, `l.auction_id = ?`, order, page, perPage, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return

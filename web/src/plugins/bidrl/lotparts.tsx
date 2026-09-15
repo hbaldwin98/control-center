@@ -222,11 +222,44 @@ export function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: 
   );
 }
 
+/** The compact identity block used by the triage table. It avoids repeating a long
+ * external-link label in every row while keeping lot code, model, and location visible. */
+export function LotTableTitle({ lot }: { lot: Lot }) {
+  const ident = lot.identification && lot.identification !== lot.title ? lot.identification : "";
+  return (
+    <div className="bidrl-table-item">
+      <LotThumbLink lot={lot} className="bidrl-table-thumb" />
+      <div className="bidrl-table-item__body">
+        <div className="bidrl-table-item__eyebrow">
+          {lot.lotCode ? `Lot ${lot.lotCode}` : "Lot"}
+          {lot.category ? <Badge>{lot.category}</Badge> : null}
+          <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
+        </div>
+        <div className="bidrl-table-item__title">
+          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</Link>
+          {lot.url ? (
+            <BidrlLink
+              href={lot.url}
+              ariaLabel={`Open ${lot.title || lot.id} on BidRL`}
+            >
+              ↗
+            </BidrlLink>
+          ) : null}
+        </div>
+        <div className="bidrl-table-item__meta">
+          {ident ? <span title={ident}>{ident}</span> : null}
+          <LotLocation lot={lot} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LotComparable({ lot }: { lot: Lot }) {
-  if (lot.priceCents == null) return <Dash />;
+  if (lot.priceCents == null) return <span className="bidrl-table-comp__value"><Dash /></span>;
   return (
     <>
-      {cents(lot.priceCents)}
+      <span className="bidrl-table-comp__value">{cents(lot.priceCents)}</span>
       <Hint>
         {lot.sourceUrl ? (
           <a href={lot.sourceUrl} target="_blank" rel="noreferrer">

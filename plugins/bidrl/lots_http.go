@@ -19,6 +19,9 @@ const (
 	maxLotPage         = 1_000_000
 )
 
+const lotGapOrderExpr = `CASE WHEN v.price_cents > 0 AND l.current_bid_cents >= 0
+	THEN (v.price_cents - l.current_bid_cents) * 1.0 / v.price_cents END`
+
 type lotListPage struct {
 	Lots       []lotView
 	Total      int
@@ -35,11 +38,17 @@ const lotSelect = `SELECT l.id, l.auction_id, l.url, l.lot_code, l.title, IFNULL
 		IFNULL(f.note,''), IFNULL(f.created_at,''), f.lot_id IS NOT NULL,
 		(SELECT blob_key FROM bidrl_images WHERE lot_id = l.id ORDER BY ordinal LIMIT 1)`
 
-const lotFrom = ` FROM bidrl_lots l
+const lotBaseFrom = ` FROM bidrl_lots l
 		LEFT JOIN bidrl_auctions au ON au.id = l.auction_id
-		LEFT JOIN bidrl_favorites f ON f.lot_id = l.id
-		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)
+		LEFT JOIN bidrl_favorites f ON f.lot_id = l.id`
+
+const lotAnalysisFrom = `
+		LEFT JOIN bidrl_analyses a ON a.id = (SELECT MAX(id) FROM bidrl_analyses WHERE lot_id = l.id)`
+
+const lotValuationFrom = `
 		LEFT JOIN bidrl_valuations v ON v.id = (SELECT MAX(id) FROM bidrl_valuations WHERE lot_id = l.id)`
+
+const lotFrom = lotBaseFrom + lotAnalysisFrom + lotValuationFrom
 
 func (p *Plugin) handleReprice(w http.ResponseWriter, r *http.Request) {
 	p.enqueueNamed(w, r, "reprice", repriceArgs{LotID: r.PathValue("id")}, "reprice-"+r.PathValue("id"))
@@ -64,7 +73,8 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 	bucket := r.URL.Query().Get("bucket")
 	category := r.URL.Query().Get("category")
 	ending := r.URL.Query().Get("ending")
-	where, ok := feedWhere(r.URL.Query().Get("filter"))
+	filter := r.URL.Query().Get("filter")
+	where, ok := feedWhere(filter)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad_request", "unknown filter")
 		return
@@ -79,12 +89,19 @@ func (p *Plugin) handleListLots(w http.ResponseWriter, r *http.Request) {
 		where += ` AND IFNULL(NULLIF(l.category, ''), a.category) = ?`
 		args = append(args, category)
 	}
-	order := "l.id"
+	defaultSort := "lot.asc"
 	if ending == "soon" {
 		now := h.Clock().Now().UTC()
 		where += ` AND l.ends_at > ? AND l.ends_at <= ?`
 		args = append(args, now.Format(time.RFC3339Nano), now.Add(24*time.Hour).Format(time.RFC3339Nano))
-		order = "l.ends_at, l.title, l.id"
+		defaultSort = "ends.asc"
+	} else if filter == "deals" || bucket == "priced" || bucket == "worth_opening" {
+		defaultSort = "gap.desc"
+	}
+	order, err := lotOrder(r.URL.Query().Get("sort"), defaultSort)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
 	}
 	if clause, vals := affiliateClause(r.URL.Query()); clause != "" {
 		where += clause
@@ -146,7 +163,7 @@ func (p *Plugin) queryLots(h host.Host, r *http.Request, where string, args ...a
 
 func (p *Plugin) queryLotsPage(h host.Host, r *http.Request, where, order string, page, perPage int, args ...any) (lotListPage, error) {
 	var total int
-	if err := h.Store().QueryRow(r.Context(), `SELECT COUNT(*)`+lotFrom+` WHERE `+where, args...).Scan(&total); err != nil {
+	if err := h.Store().QueryRow(r.Context(), `SELECT COUNT(DISTINCT l.id)`+lotCountFrom(where)+` WHERE `+where, args...).Scan(&total); err != nil {
 		return lotListPage{}, err
 	}
 	totalPages := 0
@@ -169,6 +186,29 @@ func (p *Plugin) queryLotsPage(h host.Host, r *http.Request, where, order string
 		return lotListPage{}, err
 	}
 	return lotListPage{Lots: lots, Total: total, Page: page, PerPage: perPage, TotalPages: totalPages}, nil
+}
+
+// lotCountFrom deliberately avoids the latest analysis and valuation joins unless the
+// predicate needs them. The list query must still join both tables to render a row, but
+// counting a page should not walk the historical analysis/valuation tables for every lot.
+func lotCountFrom(where string) string {
+	from := lotBaseFrom
+	if strings.Contains(where, "a.") {
+		from += lotAnalysisFrom
+	}
+	if strings.Contains(where, "v.") {
+		from += lotValuationFrom
+	}
+	return from
+}
+
+func (p *Plugin) queryLotsLimited(h host.Host, r *http.Request, where, order string, limit int, args ...any) ([]lotView, error) {
+	queryArgs := append(append([]any(nil), args...), limit)
+	rows, err := h.Store().Query(r.Context(), lotSelect+lotFrom+` WHERE `+where+` ORDER BY `+order+` LIMIT ?`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	return scanLotRows(rows, h.Blobs().URL)
 }
 
 func scanLotRows(rows hoststorage.Rows, blobURL func(string) string) ([]lotView, error) {
@@ -206,6 +246,53 @@ func scanLotRows(rows hoststorage.Rows, blobURL func(string) string) ([]lotView,
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+func lotOrder(raw, fallback string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		raw = fallback
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) > 2 || strings.TrimSpace(parts[0]) == "" {
+		return "", &queryValueError{message: "sort must be a known column and direction"}
+	}
+	key := strings.TrimSpace(parts[0])
+	direction := ""
+	if len(parts) == 2 {
+		direction = strings.ToLower(strings.TrimSpace(parts[1]))
+	}
+	if direction == "" {
+		switch key {
+		case "gap", "price", "saved":
+			direction = "desc"
+		default:
+			direction = "asc"
+		}
+	}
+	if direction != "asc" && direction != "desc" {
+		return "", &queryValueError{message: "sort direction must be asc or desc"}
+	}
+	expressions := map[string]string{
+		"lot":      "l.id",
+		"name":     "l.title",
+		"bid":      "l.current_bid_cents",
+		"ends":     "l.ends_at",
+		"location": "COALESCE(NULLIF(au.city, ''), au.affiliate_name)",
+		"category": "COALESCE(NULLIF(l.category, ''), a.category)",
+		"price":    "v.price_cents",
+		"gap":      lotGapOrderExpr,
+		"bucket":   "l.bucket",
+		"saved":    "f.created_at",
+	}
+	expr, ok := expressions[key]
+	if !ok {
+		return "", &queryValueError{message: "sort must be a known column and direction"}
+	}
+	numeric := key == "bid" || key == "price" || key == "gap"
+	if numeric {
+		return `CASE WHEN (` + expr + `) IS NULL THEN 1 ELSE 0 END, (` + expr + `) ` + direction + `, l.id`, nil
+	}
+	return `CASE WHEN IFNULL(` + expr + `, '') = '' THEN 1 ELSE 0 END, ` + expr + ` ` + direction + `, l.id`, nil
 }
 
 func parseLotPage(r *http.Request) (int, int, error) {
@@ -272,6 +359,28 @@ func addLotSearch(where *string, args *[]any, q string) {
 		}
 	}
 	*where += ` AND (` + strings.Join(terms, " OR ") + `)`
+}
+
+// lotIDWhere lets endpoints that already know the lot ids they need avoid loading the
+// entire catalog just to assemble a response (findings and intent results use this).
+func lotIDWhere(ids []string) (string, []any) {
+	args := make([]any, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return "0", nil
+	}
+	return "l.id IN (" + placeholders(len(args)) + ")", args
 }
 
 // affiliateClause narrows a lot query to a set of SITES locations. Filtering to

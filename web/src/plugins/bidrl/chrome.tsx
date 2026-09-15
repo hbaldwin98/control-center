@@ -32,10 +32,18 @@ export function ViewToggle({ value, onChange }: { value: "grid" | "table"; onCha
   );
 }
 
-export function BidrlLink({ href, children }: { href: string; children?: string }) {
+export function BidrlLink({
+  href,
+  children,
+  ariaLabel,
+}: {
+  href: string;
+  children?: string;
+  ariaLabel?: string;
+}) {
   if (!href) return null;
   return (
-    <a href={href} target="_blank" rel="noreferrer">
+    <a href={href} target="_blank" rel="noreferrer" aria-label={ariaLabel}>
       {children ?? "Open on BidRL"}
     </a>
   );

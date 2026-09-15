@@ -83,13 +83,18 @@ func (p *Plugin) handleListFavorites(w http.ResponseWriter, r *http.Request) {
 		where += clause
 		args = append(args, vals...)
 	}
-	result, err := p.queryLotsPage(h, r, where, "f.created_at DESC, l.id", page, perPage, args...)
+	order, err := lotOrder(r.URL.Query().Get("sort"), "saved.desc")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	result, err := p.queryLotsPage(h, r, where, order, page, perPage, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	if p.freshenLots(r.Context(), h, result.Lots) {
-		if refreshed, err := p.queryLotsPage(h, r, where, "f.created_at DESC, l.id", result.Page, perPage, args...); err == nil {
+		if refreshed, err := p.queryLotsPage(h, r, where, order, result.Page, perPage, args...); err == nil {
 			result = refreshed
 		}
 	}

@@ -597,6 +597,32 @@ export const LOT_SORT_DEFAULTS: Record<LotSortColumn, SortDir> = {
   why: "asc",
 };
 
+export function defaultLotSort(
+  filter: string,
+  bucket: string,
+  ending: string,
+): SortState<LotSortColumn> {
+  if (ending === "soon") return { column: "ends", dir: "asc" };
+  if (filter === "deals" || bucket === "priced" || bucket === "worth_opening") {
+    return { column: "gap", dir: "desc" };
+  }
+  return { column: "lot", dir: "asc" };
+}
+
+export function lotSortParam(sort: SortState<LotSortColumn>): string {
+  return `${sort.column}.${sort.dir}`;
+}
+
+export function parseLotSort(
+  raw: string,
+  fallback: SortState<LotSortColumn>,
+): SortState<LotSortColumn> {
+  const [column, direction] = raw.split(".");
+  if (!column || !(column in LOT_SORT_DEFAULTS)) return fallback;
+  if (direction !== "asc" && direction !== "desc") return fallback;
+  return { column: column as LotSortColumn, dir: direction };
+}
+
 export const AUCTION_SORT_DEFAULTS: Record<AuctionSortColumn, SortDir> = {
   title: "asc",
   status: "asc",

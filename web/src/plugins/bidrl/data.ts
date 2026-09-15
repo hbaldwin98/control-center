@@ -179,10 +179,11 @@ export function useInfiniteLots(
   category: string,
   ending: string,
   affiliate: string,
+  sort: string,
 ): InfiniteLotsResult {
-  const key = ["lots", filter, q, bucket, category, ending, affiliate].join("\u0000");
+  const key = ["lots", filter, q, bucket, category, ending, affiliate, sort].join("\u0000");
   const loadPage = useCallback(async (page: number, signal: AbortSignal) => {
-    const params = new URLSearchParams({ page: String(page), perPage: String(LOT_PAGE_SIZE) });
+    const params = new URLSearchParams({ page: String(page), perPage: String(LOT_PAGE_SIZE), sort });
     if (filter) params.set("filter", filter);
     if (q.trim()) params.set("q", q.trim());
     if (bucket && bucket !== "all") params.set("bucket", bucket);
@@ -191,7 +192,7 @@ export function useInfiniteLots(
     if (affiliate) params.set("affiliate", affiliate);
     const data = await api.get<LotsPage>(`/lots?${params}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [affiliate, bucket, category, ending, filter, q]);
+  }, [affiliate, bucket, category, ending, filter, q, sort]);
   return useInfiniteLotPages(key, loadPage);
 }
 
@@ -199,26 +200,27 @@ export function useInfiniteFavorites(
   q: string,
   category: string,
   affiliate: string,
+  sort: string,
 ): InfiniteLotsResult {
-  const key = ["favorites", q, category, affiliate].join("\u0000");
+  const key = ["favorites", q, category, affiliate, sort].join("\u0000");
   const loadPage = useCallback(async (page: number, signal: AbortSignal) => {
-    const params = new URLSearchParams({ page: String(page), perPage: String(LOT_PAGE_SIZE) });
+    const params = new URLSearchParams({ page: String(page), perPage: String(LOT_PAGE_SIZE), sort });
     if (q.trim()) params.set("q", q.trim());
     if (category && category !== "all") params.set("category", category);
     if (affiliate) params.set("affiliate", affiliate);
     const data = await api.get<FavoritesPage>(`/favorites?${params}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [affiliate, category, q]);
+  }, [affiliate, category, q, sort]);
   return useInfiniteLotPages(key, loadPage);
 }
 
-export function useInfiniteAuction(id: string): InfiniteLotsResult<AuctionPage> {
-  const key = ["auction", id].join("\u0000");
+export function useInfiniteAuction(id: string, sort: string): InfiniteLotsResult<AuctionPage> {
+  const key = ["auction", id, sort].join("\u0000");
   const loadPage = useCallback(async (page: number, signal: AbortSignal) => {
-    const params = new URLSearchParams({ page: String(page), perPage: String(LOT_PAGE_SIZE) });
+    const params = new URLSearchParams({ page: String(page), perPage: String(LOT_PAGE_SIZE), sort });
     const data = await api.get<AuctionPage>(`/auctions/${encodeURIComponent(id)}?${params}`, signal);
     return { data, asOfEventId: eventBoundary(data.latestEventId) };
-  }, [id]);
+  }, [id, sort]);
   return useInfiniteLotPages(key, loadPage);
 }
 

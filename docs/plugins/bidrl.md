@@ -303,10 +303,12 @@ right.
 | Events | `bidrl.auction.collected`, `bidrl.lot.analyzed`, `bidrl.lot.priced`, `bidrl.lot.enriched`, `bidrl.deal_found`, `bidrl.scan.completed`, `bidrl.bids.refreshed`, `bidrl.search.completed`, `bidrl.intent.completed`, `bidrl.sites.discovered`, `bidrl.expired.cleaned`, `bidrl.finding.created`, `bidrl.alert` |
 | UI | `/bidrl` feed, `/bidrl/auctions`, `/bidrl/lots`, `/bidrl/findings`, `/bidrl/watchlists`, `/bidrl/saved`, `/bidrl/auction/:id`, `/bidrl/lot/:id` |
 
-Lot list endpoints default to 50 rows and cap `perPage` at 100. The catalog, Saved, and auction
-screens load the next page automatically when their scroll sentinel enters view; there is no
-Next button. Live bid subscriptions are bounded to the newest 100 loaded rows, so scrolling
-through a large result can never rebuild an oversized comma-separated `topics` URL.
+Lot list endpoints default to 50 rows and cap `perPage` at 100. They accept `sort=<column>.<direction>`
+for stable server-side ordering (`gap`, `ends`, `bid`, `price`, `name`, `lot`, `location`, `category`,
+`bucket`, or `saved`). The catalog, Saved, and auction screens load the next page automatically
+when their scroll sentinel enters view; there is no Next button. Live bid subscriptions are bounded
+to the newest 100 loaded rows, so scrolling through a large result can never rebuild an oversized
+comma-separated `topics` URL.
 
 Allowlisted hosts: `www.bidrl.com`, `bidrl.com`, `d3ugkdpeq35ojy.cloudfront.net`. The fake
 browser serves a canned three-lot warehouse auction at

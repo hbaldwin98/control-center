@@ -581,15 +581,35 @@ describe("bidrl screens", () => {
     expect(find?.value).toBe("keurig");
   });
 
-  it("asks the API for the filters named in the URL", async () => {
+  it("asks the API for the filters and meaningful sort named by the URL", async () => {
     await renderAt("/bidrl/lots?filter=deals&bucket=priced");
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((url) => url.includes("filter=deals") && url.includes("bucket=priced"))).toBe(true);
+    expect(calls.some((url) =>
+      url.includes("filter=deals") && url.includes("bucket=priced") && url.includes("sort=gap.desc")
+    )).toBe(true);
   });
 
   it("shows a lot's auction location on the catalog, so it can be ruled out without opening it", async () => {
     await renderAt("/bidrl/lots");
     expect(container.textContent).toContain("Turlock");
+  });
+
+  it("keeps every lot as a separate row in table view", async () => {
+    const lots = [
+      lot({ id: "1001", lotCode: "1001", title: "Matching item", identification: "Shared model", modelOrSku: "shared" }),
+      lot({ id: "1002", lotCode: "1002", title: "Matching item", identification: "Shared model", modelOrSku: "shared" }),
+    ];
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <LotBrowser lots={lots} empty="none" view="table" />
+        </MemoryRouter>,
+      );
+    });
+    expect(container.querySelectorAll(".bidrl-lot-table tbody > tr")).toHaveLength(2);
+    expect(container.textContent).toContain("Opportunity");
+    expect(container.textContent).toContain("Lot 1001");
+    expect(container.textContent).toContain("Lot 1002");
   });
 
   it("shares one countdown clock across a large lot grid", async () => {

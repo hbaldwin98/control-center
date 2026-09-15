@@ -30,9 +30,69 @@ import {
   type Lot,
   type LotSortColumn,
   type SimilarGroup,
+  type SortState,
 } from "./model";
 import { useColumnSort, SortedHead } from "./sorting";
-import { FavoriteStar, LotThumbLink, LotTitle, LotLocation, LotComparable, bucketTone, savedOn } from "./lotparts";
+import {
+  FavoriteStar,
+  LotThumbLink,
+  LotTitle,
+  LotLocation,
+  LotTableTitle,
+  LotComparable,
+  bucketTone,
+  savedOn,
+} from "./lotparts";
+
+type LotTableRowProps = {
+  lot: Lot;
+  extraClass?: string | undefined;
+  showWhy?: boolean | undefined;
+  showSaved?: boolean | undefined;
+  similarCount?: number | undefined;
+  similarOpen?: boolean | undefined;
+  onToggleSimilar?: (() => void) | undefined;
+};
+
+function LotTableRow({
+  lot,
+  extraClass,
+  showWhy = false,
+  showSaved = false,
+  similarCount = 0,
+  similarOpen = false,
+  onToggleSimilar,
+}: LotTableRowProps) {
+  const gap = lot.dealScore == null ? "No comparable" : `${pct(lot.dealScore)} below`;
+  const gapClass = `bidrl-table-gap__value bidrl-table-gap__value--${gapTone(lot.dealScore)}`;
+  return (
+    <tr className={extraClass}>
+      <td className="bidrl-table-cell--save"><FavoriteStar lot={lot} /></td>
+      <td className="bidrl-table-cell--item">
+        <LotTableTitle lot={lot} />
+        {similarCount > 0 ? (
+          <Button size="sm" pressed={similarOpen} onClick={onToggleSimilar}>
+            {similarOpen ? "Hide similar" : `${similarCount} similar`}
+          </Button>
+        ) : null}
+      </td>
+      <td className="bidrl-table-cell--bid">
+        <strong>{cents(lot.currentBidCents)}</strong>
+        <Hint>{lot.bidCount ? `${lot.bidCount} bid${lot.bidCount === 1 ? "" : "s"}` : "No bids"}</Hint>
+      </td>
+      <td className="bidrl-table-cell--comp"><div className="bidrl-table-comp"><LotComparable lot={lot} /></div></td>
+      <td className="bidrl-table-cell--gap">
+        <div className="bidrl-table-gap">
+          <span className={gapClass}>{gap}</span>
+          {lot.priceCents != null ? <span className="bidrl-table-gap__comp">vs {cents(lot.priceCents)}</span> : null}
+        </div>
+      </td>
+      <td className="bidrl-table-cell--ends">{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
+      {showWhy ? <td className="bidrl-table-cell--why">{lot.matchReason || <Dash />}</td> : null}
+      {showSaved ? <td className="bidrl-table-cell--saved">{savedOn(lot.savedAt) || <Dash />}</td> : null}
+    </tr>
+  );
+}
 
 export function LotTableRows({
   lots,
@@ -48,21 +108,7 @@ export function LotTableRows({
   return (
     <>
       {lots.map((lot) => (
-        <tr key={lot.id} className={extraClass}>
-          <td className="bidrl-col-star"><FavoriteStar lot={lot} /></td>
-          <td><LotThumbLink lot={lot} /></td>
-          <td className="cc-nowrap">{lot.lotCode || <Dash />}</td>
-          <td><LotTitle lot={lot} showLotCode={false} /></td>
-          <td>{cents(lot.currentBidCents)}</td>
-          <td>{lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}</td>
-          <td className="bidrl-col-location">{locationLabelOrEmpty(lot) || <Dash />}</td>
-          <td>{lot.category ? <Badge>{lot.category}</Badge> : <Dash />}</td>
-          <td><LotComparable lot={lot} /></td>
-          <td className="cc-num">{lot.dealScore != null ? pct(lot.dealScore) : <Dash />}</td>
-          <td><Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge></td>
-          {showWhy ? <td>{lot.matchReason || <Dash />}</td> : null}
-          {showSaved ? <td className="cc-nowrap">{savedOn(lot.savedAt) || <Dash />}</td> : null}
-        </tr>
+        <LotTableRow key={lot.id} lot={lot} extraClass={extraClass} showWhy={showWhy} showSaved={showSaved} />
       ))}
     </>
   );
@@ -173,19 +219,28 @@ export function LotBrowser({
   empty,
   view,
   groupSimilar = true,
+  sort: controlledSort,
+  onSort: controlledOnSort,
 }: {
   lots: Lot[];
   empty: string;
   view: "grid" | "table";
   groupSimilar?: boolean;
+  sort?: SortState<LotSortColumn> | null;
+  onSort?: (column: LotSortColumn) => void;
 }) {
-  const { sort, onSort } = useColumnSort<LotSortColumn>(LOT_SORT_DEFAULTS);
+  const local = useColumnSort<LotSortColumn>(LOT_SORT_DEFAULTS);
+  const sort = controlledSort === undefined ? local.sort : controlledSort;
+  const onSort = controlledOnSort ?? local.onSort;
   const groups = useMemo(() => {
-    const grouped = groupSimilar
+    // Similarity is useful for a visual grid, but hiding rows in a table makes exact
+    // lot-by-lot comparison slower. Every table row is therefore always a real lot.
+    const shouldGroup = groupSimilar && view === "grid";
+    const grouped = shouldGroup
       ? groupSimilarLots(lots)
       : lots.map((lot) => ({ key: `id:${lot.id}`, label: lot.title, lots: [lot] }));
     return sortLotGroups(grouped, sort);
-  }, [lots, groupSimilar, sort]);
+  }, [lots, groupSimilar, sort, view]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   const showWhy = lots.some((lot) => Boolean(lot.matchReason));
@@ -213,16 +268,11 @@ export function LotBrowser({
       head={
         <>
           <th><span className="cc-sr-only">Saved</span></th>
-          <th></th>
-          <SortedHead column="lot" sort={sort} onSort={onSort}>Lot</SortedHead>
-          <SortedHead column="name" sort={sort} onSort={onSort}>Name</SortedHead>
-          <SortedHead column="bid" sort={sort} onSort={onSort}>Bid</SortedHead>
-          <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
-          <SortedHead column="location" sort={sort} onSort={onSort}>Location</SortedHead>
-          <SortedHead column="category" sort={sort} onSort={onSort}>Category</SortedHead>
-          <SortedHead column="price" sort={sort} onSort={onSort}>Price</SortedHead>
-          <SortedHead column="gap" sort={sort} onSort={onSort} numeric>Gap</SortedHead>
-          <SortedHead column="bucket" sort={sort} onSort={onSort}>Bucket</SortedHead>
+          <SortedHead column="name" sort={sort} onSort={onSort}>Item</SortedHead>
+          <SortedHead column="bid" sort={sort} onSort={onSort} numeric>Bid</SortedHead>
+          <SortedHead column="price" sort={sort} onSort={onSort} numeric>Comparable</SortedHead>
+          <SortedHead column="gap" sort={sort} onSort={onSort} numeric>Opportunity</SortedHead>
+          <SortedHead column="ends" sort={sort} onSort={onSort}>Closes</SortedHead>
           {showWhy ? <SortedHead column="why" sort={sort} onSort={onSort}>Why</SortedHead> : null}
           {showSaved ? <SortedHead column="saved" sort={sort} onSort={onSort}>Saved</SortedHead> : null}
         </>
@@ -292,30 +342,14 @@ export const LotGroupRows = memo(function LotGroupRows({
   const rest = group.lots.slice(1);
   return (
     <>
-      <tr>
-        <td className="bidrl-col-star"><FavoriteStar lot={head} /></td>
-        <td><LotThumbLink lot={head} /></td>
-        <td className="cc-nowrap">{head.lotCode || <Dash />}</td>
-        <td>
-          <LotTitle lot={head} showLotCode={false} />
-          {rest.length > 0 ? (
-            <div>
-              <Button size="sm" pressed={open} onClick={onToggle}>
-                {open ? "Hide similar" : `${rest.length} similar`}
-              </Button>
-            </div>
-          ) : null}
-        </td>
-        <td>{cents(head.currentBidCents)}</td>
-        <td>{head.endsAt ? <Countdown iso={head.endsAt} /> : <Dash />}</td>
-        <td className="bidrl-col-location">{locationLabelOrEmpty(head) || <Dash />}</td>
-        <td>{head.category ? <Badge>{head.category}</Badge> : <Dash />}</td>
-        <td><LotComparable lot={head} /></td>
-        <td className="cc-num">{head.dealScore != null ? pct(head.dealScore) : <Dash />}</td>
-        <td><Badge tone={bucketTone(head.bucket)}>{head.bucket.replace("_", " ")}</Badge></td>
-        {showWhy ? <td>{head.matchReason || <Dash />}</td> : null}
-        {showSaved ? <td className="cc-nowrap">{savedOn(head.savedAt) || <Dash />}</td> : null}
-      </tr>
+      <LotTableRow
+        lot={head}
+        showWhy={showWhy}
+        showSaved={showSaved}
+        similarCount={rest.length}
+        similarOpen={open}
+        onToggleSimilar={onToggle}
+      />
       {open ? (
         <LotTableRows
           lots={rest}

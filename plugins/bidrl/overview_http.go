@@ -2,8 +2,8 @@ package bidrl
 
 import (
 	"net/http"
-	"sort"
 	"strings"
+	"time"
 )
 
 // The two summary screens: the front door, and the deal feed behind the tile.
@@ -82,21 +82,34 @@ func (p *Plugin) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 	// A lot with no close time has not ended, so it is still live.
 	stats.Live += blank
 
-	priced, err := p.queryLots(h, r, `v.price_cents IS NOT NULL`)
+	// These lists used to load every priced lot and every dated lot, then sort and
+	// truncate in Go. The response was small, but the backend still decoded the whole
+	// catalog on every dashboard request. The ordering is expressible in SQLite, so only
+	// the handful of rows the overview can display is materialized.
+	deals, err := p.queryLotsLimited(h, r,
+		`v.price_cents IS NOT NULL AND v.price_cents > 0
+			AND l.current_bid_cents IS NOT NULL AND l.current_bid_cents >= 0
+			AND (l.ends_at = '' OR l.ends_at >= ?)
+			AND `+lotVisible,
+		`CAST(v.price_cents - l.current_bid_cents AS REAL) / v.price_cents DESC, l.id`,
+		overviewRows, now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	deals := make([]lotView, 0, len(priced))
-	for _, lot := range priced {
+	// Keep the parser as the final guard for legacy or malformed rows, which are
+	// intentionally treated as unknown rather than as live auctions.
+	filteredDeals := deals[:0]
+	for _, lot := range deals {
 		if lot.DealScore != nil && !hasEnded(lot.EndsAt, now) {
-			deals = append(deals, lot)
+			filteredDeals = append(filteredDeals, lot)
 		}
 	}
-	sort.SliceStable(deals, func(i, j int) bool { return *deals[i].DealScore > *deals[j].DealScore })
-	deals = capLots(deals, overviewRows)
+	deals = filteredDeals
 
-	upcoming, err := p.queryLots(h, r, `l.ends_at != ''`)
+	upcoming, err := p.queryLotsLimited(h, r,
+		`l.ends_at != '' AND l.ends_at >= ? AND `+lotVisible,
+		`l.ends_at, l.id`, overviewRows, now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
@@ -107,7 +120,7 @@ func (p *Plugin) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 			closing = append(closing, lot)
 		}
 	}
-	sort.SliceStable(closing, func(i, j int) bool { return closing[i].EndsAt < closing[j].EndsAt })
+	// The query is already ordered and bounded; retain the cap for malformed rows.
 	closing = capLots(closing, overviewRows)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -137,13 +150,22 @@ func (p *Plugin) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 		where += clause
 		args = append(args, vals...)
 	}
-	result, err := p.queryLotsPage(h, r, where, "l.id", 1, overviewRows, args...)
+	defaultSort := "lot.asc"
+	if filter == "deals" || filter == "worth_opening" {
+		defaultSort = "gap.desc"
+	}
+	order, err := lotOrder(r.URL.Query().Get("sort"), defaultSort)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	result, err := p.queryLotsPage(h, r, where, order, 1, overviewRows, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	if p.freshenLots(r.Context(), h, result.Lots) {
-		if refreshed, err := p.queryLotsPage(h, r, where, "l.id", result.Page, overviewRows, args...); err == nil {
+		if refreshed, err := p.queryLotsPage(h, r, where, order, result.Page, overviewRows, args...); err == nil {
 			result = refreshed
 		}
 	}

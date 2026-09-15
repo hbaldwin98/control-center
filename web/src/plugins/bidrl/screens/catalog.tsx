@@ -22,11 +22,17 @@ import {
 import {
   LOT_CATEGORIES,
   LOT_PRESETS,
+  LOT_SORT_DEFAULTS,
   affiliateParam,
+  cycleSort,
+  defaultLotSort,
   filterLabel,
   locationLabel,
+  lotSortParam,
   parseAffiliateParam,
+  parseLotSort,
   overlayBids,
+  type LotSortColumn,
 } from "../model";
 import { usePlace } from "../place";
 import { useInfiniteLots, useLocations, useLotView } from "../data";
@@ -47,16 +53,29 @@ export function LotsCatalog() {
   const [category, setCategory] = useQueryState("category", "all");
   const [ending, setEnding] = useQueryState("ending");
   const [affiliate, setAffiliate] = useQueryState("affiliate");
+  const [sortParam, setSortParam] = useQueryState("sort");
   const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
-  const snap = useInfiniteLots(filter, q, bucket, category, ending, affiliate);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth > 720,
+  );
+  const sort = parseLotSort(sortParam, defaultLotSort(filter, bucket, ending));
+  const sortQuery = lotSortParam(sort);
+  const snap = useInfiniteLots(filter, q, bucket, category, ending, affiliate, sortQuery);
   const locations = useLocations();
   const disabled = snap.error instanceof PluginDisabledError;
   const live = useLiveBids(snap.status === "ready" ? snap.lots : undefined, !disabled);
   const selected = parseAffiliateParam(affiliate);
   const narrowed =
     Boolean(filter || q || ending || affiliate) || bucket !== "all" || category !== "all";
+  const advancedCount = [bucket !== "all", category !== "all", ending === "soon", selected.length > 0]
+    .filter(Boolean).length;
   usePlace("/bidrl/lots", snap.status === "ready");
+
+  const changeSort = (column: LotSortColumn) => {
+    const next = cycleSort(sort, column, LOT_SORT_DEFAULTS[column]);
+    setSortParam(next ? lotSortParam(next) : "");
+  };
 
   const toggleLocation = (id: string) => {
     setAffiliate(
@@ -75,6 +94,7 @@ export function LotsCatalog() {
     setCategory("all");
     setEnding("");
     setAffiliate("");
+    setSortParam("");
   };
 
   return (
@@ -123,57 +143,84 @@ export function LotsCatalog() {
             <Button disabled={disabled} onClick={() => setQ(draft)}>
               Find
             </Button>
-            <Field label="Bucket">
-              <Select value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Bucket">
-                <option value="all">All buckets</option>
-                <option value="priced">Priced</option>
-                <option value="worth_opening">Worth opening</option>
-                <option value="research">Research</option>
-                <option value="skipped">Skipped</option>
-                <option value="discarded">Discarded</option>
-                <option value="pending">Pending</option>
+            <Field label="Sort">
+              <Select
+                value={lotSortParam(sort)}
+                onChange={(e) => setSortParam(e.target.value)}
+                aria-label="Sort lots"
+              >
+                <option value="gap.desc">Best opportunities</option>
+                <option value="ends.asc">Closing soon</option>
+                <option value="bid.asc">Lowest bid</option>
+                <option value="price.desc">Highest comparable</option>
+                <option value="name.asc">Name</option>
+                <option value="lot.asc">Lot code</option>
               </Select>
             </Field>
-            <Field label="Category">
-              <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
-                <option value="all">All categories</option>
-                {LOT_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </Select>
-            </Field>
-            <Checkbox
-              label="Ending soon"
-              checked={ending === "soon"}
-              onChange={(e) => setEnding(e.target.checked ? "soon" : "")}
-              disabled={disabled}
-            />
           </Toolbar>
-          {locations.status === "ready" && locations.data.locations.length > 0 ? (
-            <Field label="Locations">
-              <div className="bidrl-loc-filter">
-                {locations.data.locations.map((loc) => (
-                  <Button
-                    key={loc.id}
-                    size="sm"
-                    pressed={selected.includes(loc.id)}
-                    disabled={disabled}
-                    onClick={() => toggleLocation(loc.id)}
-                  >
-                    {locationLabel(loc)} · {loc.lotCount}
-                  </Button>
-                ))}
-                {selected.length > 0 ? (
-                  <Button size="sm" onClick={() => setAffiliate("")}>
-                    All locations
-                  </Button>
-                ) : null}
-              </div>
-            </Field>
-          ) : null}
+          <details
+            className="bidrl-advanced-filters"
+            open={advancedOpen}
+            onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+          >
+            <summary>
+              More filters{advancedCount > 0 ? ` · ${advancedCount} active` : ""}
+            </summary>
+            <div className="bidrl-advanced-filters__body">
+              <Toolbar>
+                <Field label="Bucket">
+                  <Select value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Bucket">
+                    <option value="all">All buckets</option>
+                    <option value="priced">Priced</option>
+                    <option value="worth_opening">Worth opening</option>
+                    <option value="research">Research</option>
+                    <option value="skipped">Skipped</option>
+                    <option value="discarded">Discarded</option>
+                    <option value="pending">Pending</option>
+                  </Select>
+                </Field>
+                <Field label="Category">
+                  <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+                    <option value="all">All categories</option>
+                    {LOT_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Checkbox
+                  label="Ending soon"
+                  checked={ending === "soon"}
+                  onChange={(e) => setEnding(e.target.checked ? "soon" : "")}
+                  disabled={disabled}
+                />
+              </Toolbar>
+              {locations.status === "ready" && locations.data.locations.length > 0 ? (
+                <Field label="Locations">
+                  <div className="bidrl-loc-filter">
+                    {locations.data.locations.map((loc) => (
+                      <Button
+                        key={loc.id}
+                        size="sm"
+                        pressed={selected.includes(loc.id)}
+                        disabled={disabled}
+                        onClick={() => toggleLocation(loc.id)}
+                      >
+                        {locationLabel(loc)} · {loc.lotCount}
+                      </Button>
+                    ))}
+                    {selected.length > 0 ? (
+                      <Button size="sm" onClick={() => setAffiliate("")}>
+                        All locations
+                      </Button>
+                    ) : null}
+                  </div>
+                </Field>
+              ) : null}
+            </div>
+          </details>
           <Hint>
             {filterLabel(filter)}
-            {snap.status === "ready" ? ` · ${snap.lots.length}${snap.hasMore ? " loaded" : " shown"}` : ""}
+            {snap.status === "ready" ? ` · ${snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} shown`}` : ""}
           </Hint>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
           {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error?.message ?? "Could not load lots."}</Callout> : null}
@@ -187,6 +234,8 @@ export function LotsCatalog() {
                     : "No lots collected yet. Collect an auction on the Auctions tab."
                 }
                 view={view}
+                sort={sort}
+                onSort={changeSort}
               />
               <LotLoadMore
                 hasMore={snap.hasMore}

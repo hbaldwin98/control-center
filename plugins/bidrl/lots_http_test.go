@@ -27,9 +27,9 @@ func TestListLotsPaginatesResults(t *testing.T) {
 	for i := 1; i <= 120; i++ {
 		id := fmt.Sprintf("lot-%03d", i)
 		if _, err := h.DB().Exec(`INSERT INTO bidrl_lots
-			(id, auction_id, url, title, bucket, created_at, bids_refreshed_at)
-			VALUES (?, ?, ?, ?, 'priced', ?, ?)`,
-			id, "auction-page", "https://www.bidrl.com/auction/page/item/"+id, "Paged lot "+id, now, now); err != nil {
+			(id, auction_id, url, title, current_bid_cents, bucket, created_at, bids_refreshed_at)
+			VALUES (?, ?, ?, ?, ?, 'priced', ?, ?)`,
+			id, "auction-page", "https://www.bidrl.com/auction/page/item/"+id, "Paged lot "+id, i*100, now, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -56,6 +56,25 @@ func TestListLotsPaginatesResults(t *testing.T) {
 	}
 	if len(page.Lots) != 25 || page.Lots[0].ID != "lot-051" || page.Lots[24].ID != "lot-075" {
 		t.Fatalf("page rows = %d, first/last = %#v / %#v", len(page.Lots), page.Lots[0], page.Lots[len(page.Lots)-1])
+	}
+
+	rec = h.GET("/lots?sort=bid.desc&perPage=1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sort lots: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	var sorted struct {
+		Lots []struct {
+			ID string `json:"id"`
+		} `json:"lots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sorted); err != nil {
+		t.Fatal(err)
+	}
+	if len(sorted.Lots) != 1 || sorted.Lots[0].ID != "lot-120" {
+		t.Fatalf("sorted rows = %#v", sorted.Lots)
+	}
+	if rec = h.GET("/lots?sort=not-a-sort"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad sort status = %d", rec.Code)
 	}
 
 	for i := 1; i <= 120; i++ {

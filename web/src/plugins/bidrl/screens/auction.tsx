@@ -8,6 +8,7 @@ import {
   Card,
   Countdown,
   Dash,
+  Field,
   Grid,
   Link,
   Loading,
@@ -15,12 +16,19 @@ import {
   Page,
   PageHeader,
   PluginDisabledError,
+  Select,
   Stack,
   useNavigate,
+  useQueryState,
   useRouteParams,
 } from "@cc/ui";
 import {
+  LOT_SORT_DEFAULTS,
+  cycleSort,
+  lotSortParam,
+  parseLotSort,
   overlayBids,
+  type LotSortColumn,
 } from "../model";
 import { api } from "../api";
 import { useInfiniteAuction, useLotView } from "../data";
@@ -31,7 +39,9 @@ import { LotBrowser, LotLoadMore } from "../lots";
 
 export function AuctionView() {
   const id = useRouteParams().id ?? "";
-  const snap = useInfiniteAuction(id);
+  const [sortParam, setSortParam] = useQueryState("sort");
+  const sort = parseLotSort(sortParam, { column: "lot", dir: "asc" });
+  const snap = useInfiniteAuction(id, lotSortParam(sort));
   const live = useLiveBids(
     snap.status === "ready" ? snap.lots : undefined,
     !(snap.error instanceof PluginDisabledError),
@@ -40,6 +50,10 @@ export function AuctionView() {
   const { busy, notice, error, run, setError } = useAction();
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
+  const changeSort = (column: LotSortColumn) => {
+    const next = cycleSort(sort, column, LOT_SORT_DEFAULTS[column]);
+    setSortParam(next ? lotSortParam(next) : "");
+  };
   const remove = async () => {
     if (!window.confirm("Delete this auction? Its lots, photos, analyses, and comparables go with it.")) {
       return;
@@ -108,12 +122,34 @@ export function AuctionView() {
           </Button>
         </div>
         {snap.status === "ready" ? (
-          <Card title="Lots" actions={<ViewToggle value={view} onChange={setView} />}>
+          <Card
+            title="Lots"
+            actions={
+              <>
+                <Field label="Sort">
+                  <Select
+                    value={lotSortParam(sort)}
+                    onChange={(e) => setSortParam(e.target.value)}
+                    aria-label="Sort auction lots"
+                  >
+                    <option value="lot.asc">Lot code</option>
+                    <option value="ends.asc">Closing soon</option>
+                    <option value="gap.desc">Best opportunities</option>
+                    <option value="bid.asc">Lowest bid</option>
+                    <option value="name.asc">Name</option>
+                  </Select>
+                </Field>
+                <ViewToggle value={view} onChange={setView} />
+              </>
+            }
+          >
             <>
               <LotBrowser
                 lots={overlayBids(snap.lots, live.bids)}
                 empty="This auction has no lots yet."
                 view={view}
+                sort={sort}
+                onSort={changeSort}
               />
               <LotLoadMore
                 hasMore={snap.hasMore}
