@@ -531,6 +531,26 @@ describe("bidrl screens", () => {
     expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
   });
 
+  it("opens a lot with a decision-first hero and evidence sections", async () => {
+    const before = routes.get("/api/plugins/bidrl/lots/1001");
+    routes.set("/api/plugins/bidrl/lots/1001", {
+      ...lot({ photoUrls: ["/api/blobs/lot-photo"] }),
+      latestEventId: 1,
+    });
+    try {
+      await renderAt("/bidrl/lot/1001");
+      expect(container.querySelector(".bidrl-lot-hero")).not.toBeNull();
+      expect(container.querySelector(".bidrl-lot-hero__gallery")).not.toBeNull();
+      expect(container.querySelector(".bidrl-lot-opportunity")?.textContent).toContain("88% below");
+      expect(container.querySelector(".bidrl-lot-detail-grid__aside")).not.toBeNull();
+      expect(container.textContent).toContain("Save lot");
+      expect(container.textContent).toContain("Auction details");
+      expect(container.textContent).toContain("Comparable evidence");
+    } finally {
+      routes.set("/api/plugins/bidrl/lots/1001", before);
+    }
+  });
+
   // The heading used to hold Scan, Refresh, Delete, and Open on BidRL in one right-hand
   // pile that could not wrap. Jobs live in a full-width command row; the origin link is
   // a crumb, not a fourth button.
