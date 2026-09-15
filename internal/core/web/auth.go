@@ -331,6 +331,50 @@ func (a *authStore) lookup(ctx context.Context, cookie string, idle time.Duratio
 	return s, nil
 }
 
+// touch refreshes an authenticated long-lived request without extending the absolute
+// lifetime. It repeats the idle/expiry checks so a session revoked by logout or a password
+// change cannot keep using an already-open stream.
+func (a *authStore) touch(ctx context.Context, sessionID string, idle time.Duration) error {
+	var lastSeen, expires string
+	err := a.db.QueryRow(ctx,
+		`SELECT last_seen_at, expires_at FROM core_sessions WHERE id = ?`, sessionID).
+		Scan(&lastSeen, &expires)
+	if storage.IsNoRows(err) {
+		return errBadCredentials
+	}
+	if err != nil {
+		return err
+	}
+
+	now := a.now().UTC()
+	expiresAt, err := time.Parse(time.RFC3339Nano, expires)
+	if err != nil {
+		return err
+	}
+	lastSeenAt, err := time.Parse(time.RFC3339Nano, lastSeen)
+	if err != nil {
+		return err
+	}
+	if now.After(expiresAt) || now.Sub(lastSeenAt) > idle {
+		_ = a.delete(ctx, sessionID)
+		return errBadCredentials
+	}
+
+	res, err := a.db.Exec(ctx,
+		`UPDATE core_sessions SET last_seen_at = ? WHERE id = ?`,
+		now.Format(time.RFC3339Nano), sessionID)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		// Logout or password revocation won the race after the read above.
+		return errBadCredentials
+	}
+	return nil
+}
+
 // deriveCSRF computes the session's synchronizer token as HMAC(token_hash, sessionID).
 // Deriving rather than storing keeps the token stable for the life of the session, so
 // every tab that bootstraps the same session gets the same token instead of retiring the

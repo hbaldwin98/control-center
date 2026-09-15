@@ -234,8 +234,9 @@ architectural test rather than a review convention.
   is available only on loopback and requires a one-time token to set the admin password.
 - Non-loopback access requires TLS. Passwords are hashed with Argon2id.
 - Authentication uses a `__Host-` `HttpOnly`, `Secure`, `SameSite=Lax` session cookie with
-  `Path=/`, no `Domain`, and 12-hour absolute and idle policies. Authentication rotates
-  the session; logout invalidates it.
+  `Path=/`, no `Domain`, a 12-hour absolute lifetime, and an idle policy. The authenticated
+  SSE stream refreshes idle activity while connected. Authentication rotates the session;
+  logout invalidates it.
 - Mutations require a synchronizer CSRF token bound to the session and a valid `Origin`.
   Credential changes also require password reauthentication within the last five minutes.
 - Secrets live in `credentials`, encrypted at rest with a key from the environment or the

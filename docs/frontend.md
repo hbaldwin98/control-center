@@ -223,7 +223,7 @@ affected resource rather than reconstructing it from partial event payloads.
 ## Core screens
 
 | Screen | Shows |
-|---|---|
+| --- | --- |
 | Dashboard | one live tile per plugin in a grid, plus totals, running jobs, and recent alerts |
 | Plugin detail | one plugin: overview (status, its surface, jobs) and a settings tab for AI, declared events, budget, config, kill switch |
 | Plugins | a card per plugin; click through to that plugin's overview |
@@ -332,8 +332,9 @@ First-run bootstrap is accepted only on loopback and requires a one-time token t
 admin password. Non-loopback access requires TLS; the password hash is Argon2id.
 
 The server uses a `__Host-` `HttpOnly`, `Secure`, `SameSite=Lax` session cookie. Sessions
-use `Path=/`, omit `Domain`, have 12-hour absolute and idle policies, rotate on
-authentication, and are invalidated on logout. Every mutation requires a synchronizer
+use `Path=/`, omit `Domain`, have a 12-hour absolute lifetime plus an idle policy, and
+an authenticated SSE stream refreshes idle activity while it remains connected. They
+rotate on authentication and are invalidated on logout. Every mutation requires a synchronizer
 CSRF token bound to that session plus an allowed `Origin`. Credential changes require
 password reauthentication within five minutes.
 

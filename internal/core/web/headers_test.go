@@ -11,6 +11,7 @@ func TestSecurityHeadersAlwaysPresent(t *testing.T) {
 	h := newHarness(t)
 	rec := h.do(http.MethodGet, "/api/auth/status", nil)
 	for header, want := range map[string]string{
+		"Cache-Control":          "no-store",
 		"X-Content-Type-Options": "nosniff",
 		"X-Frame-Options":        "DENY",
 		"Referrer-Policy":        "no-referrer",

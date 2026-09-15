@@ -30,6 +30,16 @@ export function CloudflarePushSetup({ channelId }: { channelId: string }) {
           setSupported(true);
           setEnabled(subscription !== null);
         }
+        // A browser can keep a local subscription while the Worker loses it, or the
+        // push endpoint can rotate. Reconcile an existing subscription whenever an
+        // authenticated settings screen is opened instead of trusting local state.
+        if (subscription !== null) {
+          try {
+            await registerSubscription(channelId, subscription);
+          } catch (err) {
+            if (!cancelled) setError(formatErr(err));
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           setSupported(false);
@@ -41,7 +51,7 @@ export function CloudflarePushSetup({ channelId }: { channelId: string }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [channelId]);
 
   const enable = async () => {
     setBusy(true);
@@ -69,18 +79,7 @@ export function CloudflarePushSetup({ channelId }: { channelId: string }) {
           applicationServerKey: base64UrlToBytes(key.publicKey) as BufferSource,
         });
       }
-      const json = subscription.toJSON();
-      const keys = json.keys;
-      if (!json.endpoint || !keys?.p256dh || !keys.auth) {
-        throw new Error(
-          "The browser returned an incomplete push subscription.",
-        );
-      }
-      await api.post(pushPath(channelId, "push-subscriptions"), {
-        endpoint: json.endpoint,
-        expirationTime: json.expirationTime ?? null,
-        keys: { p256dh: keys.p256dh, auth: keys.auth },
-      });
+      await registerSubscription(channelId, subscription);
       setEnabled(true);
     } catch (err) {
       setError(formatErr(err));
@@ -150,6 +149,22 @@ export function CloudflarePushSetup({ channelId }: { channelId: string }) {
 
 function pushPath(channelId: string, suffix: string): string {
   return `/api/admin/notifications/channels/${encodeURIComponent(channelId)}/${suffix}`;
+}
+
+async function registerSubscription(
+  channelId: string,
+  subscription: PushSubscription,
+): Promise<void> {
+  const json = subscription.toJSON();
+  const keys = json.keys;
+  if (!json.endpoint || !keys?.p256dh || !keys.auth) {
+    throw new Error("The browser returned an incomplete push subscription.");
+  }
+  await api.post(pushPath(channelId, "push-subscriptions"), {
+    endpoint: json.endpoint,
+    expirationTime: json.expirationTime ?? null,
+    keys: { p256dh: keys.p256dh, auth: keys.auth },
+  });
 }
 
 function base64UrlToBytes(value: string): Uint8Array {

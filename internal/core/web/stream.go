@@ -15,7 +15,7 @@ import (
 // One authenticated SSE stream carries every authorized committed event. The shell opens
 // it once and multiplexes dot-segment patterns locally; clients never send server-side
 // subscription patterns.
-const (
+var (
 	// heartbeatInterval keeps intermediaries and stale-connection detection working.
 	heartbeatInterval = 20 * time.Second
 
@@ -74,6 +74,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	sess := sessionFrom(ctx)
+	if sess == nil {
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache, no-transform")
@@ -152,6 +156,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-woken:
 		case <-poll.C:
 		case <-heartbeat.C:
+			if err := s.auth.touch(ctx, sess.ID, s.deps.Config.Session.Idle); err != nil {
+				return
+			}
 			if !send(": heartbeat\n\n") {
 				return
 			}

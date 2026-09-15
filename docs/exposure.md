@@ -84,7 +84,9 @@ before any per-minute ceiling is reached.
 
 `session.idle` must be shorter than `session.absolute` or it can never close first, and an
 abandoned session lasts exactly as long as a used one. The defaults are 1h idle inside a
-12h absolute lifetime. Shorten both if the browser holding the cookie is not one you
+12h absolute lifetime. An authenticated SSE stream counts as activity and refreshes the
+idle timestamp while it remains connected; a backgrounded or disconnected browser still
+obeys the idle limit. Shorten both if the browser holding the cookie is not one you
 physically control.
 
 A password change signs out every other session, and is the fastest revocation available.
