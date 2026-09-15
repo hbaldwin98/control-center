@@ -76,7 +76,12 @@ func (p *Plugin) handleListFindings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	lots, err := p.queryLots(h, r, "1=1")
+	lotIDs := make([]string, 0, len(listed))
+	for _, rv := range listed {
+		lotIDs = append(lotIDs, rv.LotID)
+	}
+	lotWhere, lotArgs := lotIDWhere(lotIDs)
+	lots, err := p.queryLots(h, r, lotWhere, lotArgs...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return

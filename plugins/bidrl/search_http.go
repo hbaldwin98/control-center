@@ -98,35 +98,28 @@ func (p *Plugin) handleGetSearch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	rows, err := h.Store().Query(r.Context(), `SELECT lot_id, auction_id, url, title, auction_title, lot_code, affiliate_id, affiliate_name, preferred, bid_cents, match_score, match_reason, source
-		FROM bidrl_search_hits WHERE search_id = ? ORDER BY ordinal`, id)
+	rows, err := h.Store().Query(r.Context(), `SELECT h.lot_id, h.auction_id, h.url, h.title, h.auction_title, h.lot_code,
+		h.affiliate_id, h.affiliate_name, h.preferred, h.bid_cents, h.match_score, h.match_reason, h.source,
+		l.id IS NOT NULL
+		FROM bidrl_search_hits h
+		LEFT JOIN bidrl_lots l ON l.id = h.lot_id
+		WHERE h.search_id = ? ORDER BY h.ordinal`, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	defer rows.Close()
-	collected := map[string]struct{}{}
-	lotRows, err := h.Store().Query(r.Context(), `SELECT id FROM bidrl_lots`)
-	if err == nil {
-		for lotRows.Next() {
-			var lotID string
-			if lotRows.Scan(&lotID) == nil {
-				collected[lotID] = struct{}{}
-			}
-		}
-		_ = lotRows.Close()
-	}
 	out := []searchHitView{}
 	for rows.Next() {
 		var htv searchHitView
-		var pref int
+		var pref, collected int
 		if err := rows.Scan(&htv.LotID, &htv.AuctionID, &htv.URL, &htv.Title, &htv.AuctionTitle, &htv.LotCode,
-			&htv.AffiliateID, &htv.AffiliateName, &pref, &htv.BidCents, &htv.Score, &htv.Reason, &htv.Source); err != nil {
+			&htv.AffiliateID, &htv.AffiliateName, &pref, &htv.BidCents, &htv.Score, &htv.Reason, &htv.Source, &collected); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
 		htv.Preferred = pref != 0
-		_, htv.Collected = collected[htv.LotID]
+		htv.Collected = collected != 0
 		out = append(out, htv)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

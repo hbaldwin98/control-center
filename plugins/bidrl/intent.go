@@ -136,7 +136,12 @@ func (p *Plugin) handleGetIntent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	all, err := p.queryLots(h, r, "1=1")
+	lotIDs := make([]string, 0, len(ordered))
+	for _, htv := range ordered {
+		lotIDs = append(lotIDs, htv.LotID)
+	}
+	lotWhere, lotArgs := lotIDWhere(lotIDs)
+	all, err := p.queryLots(h, r, lotWhere, lotArgs...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "internal error")
 		return

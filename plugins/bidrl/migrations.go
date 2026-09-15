@@ -310,6 +310,16 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 		Up: `
 			ALTER TABLE bidrl_lots ADD COLUMN last_call_alerted_at TEXT NOT NULL DEFAULT '';
 		`,
+	}, {
+		Version: 16,
+		Name:    "lot_read_indexes",
+		Up: `
+			CREATE INDEX bidrl_lots_ends_id ON bidrl_lots(ends_at, id);
+			CREATE INDEX bidrl_lots_auction_id ON bidrl_lots(auction_id, id);
+			CREATE INDEX bidrl_analyses_lot_id ON bidrl_analyses(lot_id, id);
+			CREATE INDEX bidrl_valuations_lot_id ON bidrl_valuations(lot_id, id);
+			CREATE INDEX bidrl_favorites_created_lot ON bidrl_favorites(created_at DESC, lot_id);
+		`,
 	}})
 }
 
