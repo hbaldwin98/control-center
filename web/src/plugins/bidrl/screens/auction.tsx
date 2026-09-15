@@ -35,7 +35,7 @@ import { useInfiniteAuction, useLotView } from "../data";
 import { useLiveBids, LiveDot } from "../live";
 import { ViewToggle, BidrlLink, BidrlTabs } from "../chrome";
 import { useAction, Notices } from "../actions";
-import { LotBrowser, LotLoadMore } from "../lots";
+import { LotBrowser, LotLoadMore, LotRefreshIndicator } from "../lots";
 
 export function AuctionView() {
   const id = useRouteParams().id ?? "";
@@ -87,7 +87,7 @@ export function AuctionView() {
         </div>
         <Notices message={notice} error={error} disabled={disabled} />
         {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
-        {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error?.message ?? "Could not load auction."}</Callout> : null}
+        {snap.error && !disabled ? <Callout tone="danger">{snap.error.message || "Could not load auction."}</Callout> : null}
         {auction ? (
           <Grid density="metric">
             <Metric label="Lots" value={String(auction.lotCount)} />
@@ -144,13 +144,16 @@ export function AuctionView() {
             }
           >
             <>
-              <LotBrowser
-                lots={overlayBids(snap.lots, live.bids)}
-                empty="This auction has no lots yet."
-                view={view}
-                sort={sort}
-                onSort={changeSort}
-              />
+              <div className="bidrl-lot-results">
+                <LotRefreshIndicator refreshing={snap.refreshing} />
+                <LotBrowser
+                  lots={overlayBids(snap.lots, live.bids)}
+                  empty="This auction has no lots yet."
+                  view={view}
+                  sort={snap.refreshing ? null : sort}
+                  onSort={changeSort}
+                />
+              </div>
               <LotLoadMore
                 hasMore={snap.hasMore}
                 loading={snap.loadingMore}

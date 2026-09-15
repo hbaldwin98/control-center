@@ -39,7 +39,7 @@ import { useInfiniteLots, useLocations, useLotView } from "../data";
 import { useLiveBids, LiveDot } from "../live";
 import { ViewToggle, BidrlTabs } from "../chrome";
 import { Notices } from "../actions";
-import { LotBrowser, LotLoadMore } from "../lots";
+import { LotBrowser, LotLoadMore, LotRefreshIndicator } from "../lots";
 
 /**
  * The one catalog. Its whole state — preset, text, bucket, category, ending, locations — lives in
@@ -223,20 +223,23 @@ export function LotsCatalog() {
             {snap.status === "ready" ? ` · ${snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} shown`}` : ""}
           </Hint>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
-          {snap.status === "error" && !disabled ? <Callout tone="danger">{snap.error?.message ?? "Could not load lots."}</Callout> : null}
+          {snap.error && !disabled ? <Callout tone="danger">{snap.error.message || "Could not load lots."}</Callout> : null}
           {snap.status === "ready" ? (
             <>
-              <LotBrowser
-                lots={overlayBids(snap.lots, live.bids)}
-                empty={
-                  narrowed
-                    ? "No lot matches these filters. Clear them to see the whole catalog."
-                    : "No lots collected yet. Collect an auction on the Auctions tab."
-                }
-                view={view}
-                sort={sort}
-                onSort={changeSort}
-              />
+              <div className="bidrl-lot-results">
+                <LotRefreshIndicator refreshing={snap.refreshing} />
+                <LotBrowser
+                  lots={overlayBids(snap.lots, live.bids)}
+                  empty={
+                    narrowed
+                      ? "No lot matches these filters. Clear them to see the whole catalog."
+                      : "No lots collected yet. Collect an auction on the Auctions tab."
+                  }
+                  view={view}
+                  sort={snap.refreshing ? null : sort}
+                  onSort={changeSort}
+                />
+              </div>
               <LotLoadMore
                 hasMore={snap.hasMore}
                 loading={snap.loadingMore}

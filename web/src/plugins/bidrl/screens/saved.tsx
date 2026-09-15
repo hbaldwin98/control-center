@@ -36,7 +36,7 @@ import { useLiveBids, LiveDot } from "../live";
 import { ViewToggle, BidrlTabs } from "../chrome";
 import { Notices } from "../actions";
 import { FavoriteChanged } from "../lotparts";
-import { LotBrowser, LotLoadMore } from "../lots";
+import { LotBrowser, LotLoadMore, LotRefreshIndicator } from "../lots";
 
 /**
  * Saved lots. The same card/table browser and the same location and category filters as
@@ -193,28 +193,31 @@ export function SavedLots() {
             <Hint>{snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} saved`}</Hint>
           ) : null}
           {snap.status === "loading" ? <Loading label="Loading saved lots…" /> : null}
-          {snap.status === "error" && !disabled ? (
-            <Callout tone="danger">{snap.error?.message ?? "Could not load saved lots."}</Callout>
+          {snap.error && !disabled ? (
+            <Callout tone="danger">{snap.error.message || "Could not load saved lots."}</Callout>
           ) : null}
           {snap.status === "ready" ? (
             // Unstarring a row takes it off this list, so the list reloads the moment a
             // star changes rather than waiting for a refresh to notice.
             <FavoriteChanged.Provider value={snap.reload}>
               <>
-                <LotBrowser
-                  lots={overlayBids(snap.lots, live.bids)}
-                  empty={
-                    narrowed
-                      ? "No saved lot matches these filters."
-                      : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
-                  }
-                  view={view}
-                  // Every row here was chosen on purpose, so two similar lots must both
-                  // show rather than collapsing into "1 similar".
-                  groupSimilar={false}
-                  sort={sort}
-                  onSort={changeSort}
-                />
+                <div className="bidrl-lot-results">
+                  <LotRefreshIndicator refreshing={snap.refreshing} />
+                  <LotBrowser
+                    lots={overlayBids(snap.lots, live.bids)}
+                    empty={
+                      narrowed
+                        ? "No saved lot matches these filters."
+                        : "Nothing saved yet. Star a lot anywhere — the catalog, an auction, or its own page — to keep it here."
+                    }
+                    view={view}
+                    // Every row here was chosen on purpose, so two similar lots must both
+                    // show rather than collapsing into "1 similar".
+                    groupSimilar={false}
+                    sort={snap.refreshing ? null : sort}
+                    onSort={changeSort}
+                  />
+                </div>
                 <LotLoadMore
                   hasMore={snap.hasMore}
                   loading={snap.loadingMore}

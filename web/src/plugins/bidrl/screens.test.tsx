@@ -589,6 +589,44 @@ describe("bidrl screens", () => {
     )).toBe(true);
   });
 
+  it("keeps the old rows visible with an updating indicator while sorting", async () => {
+    let releaseSorted: ((response: Response) => void) | null = null;
+    const fallback = fetchMock.getMockImplementation() as ((input: string) => Promise<Response>) | undefined;
+    fetchMock.mockImplementation((input: string) => {
+      if (String(input).includes("sort=name.asc")) {
+        return new Promise<Response>((resolve) => {
+          releaseSorted = resolve;
+        });
+      }
+      return fallback?.(input) ?? Promise.resolve(new Response("{}"));
+    });
+
+    await renderAt("/bidrl/lots");
+    const sort = container.querySelector<HTMLSelectElement>('select[aria-label="Sort lots"]');
+    expect(sort?.value).toBe("lot.asc");
+    await act(async () => {
+      if (!sort) throw new Error("sort control missing");
+      sort.value = "name.asc";
+      sort.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Keurig coffee maker");
+    expect(container.textContent).toContain("Updating results…");
+    expect(container.textContent).not.toContain("No lots collected yet");
+    expect(releaseSorted).not.toBeNull();
+
+    await act(async () => {
+      releaseSorted?.(new Response(JSON.stringify({
+        lots: [lot({ id: "2002", title: "Sorted coffee maker" })],
+        latestEventId: 2,
+      }), { headers: { "Content-Type": "application/json" } }));
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("Sorted coffee maker");
+    expect(container.textContent).not.toContain("Updating results…");
+  });
+
   it("shows a lot's auction location on the catalog, so it can be ruled out without opening it", async () => {
     await renderAt("/bidrl/lots");
     expect(container.textContent).toContain("Turlock");

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -58,6 +59,8 @@ export type InfiniteLotsResult<T extends LotPageResponse = LotPageResponse> = {
   totalPages: number;
   hasMore: boolean;
   loadingMore: boolean;
+  /** True while a new filter/sort key is fetching; existing rows remain visible. */
+  refreshing: boolean;
   error: Error | null;
   loadMore: () => void;
   reload: () => void;
@@ -66,7 +69,8 @@ export type InfiniteLotsResult<T extends LotPageResponse = LotPageResponse> = {
 /**
  * Loads bounded API pages while retaining the rows already scrolled past. The current
  * page remains a normal useSnapshot, so stream invalidation still refreshes it; replacing
- * that page in the map avoids duplicating rows after a live event.
+ * that page in the map avoids duplicating rows after a live event. A sort/filter key keeps
+ * the old map until page one of the new query arrives, so a refresh never flashes empty.
  */
 export function useInfiniteLotPages<T extends LotPageResponse>(
   key: string,
@@ -78,48 +82,74 @@ export function useInfiniteLotPages<T extends LotPageResponse>(
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [latest, setLatest] = useState<T | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // Keep the previous rows on screen while a new query key is in flight. The refs also
+  // let the first render after a sort request page 1, even if the old list had loaded
+  // several pages already.
+  const displayedKey = useRef(key);
+  const replaceOnNextPage = useRef(false);
+  const requestPage = displayedKey.current === key && !replaceOnNextPage.current ? page : 1;
 
   const load = useCallback(async (signal: AbortSignal) => {
-    const snap = await loadPage(page, signal);
-    return {
-      ...snap,
-      data: {
-        ...snap.data,
-        __requestKey: key,
-        __requestPage: page,
-      },
-    };
-  }, [key, loadPage, page]);
+    try {
+      const snap = await loadPage(requestPage, signal);
+      return {
+        ...snap,
+        data: {
+          ...snap.data,
+          __requestKey: key,
+          __requestPage: requestPage,
+        },
+      };
+    } catch (error) {
+      if (!signal.aborted) {
+        // A failed refresh should stop saying "updating" while the old rows remain
+        // available, and the screen can expose the error without flashing empty state.
+        displayedKey.current = key;
+        replaceOnNextPage.current = false;
+        setRefreshing(false);
+      }
+      throw error;
+    }
+  }, [key, loadPage, requestPage]);
   const snap = useSnapshot<TaggedPage<T>>(load, { events: "bidrl.**" });
   const snapData = snap.status === "ready" ? snap.data : null;
 
   useEffect(() => {
+    if (displayedKey.current === key) return;
+    replaceOnNextPage.current = true;
+    setRefreshing(true);
     setPage(1);
     setLoadedPage(0);
-    setPageRows({});
-    setTotal(0);
     setTotalPages(0);
-    setLatest(null);
   }, [key]);
 
   useEffect(() => {
     if (
       snapData === null ||
       snapData.__requestKey !== key ||
-      snapData.__requestPage !== page
+      snapData.__requestPage !== requestPage
     ) {
       return;
     }
     const data = snapData;
+    const replacing = replaceOnNextPage.current || displayedKey.current !== key;
+    displayedKey.current = key;
+    replaceOnNextPage.current = false;
     const size = data.perPage ?? LOT_PAGE_SIZE;
-    const nextTotal = data.total ?? (data.hasNext ? page * size + 1 : data.lots.length);
-    const nextTotalPages = data.totalPages ?? (data.hasNext ? page + 1 : page);
-    setPageRows((current) => ({ ...current, [page]: data.lots }));
-    setLoadedPage((current) => Math.max(current, page));
+    const nextTotal = data.total ?? (data.hasNext ? requestPage * size + 1 : data.lots.length);
+    const nextTotalPages = data.totalPages ?? (data.hasNext ? requestPage + 1 : requestPage);
+    setPageRows((current) =>
+      replacing ? { [requestPage]: data.lots } : { ...current, [requestPage]: data.lots },
+    );
+    setLoadedPage((current) =>
+      replacing ? requestPage : Math.max(current, requestPage),
+    );
     setTotal(nextTotal);
     setTotalPages(nextTotalPages);
     setLatest(data);
-  }, [key, page, snapData]);
+    setRefreshing(false);
+  }, [key, requestPage, snapData]);
 
   const lots = useMemo(() => {
     const seen = new Set<string>();
@@ -135,26 +165,27 @@ export function useInfiniteLotPages<T extends LotPageResponse>(
   }, [pageRows]);
 
   const current = snap.status === "ready" &&
-    snap.data.__requestKey === key && snap.data.__requestPage === page;
+    snap.data.__requestKey === key && snap.data.__requestPage === requestPage;
+  const isRefreshing = refreshing || displayedKey.current !== key || replaceOnNextPage.current;
   const status: InfiniteLotsResult<T>["status"] =
     lots.length > 0 || current ? "ready" : snap.status;
-  const loadingMore = loadedPage > 0 && page > loadedPage && snap.status !== "error";
-  const hasMore = loadedPage > 0 && loadedPage < totalPages;
+  const loadingMore = !isRefreshing && loadedPage > 0 && page > loadedPage && snap.status !== "error";
+  const hasMore = !isRefreshing && loadedPage > 0 && loadedPage < totalPages;
   const loadMore = useCallback(() => {
+    if (isRefreshing) return;
     if (snap.status === "error") {
       snap.reload();
       return;
     }
     if (loadingMore || !hasMore) return;
     setPage(loadedPage + 1);
-  }, [hasMore, loadedPage, loadingMore, snap.reload, snap.status]);
+  }, [hasMore, isRefreshing, loadedPage, loadingMore, snap.reload, snap.status]);
   const reload = useCallback(() => {
+    replaceOnNextPage.current = true;
+    setRefreshing(true);
     setPage(1);
     setLoadedPage(0);
-    setPageRows({});
-    setTotal(0);
     setTotalPages(0);
-    setLatest(null);
     snap.reload();
   }, [snap.reload]);
 
@@ -166,6 +197,7 @@ export function useInfiniteLotPages<T extends LotPageResponse>(
     totalPages,
     hasMore,
     loadingMore,
+    refreshing: isRefreshing,
     error: snap.status === "error" ? snap.error : null,
     loadMore,
     reload,

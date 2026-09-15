@@ -183,6 +183,15 @@ export function SimilarList({ lots }: { lots: Lot[] }) {
   );
 }
 
+export function LotRefreshIndicator({ refreshing }: { refreshing: boolean }) {
+  if (!refreshing) return null;
+  return (
+    <div className="bidrl-lot-refreshing" role="status" aria-live="polite">
+      Updating results…
+    </div>
+  );
+}
+
 export function LotLoadMore({
   hasMore,
   loading,
