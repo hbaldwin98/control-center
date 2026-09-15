@@ -17,7 +17,7 @@ The interfaces translate directly to Rust if that changes; the layering does not
 ## Documents
 
 | Document | For |
-|---|---|
+| --- | --- |
 | This file | The overall shape. Read first. |
 | [`docs/plugin-api.md`](docs/plugin-api.md) | Everything needed to write a plugin. Self-contained. |
 | [`docs/frontend.md`](docs/frontend.md) | Shell, plugin UI contract, live data. |
@@ -54,7 +54,7 @@ Open `https://localhost:8443` (self-signed). The first-run admin password is
 ### Not in v1
 
 | Deferred | Reason |
-|---|---|
+| --- | --- |
 | Interactive PTY harness sessions | The first harness slice deliberately has no stdin, resize, attach/detach, or terminal emulation protocol. |
 | Interactive terminal in the browser | Requires the PTY protocol above. Retained stdout and stderr are already visible. |
 | Externally reachable OpenAI-compatible gateway | Nothing outside the control center calls it yet. Additive later. |
@@ -130,7 +130,7 @@ So plugin state, budgets, spend counters, and the gate are extracted into `polic
 ## 4. Module map
 
 | Layer | Module | Responsibility (one sentence) |
-|---|---|---|
+| --- | --- | --- |
 | L0 | [storage](docs/modules/storage.md) | SQLite handles, migrations, and filesystem blob storage. |
 | L1 | [events](docs/modules/events.md) | Insert events transactionally, then dispatch committed events to live and durable subscribers. |
 | L2 | [policy](docs/modules/policy.md) | Own plugin enabled state and atomically reserve, settle, and release budget capacity. |
@@ -165,7 +165,7 @@ Two walkthroughs. If these read cleanly, the architecture is doing its job.
                            micro-USD, release unused reservation, and insert core.ai.usage
 10  web                    SSE pushes it; the cost ticks up in the UI
 11  plugin handler         host.Events().Publish("deal_found", ...)
-12  notifications          rule matches bidrl.deal_found → push
+12  notifications          rule matches bidrl.deal_found → configured channels
 ```
 
 Note what never happens: the plugin never sees a credential, never names a provider, never
@@ -256,7 +256,7 @@ architectural test rather than a review convention.
 ## 8. Build order
 
 | # | Milestone | Done when |
-|---|---|---|
+| --- | --- | --- |
 | 1 | Skeleton | `cmd`, config, SQLite, migrations, TLS-aware HTTP server, first-run bootstrap, session auth, CSRF, React shell boot. |
 | 2 | `storage` + `events` | Transactional event insertion works; durable delivery is serial and at-least-once; SSE replay and reset work. |
 | 3 | `policy` | Disable admission/cancellation works; persisted integer micro-USD reservations settle and release atomically. |

@@ -160,7 +160,7 @@ func (s *Service) PutChannel(ctx context.Context, channel ChannelConfig) error {
 }
 
 func isExternalKind(kind string) bool {
-	return kind == "ntfy" || kind == "webpush"
+	return kind == "ntfy" || kind == "webpush" || kind == "cloudflare" || kind == "email"
 }
 
 func attachToPluginAlert(ctx context.Context, tx storage.Tx, channelID string) error {
@@ -374,7 +374,7 @@ func (s *Service) validateChannel(ctx context.Context, c ChannelConfig) error {
 		return fmt.Errorf("%w: id %q", ErrInvalidChannel, c.ID)
 	}
 	switch c.Kind {
-	case "inbox", "ntfy", "webpush":
+	case "inbox", "ntfy", "webpush", "cloudflare", "email":
 	default:
 		return fmt.Errorf("%w: kind %q", ErrInvalidChannel, c.Kind)
 	}
@@ -389,6 +389,25 @@ func (s *Service) validateChannel(ctx context.Context, c ChannelConfig) error {
 	if c.Kind == "webpush" {
 		if strings.TrimSpace(c.Settings["endpoint"]) == "" {
 			return fmt.Errorf("%w: webpush requires endpoint", ErrInvalidChannel)
+		}
+		if err := validatePushEndpoint(c.Settings["endpoint"]); err != nil {
+			return fmt.Errorf("%w: webpush endpoint is invalid", ErrInvalidChannel)
+		}
+	}
+	if c.Kind == "cloudflare" {
+		if strings.TrimSpace(c.Settings["endpoint"]) == "" {
+			return fmt.Errorf("%w: cloudflare requires endpoint", ErrInvalidChannel)
+		}
+		if _, err := parseCloudflareEndpoint(c.Settings["endpoint"]); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidChannel, err)
+		}
+		if strings.TrimSpace(c.CredentialID) == "" {
+			return fmt.Errorf("%w: cloudflare requires a credential id", ErrInvalidChannel)
+		}
+	}
+	if c.Kind == "email" {
+		if _, err := newEmailChannel(c, s.creds); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidChannel, err)
 		}
 	}
 	for k, v := range c.Settings {

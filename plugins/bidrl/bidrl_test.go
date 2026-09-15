@@ -202,7 +202,7 @@ func TestPluginContract(t *testing.T) {
 		"bidrl_intent_searches", "bidrl_lot_embeddings", "affiliate_id",
 		"bidrl_favorites", "bidrl_watchlists", "strftime", "bidrl_automation",
 		"high_bidder_id", "ending_soon_alerted_at", "hidden", "last_call_alerted_at",
-		"bidrl_lots_ends_id",
+		"bidrl_lots_ends_id", "bidrl_lot_alerts",
 	}
 	if len(mig.migrations) != len(wantMigrations) {
 		t.Fatalf("migrations = %d, want %d", len(mig.migrations), len(wantMigrations))

@@ -38,6 +38,9 @@ type Admin interface {
     PutChannel(ctx context.Context, channel ChannelConfig) error
     DeleteChannel(ctx context.Context, id string) error
     DeliveryHealth(ctx context.Context) ([]ChannelHealth, error)
+    PushPublicKey(ctx context.Context, channelID string) (string, error)
+    RegisterPushSubscription(ctx context.Context, channelID string, sub PushSubscription) error
+    UnregisterPushSubscription(ctx context.Context, channelID, endpoint string) error
 }
 
 type Inbox interface {
@@ -61,6 +64,12 @@ type ChannelConfig struct {
     ID, Kind, CredentialID string
     Enabled bool
     Settings map[string]string // validated, non-secret settings only
+}
+
+type PushSubscription struct {
+    Endpoint string
+    ExpirationTime *int64
+    Keys struct { P256DH, Auth string }
 }
 
 type ChannelHealth struct {
@@ -180,18 +189,23 @@ userinfo, and external hosts are rejected.
 ## Channels In V1
 
 | Channel | Notes |
-|---|---|
+| --- | --- |
 | `inbox` | In-app and created in the durable event transaction. |
-| `webpush` | Browser push; duplicate delivery is possible. |
-| `ntfy` | Self-hosted or public topic; uses a stable idempotency key where supported. Creating an enabled ntfy channel attaches it to the `plugin-alert` rule. Deleting a channel removes it from every rule that named it. |
+| `webpush` | Legacy browser-push endpoint adapter; duplicate delivery is possible. |
+| `cloudflare` | Core adapter for the deployable Cloudflare Worker. The Worker stores Web Push subscriptions and performs VAPID encryption; the channel sends generic notifications with a credential-backed bearer token. |
+| `email` | SMTP fallback. STARTTLS and implicit TLS are supported; the password/API token is a credential, never a channel setting. |
+| `ntfy` | Self-hosted or public topic; uses a stable idempotency key where supported. |
+
+An enabled external channel (`ntfy`, `webpush`, `cloudflare`, or `email`) is attached to
+`plugin-alert` when created. Deleting a channel removes it from every rule that named it.
 
 ---
 
 ## Default Rules
 
 | Pattern | Default channels | Meaning |
-|---|---|---|
-| `*.alert` | `inbox`, plus each ntfy/webpush channel you add | a plugin's explicit `<plugin>.alert` event |
+| --- | --- | --- |
+| `*.alert` | `inbox`, plus each external channel you add | a plugin's explicit `<plugin>.alert` event |
 | `core.job.dead` | `inbox` | a job exhausted its retries |
 | `core.plugin.budget_exceeded` | `inbox` | a budget admission was rejected |
 | `core.plugin.accounting_invariant_failed` | `inbox` | provider cost exceeded its conservative reservation |
@@ -203,8 +217,9 @@ rules use patterns such as `bidrl.**`; suffix rules use patterns such as `**.fai
 The default alert rule also requires the source's first segment not to be `core`. Its
 title is `{event.subject}` and its body is `{event.payload.body}`, so a plugin that puts
 the headline in the subject and details in `payload.body` reaches both the inbox and any
-attached ntfy topic without a custom rule. The administrator may add external channels to
-any other rule.
+attached external channel without a custom rule. The administrator may add external
+channels to any other rule. The Cloudflare channel's push enrollment endpoints are
+authenticated core routes; the browser never receives its Worker credential.
 
 Plugins declare the events they publish on `Manifest.Events`. `GET /api/admin/notifications/catalog`
 returns those types already prefixed (`tid.synced`), each payload field as an interpolable

@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	// The two ticks are deliberately offset. sweep touches BidRL and must stop when
-	// BidRL says so; match never touches it at all and should still run when sweep
-	// was throttled.
+	// The two crawl ticks are deliberately offset. sweep touches BidRL and must stop
+	// when BidRL says so; match never touches it at all and should still run when sweep
+	// was throttled. warn is local SQL and runs every minute so a short lead time is
+	// not rounded away by a fifteen-minute scheduler tick.
 	sweepSchedule = "0 */6 * * *"
 	matchSchedule = "30 */6 * * *"
-	warnSchedule  = "*/15 * * * *"
+	warnSchedule  = "* * * * *"
 	warnTimeout   = time.Minute
 	cronTimeZone  = "UTC"
 

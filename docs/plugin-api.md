@@ -207,7 +207,7 @@ but invoke no plugin code.
 ### What is deliberately missing
 
 | Missing | Why | Do this instead |
-|---|---|---|
+| --- | --- | --- |
 | Credentials, API keys, provider selection | You must never hold a provider token or select an AI provider; the spend gate lives inside `AI()`. Operational core events may name a configured provider. | Ask for a logical model: `"cheap-vision"`, and declare that name on `Manifest.Models`. |
 | A notifications API | Preserves the dependency direction — nothing calls notifications. | Publish an event. See §6. |
 | Raw `*sql.DB` | Table-prefix guardrail, and the seam that lets a plugin move out of process. | Use `Store()`. |
@@ -455,7 +455,7 @@ instead of guessing.
 **To notify the user, publish an event — do not look for a notify API.** The user writes a
 rule against your event type. For the case where you genuinely want to reach them without
 any configuration, publish `<plugin>.alert`, which has a default rule. Put the headline in
-the subject and details in `payload.body`; an ntfy channel you add is attached to that
+the subject and details in `payload.body`; an external channel you add is attached to that
 rule automatically.
 
 ```go
@@ -504,7 +504,7 @@ is where the host API gets fixed while fixing it is still cheap.
 It exercises every host capability and nothing else:
 
 | Capability | What `hello` does |
-|---|---|
+| --- | --- |
 | Jobs | a cron job every minute |
 | AI | one tiny `Chat` call, so cost attribution has a live source |
 | Events | publishes `hello.ticked`; declares that type and its payload on the manifest |
@@ -558,7 +558,7 @@ only moves when you move it. There is nothing to poll and nothing to wait for, s
 test either passes or fails on the first run.
 
 | You want to | Call |
-|---|---|
+| --- | --- |
 | Start the plugin | `h.Run(ctx)` — Migrate, then Init |
 | Drive a route | `h.GET(path)`, `h.POST(path, body)`, `h.Do(req)` |
 | Run work | `h.RunJobNow(ctx, name, args)`, `h.RunJob`, `h.Drain` |

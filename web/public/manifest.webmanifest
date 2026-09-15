@@ -1,0 +1,9 @@
+{
+  "id": "/",
+  "name": "Control Center",
+  "short_name": "Control Center",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fbfbfa",
+  "theme_color": "#3f5bd9"
+}

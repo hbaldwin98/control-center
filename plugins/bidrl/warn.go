@@ -2,6 +2,7 @@ package bidrl
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -9,87 +10,107 @@ import (
 	hoststorage "github.com/hbaldwin98/control-center/host/storage"
 )
 
-// A saved lot is warned about twice: once the day before it closes, and once
-// shortly before it actually does. Each warning has its own column, so one firing
-// never suppresses the other and neither can fire twice.
+// A saved lot's warning schedule is configured as durations such as "24h" or
+// "10m". The alert table records the duration in seconds, rather than putting a
+// fixed number of stages on bidrl_lots, so an operator can add or remove stages
+// without another migration.
 type warnStage struct {
-	// column is the bidrl_lots column that records this stage having fired. It is a
-	// constant from the table below, never anything a request supplies.
-	column string
-	window time.Duration
+	lead   time.Duration
 	title  string
-	// phrase completes "<lot title> ...", given the window in words.
 	phrase string
 }
 
-// Tightest window first. A lot that is already inside the last-call window the
-// first time the job sees it should ring once, as a last call, rather than twice
-// in the same tick — so the first stage that matches is the one that fires, and
-// every wider stage is marked at the same time to say it has been overtaken.
-var warnStages = []warnStage{
-	{
-		column: "last_call_alerted_at",
-		window: lastCallWindow,
-		title:  "BIDRL lot closing now",
-		phrase: "closes in under %s — bid now or let it go",
-	},
-	{
-		column: "ending_soon_alerted_at",
-		window: endingSoonWindow,
-		title:  "BIDRL lot ending soon",
-		phrase: "closes within %s",
-	},
+var defaultWarnLeadTimes = []time.Duration{
+	24 * time.Hour,
+	4 * time.Hour,
+	1 * time.Hour,
+	10 * time.Minute,
 }
 
 type warnCandidate struct {
 	id, title, ends string
-	// alerted[i] is whether stage i has already fired for this lot.
-	alerted []bool
+	// alerted is keyed by the configured lead time in seconds.
+	alerted map[int64]bool
 }
+
+func (p *Plugin) warnStages() []warnStage {
+	c := p.cfg()
+	leads := append([]time.Duration(nil), defaultWarnLeadTimes...)
+	if c.SavedAlertLeadTimes != nil {
+		leads = make([]time.Duration, 0, len(c.SavedAlertLeadTimes))
+		seen := make(map[time.Duration]struct{}, len(c.SavedAlertLeadTimes))
+		for _, raw := range c.SavedAlertLeadTimes {
+			d, err := time.ParseDuration(strings.TrimSpace(raw))
+			if err != nil || d <= 0 {
+				continue
+			}
+			if _, ok := seen[d]; ok {
+				continue
+			}
+			seen[d] = struct{}{}
+			leads = append(leads, d)
+		}
+	}
+	// The warning job chooses the tightest window that has been entered. Sorting
+	// ascending also makes a newly saved lot inside several windows fire only its
+	// closest one; the wider windows are marked as overtaken below.
+	sort.Slice(leads, func(i, j int) bool { return leads[i] < leads[j] })
+	stages := make([]warnStage, 0, len(leads))
+	for _, lead := range leads {
+		window := humanWindow(lead)
+		stages = append(stages, warnStage{
+			lead:   lead,
+			title:  "BIDRL saved lot closing in " + window,
+			phrase: "closes within %s",
+		})
+	}
+	return stages
+}
+
+func (s warnStage) leadSeconds() int64 { return int64(s.lead / time.Second) }
 
 func (p *Plugin) warnJob(jc hostjobs.Context) error {
 	h, ok := p.host()
 	if !ok {
 		return fmt.Errorf("bidrl: host is not initialized")
 	}
+	stages := p.warnStages()
+	if len(stages) == 0 {
+		return nil
+	}
 	now := h.Clock().Now()
 
-	cols := make([]string, 0, len(warnStages))
-	for _, s := range warnStages {
-		cols = append(cols, "l."+s.column)
-	}
-	// Saved lots with a known close time that still have a warning left to give.
-	// A lot every stage has already warned about is excluded in SQL rather than
-	// loaded and skipped.
-	var unfired []string
-	for _, s := range warnStages {
-		unfired = append(unfired, "l."+s.column+" = ''")
-	}
+	// The join returns one row per recorded stage. Building candidates here keeps
+	// the query bounded to saved lots while allowing the configured stage count to
+	// change without dynamic SQL or a read per stage.
 	rows, err := h.Store().Query(jc, `
-		SELECT l.id, l.title, l.ends_at, `+strings.Join(cols, ", ")+`
+		SELECT l.id, l.title, l.ends_at, COALESCE(a.lead_seconds, 0)
 		  FROM bidrl_lots l
+		  LEFT JOIN bidrl_lot_alerts a ON a.lot_id = l.id
 		 WHERE l.ends_at != ''
-		   AND (`+strings.Join(unfired, " OR ")+`)
-		   AND EXISTS (SELECT 1 FROM bidrl_favorites f WHERE f.lot_id = l.id)`)
+		   AND EXISTS (SELECT 1 FROM bidrl_favorites f WHERE f.lot_id = l.id)
+		 ORDER BY l.ends_at, l.id`)
 	if err != nil {
 		return err
 	}
-	var lots []warnCandidate
+	var lots []*warnCandidate
+	byID := make(map[string]*warnCandidate)
 	for rows.Next() {
-		c := warnCandidate{alerted: make([]bool, len(warnStages))}
-		marks := make([]string, len(warnStages))
-		dest := []any{&c.id, &c.title, &c.ends}
-		for i := range marks {
-			dest = append(dest, &marks[i])
-		}
-		if err := rows.Scan(dest...); err != nil {
+		var id, title, ends string
+		var leadSeconds int64
+		if err := rows.Scan(&id, &title, &ends, &leadSeconds); err != nil {
 			rows.Close()
 			return err
 		}
-		for i, m := range marks {
-			c.alerted[i] = m != ""
+		c := byID[id]
+		if c == nil {
+			c = &warnCandidate{id: id, title: title, ends: ends, alerted: map[int64]bool{}}
+			byID[id] = c
+			lots = append(lots, c)
 		}
-		lots = append(lots, c)
+		if leadSeconds > 0 {
+			c.alerted[leadSeconds] = true
+		}
 	}
 	err = rows.Err()
 	rows.Close()
@@ -99,26 +120,18 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 
 	marked := now.UTC().Format(time.RFC3339Nano)
 	for _, c := range lots {
-		stage, ok := dueStage(c, now)
+		stage, ok := dueStage(*c, stages, now)
 		if !ok {
 			continue
 		}
-		s := warnStages[stage]
-		body := c.title + " " + fmt.Sprintf(s.phrase, humanWindow(s.window))
-		// Every column this firing settles: the stage itself, plus the wider stages
-		// it overtook. Guarding on the fired column keeps a retry from re-alerting.
-		set := make([]string, 0, len(warnStages)-stage)
-		for i := stage; i < len(warnStages); i++ {
-			set = append(set, warnStages[i].column+" = ?")
-		}
-		args := make([]any, 0, len(set)+2)
-		for range set {
-			args = append(args, marked)
-		}
-		args = append(args, c.id)
+		s := stages[stage]
+		body := c.title + " " + fmt.Sprintf(s.phrase, humanWindow(s.lead))
 		if err := h.Store().Tx(jc, func(tx hoststorage.Tx) error {
-			result, err := tx.Exec(jc, `UPDATE bidrl_lots SET `+strings.Join(set, ", ")+
-				` WHERE id = ? AND `+s.column+` = ''`, args...)
+			// Insert the selected stage first. Its unique key is the durable
+			// exactly-once guard for the event publication.
+			result, err := tx.Exec(jc, `
+				INSERT OR IGNORE INTO bidrl_lot_alerts(lot_id, lead_seconds, alerted_at)
+				VALUES (?, ?, ?)`, c.id, s.leadSeconds(), marked)
 			if err != nil {
 				return err
 			}
@@ -127,9 +140,18 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 				return err
 			}
 			if affected == 0 {
-				// Another worker won the stage between the candidate query and this
-				// transaction. Do not publish a duplicate alert.
+				// Another worker won the same stage between the candidate query and
+				// this transaction. Do not publish a duplicate alert.
 				return nil
+			}
+			// If the lot was first observed inside a narrow window, the wider
+			// windows have been overtaken and must never fire later.
+			for i := stage + 1; i < len(stages); i++ {
+				if _, err := tx.Exec(jc, `
+					INSERT OR IGNORE INTO bidrl_lot_alerts(lot_id, lead_seconds, alerted_at)
+					VALUES (?, ?, ?)`, c.id, stages[i].leadSeconds(), marked); err != nil {
+					return err
+				}
 			}
 			return h.Events().PublishTx(jc, tx, "alert", body, alerted{
 				Title: s.title, Body: body, LotID: c.id, EndsAt: c.ends,
@@ -143,12 +165,12 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 
 // dueStage picks the tightest stage whose window this lot has entered and which
 // has not already fired for it.
-func dueStage(c warnCandidate, now time.Time) (int, bool) {
-	for i, s := range warnStages {
-		if c.alerted[i] {
+func dueStage(c warnCandidate, stages []warnStage, now time.Time) (int, bool) {
+	for i, s := range stages {
+		if c.alerted[s.leadSeconds()] {
 			continue
 		}
-		if endingWithin(c.ends, now, s.window) {
+		if endingWithin(c.ends, now, s.lead) {
 			return i, true
 		}
 	}
@@ -157,12 +179,15 @@ func dueStage(c warnCandidate, now time.Time) (int, bool) {
 
 // humanWindow says a warning window the way the alert should read it.
 func humanWindow(d time.Duration) string {
-	if d >= time.Hour {
-		h := int(d / time.Hour)
-		return fmt.Sprintf("%d hour%s", h, plural(h))
+	if d >= time.Hour && d%time.Hour == 0 {
+		hours := int(d / time.Hour)
+		return fmt.Sprintf("%d hour%s", hours, plural(hours))
 	}
-	m := int(d / time.Minute)
-	return fmt.Sprintf("%d minute%s", m, plural(m))
+	if d >= time.Minute && d%time.Minute == 0 {
+		minutes := int(d / time.Minute)
+		return fmt.Sprintf("%d minute%s", minutes, plural(minutes))
+	}
+	return d.String()
 }
 
 func plural(n int) string {

@@ -55,8 +55,9 @@ func TestWarnSkipsLotsThatAreNotSaved(t *testing.T) {
 	}
 }
 
-// A lot first seen inside the last-call window has missed the day-ahead warning.
-// It should ring once, as a last call, rather than firing both stages at once.
+// A lot first seen inside the narrowest configured window has missed the wider
+// warnings. It should ring once at the nearest stage rather than firing every
+// stage at once.
 func TestWarnRingsOnlyLastCallWhenTheLotIsAlreadyClosing(t *testing.T) {
 	ctx := context.Background()
 	h := hosttest.New(t, bidrl.New())
@@ -75,8 +76,8 @@ func TestWarnRingsOnlyLastCallWhenTheLotIsAlreadyClosing(t *testing.T) {
 	if len(bodies) != 1 {
 		t.Fatalf("alerts = %d, want 1: %v", len(bodies), bodies)
 	}
-	if !strings.Contains(bodies[0], "closes in under 30 minutes") {
-		t.Fatalf("not the last-call wording: %q", bodies[0])
+	if !strings.Contains(bodies[0], "closes within 10 minutes") {
+		t.Fatalf("not the 10-minute wording: %q", bodies[0])
 	}
 
 	// The day-ahead stage was overtaken, so a later tick must stay quiet.
@@ -88,45 +89,118 @@ func TestWarnRingsOnlyLastCallWhenTheLotIsAlreadyClosing(t *testing.T) {
 	}
 }
 
-// A lot saved well ahead of time gets both warnings, each exactly once, as the
-// clock crosses into each window.
+// A lot saved well ahead of time gets every configured warning exactly once as
+// the clock crosses into each window.
+func TestWarnUsesConfiguredLeadTimes(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, bidrl.New())
+	h.Run(ctx)
+	h.SetConfig(ctx, map[string]any{
+		"savedAlertLeadTimes": []string{"2h", "10m"},
+	})
+
+	now := h.Clock.Now().UTC()
+	insertLot(t, h, "fav-1", now.Add(90*time.Minute), now)
+	if rec := h.POST("/lots/fav-1/favorite", nil); rec.Code != http.StatusOK {
+		t.Fatalf("favorite: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("configured warn: %v", err)
+	}
+	bodies := alertBodies(h)
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "closes within 2 hours") {
+		t.Fatalf("configured first alert missing: %v", bodies)
+	}
+
+	h.Clock.Advance(80 * time.Minute) // ten minutes left
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("configured narrow warn: %v", err)
+	}
+	bodies = alertBodies(h)
+	if len(bodies) != 2 || !strings.Contains(bodies[1], "closes within 10 minutes") {
+		t.Fatalf("configured second alert missing: %v", bodies)
+	}
+}
+
+func TestWarnCanBeDisabledByAnEmptyLeadTimeList(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, bidrl.New())
+	h.Run(ctx)
+	h.SetConfig(ctx, map[string]any{"savedAlertLeadTimes": []string{}})
+
+	now := h.Clock.Now().UTC()
+	insertLot(t, h, "fav-1", now.Add(10*time.Minute), now)
+	if rec := h.POST("/lots/fav-1/favorite", nil); rec.Code != http.StatusOK {
+		t.Fatalf("favorite: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("disabled warn: %v", err)
+	}
+	if n := len(alertBodies(h)); n != 0 {
+		t.Fatalf("disabled alerts = %d", n)
+	}
+}
+
 func TestWarnRingsTheDayAheadThenTheLastCall(t *testing.T) {
 	ctx := context.Background()
 	h := hosttest.New(t, bidrl.New())
 	h.Run(ctx)
 
 	now := h.Clock.Now().UTC()
-	insertLot(t, h, "fav-1", now.Add(2*time.Hour), now)
+	insertLot(t, h, "fav-1", now.Add(26*time.Hour), now)
 	if rec := h.POST("/lots/fav-1/favorite", nil); rec.Code != http.StatusOK {
 		t.Fatalf("favorite: %d %s", rec.Code, rec.Body.Bytes())
 	}
 
 	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
-		t.Fatalf("warn: %v", err)
+		t.Fatalf("warn before first window: %v", err)
+	}
+	if n := len(alertBodies(h)); n != 0 {
+		t.Fatalf("alerted before first window: %v", alertBodies(h))
+	}
+
+	h.Clock.Advance(3 * time.Hour) // 23 hours left
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("24-hour warn: %v", err)
 	}
 	bodies := alertBodies(h)
 	if len(bodies) != 1 || !strings.Contains(bodies[0], "closes within 24 hours") {
-		t.Fatalf("day-ahead alert missing: %v", bodies)
+		t.Fatalf("24-hour alert missing: %v", bodies)
 	}
 
-	h.Clock.Advance(110 * time.Minute) // ten minutes left
+	h.Clock.Advance(19 * time.Hour) // four hours left
 	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
-		t.Fatalf("last-call warn: %v", err)
+		t.Fatalf("4-hour warn: %v", err)
 	}
 	bodies = alertBodies(h)
-	if len(bodies) != 2 {
-		t.Fatalf("alerts = %d, want 2: %v", len(bodies), bodies)
-	}
-	if !strings.Contains(bodies[1], "closes in under 30 minutes") {
-		t.Fatalf("second alert is not the last call: %q", bodies[1])
+	if len(bodies) != 2 || !strings.Contains(bodies[1], "closes within 4 hours") {
+		t.Fatalf("4-hour alert missing: %v", bodies)
 	}
 
-	// Both stages have now fired; nothing further should ring.
+	h.Clock.Advance(3 * time.Hour) // one hour left
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("1-hour warn: %v", err)
+	}
+	bodies = alertBodies(h)
+	if len(bodies) != 3 || !strings.Contains(bodies[2], "closes within 1 hour") {
+		t.Fatalf("1-hour alert missing: %v", bodies)
+	}
+
+	h.Clock.Advance(50 * time.Minute) // ten minutes left
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("10-minute warn: %v", err)
+	}
+	bodies = alertBodies(h)
+	if len(bodies) != 4 || !strings.Contains(bodies[3], "closes within 10 minutes") {
+		t.Fatalf("10-minute alert missing: %v", bodies)
+	}
+
+	// Every configured stage has now fired; nothing further should ring.
 	h.Clock.Advance(5 * time.Minute)
 	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
-		t.Fatalf("third warn: %v", err)
+		t.Fatalf("final warn: %v", err)
 	}
-	if n := len(alertBodies(h)); n != 2 {
+	if n := len(alertBodies(h)); n != 4 {
 		t.Fatalf("warn re-alerted: %d alerts", n)
 	}
 }

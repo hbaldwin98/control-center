@@ -33,6 +33,9 @@ type Admin interface {
 	PutChannel(ctx context.Context, channel ChannelConfig) error
 	DeleteChannel(ctx context.Context, id string) error
 	DeliveryHealth(ctx context.Context) ([]ChannelHealth, error)
+	PushPublicKey(ctx context.Context, channelID string) (string, error)
+	RegisterPushSubscription(ctx context.Context, channelID string, sub PushSubscription) error
+	UnregisterPushSubscription(ctx context.Context, channelID, endpoint string) error
 }
 
 type Inbox interface {
@@ -58,6 +61,27 @@ type ChannelConfig struct {
 	CredentialID string            `json:"credentialId"`
 	Enabled      bool              `json:"enabled"`
 	Settings     map[string]string `json:"settings"`
+}
+
+// PushSubscription is the browser's standard Web Push subscription. The core stores
+// no subscription material; it forwards this value to the configured push channel.
+type PushSubscription struct {
+	Endpoint       string               `json:"endpoint"`
+	ExpirationTime *int64               `json:"expirationTime"`
+	Keys           PushSubscriptionKeys `json:"keys"`
+}
+
+type PushSubscriptionKeys struct {
+	P256DH string `json:"p256dh"`
+	Auth   string `json:"auth"`
+}
+
+// PushRegistrar is an optional channel capability used by the authenticated core web
+// API to enroll a browser. It deliberately sits beside Channel: plugins never see it.
+type PushRegistrar interface {
+	PublicKey(ctx context.Context) (string, error)
+	RegisterSubscription(ctx context.Context, sub PushSubscription) error
+	UnregisterSubscription(ctx context.Context, endpoint string) error
 }
 
 type ChannelHealth struct {
@@ -92,17 +116,19 @@ type Notification struct {
 }
 
 var (
-	ErrUnknownRule     = errors.New("notifications: unknown rule")
-	ErrUnknownChannel  = errors.New("notifications: unknown channel")
-	ErrUnknownNotif    = errors.New("notifications: unknown notification")
-	ErrInvalidRule     = errors.New("notifications: invalid rule")
-	ErrInvalidChannel  = errors.New("notifications: invalid channel")
-	ErrNoActor         = errors.New("notifications: authenticated actor required")
-	ErrChannelInUse    = errors.New("notifications: channel is referenced by a rule")
-	ErrDuplicateID     = errors.New("notifications: id already exists")
-	ErrInvalidURL      = errors.New("notifications: url must be an application-relative path")
-	ErrInvalidTemplate = errors.New("notifications: invalid template")
-	ErrInvalidWhere    = errors.New("notifications: invalid where expression")
+	ErrUnknownRule             = errors.New("notifications: unknown rule")
+	ErrUnknownChannel          = errors.New("notifications: unknown channel")
+	ErrUnknownNotif            = errors.New("notifications: unknown notification")
+	ErrInvalidRule             = errors.New("notifications: invalid rule")
+	ErrInvalidChannel          = errors.New("notifications: invalid channel")
+	ErrNoActor                 = errors.New("notifications: authenticated actor required")
+	ErrChannelInUse            = errors.New("notifications: channel is referenced by a rule")
+	ErrDuplicateID             = errors.New("notifications: id already exists")
+	ErrInvalidURL              = errors.New("notifications: url must be an application-relative path")
+	ErrInvalidTemplate         = errors.New("notifications: invalid template")
+	ErrInvalidWhere            = errors.New("notifications: invalid where expression")
+	ErrPushUnsupported         = errors.New("notifications: channel does not support browser push")
+	ErrInvalidPushSubscription = errors.New("notifications: invalid push subscription")
 )
 
 type actorKey struct{}

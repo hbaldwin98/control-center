@@ -174,13 +174,7 @@ func notesAndTerms(termsJSON, notes string) string {
 	return strings.TrimSpace(strings.Join(terms, " ") + " " + notes)
 }
 
-const (
-	endingSoonWindow = 24 * time.Hour
-	// lastCallWindow is the "about to end" warning: close enough that bidding now is
-	// the only thing you can still do about it. It has to be comfortably longer than
-	// the warn tick, or a lot could close between two ticks without ever ringing.
-	lastCallWindow = 30 * time.Minute
-)
+const endingSoonWindow = 24 * time.Hour
 
 func endingSoon(endsAt string, now time.Time) bool {
 	return endingWithin(endsAt, now, endingSoonWindow)

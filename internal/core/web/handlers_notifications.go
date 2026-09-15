@@ -178,6 +178,70 @@ func (s *Server) handleNotifChannelDelete(w http.ResponseWriter, r *http.Request
 	s.writeNotifAdminErr(w, "delete channel", err)
 }
 
+func (s *Server) handleNotifPushKey(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Notifications == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeInternal, "notifications unavailable")
+		return
+	}
+	key, err := s.deps.Notifications.PushPublicKey(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeNotifPushErr(w, "get push key", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"publicKey": key})
+}
+
+func (s *Server) handleNotifPushSubscribe(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Notifications == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeInternal, "notifications unavailable")
+		return
+	}
+	var sub notifications.PushSubscription
+	if !decodeJSON(w, r, 16<<10, &sub) {
+		return
+	}
+	err := s.deps.Notifications.RegisterPushSubscription(
+		notifications.WithActor(r.Context(), actorAdmin), r.PathValue("id"), sub,
+	)
+	if err != nil {
+		s.writeNotifPushErr(w, "register push subscription", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleNotifPushUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Notifications == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeInternal, "notifications unavailable")
+		return
+	}
+	var req struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if !decodeJSON(w, r, 8<<10, &req) {
+		return
+	}
+	err := s.deps.Notifications.UnregisterPushSubscription(
+		notifications.WithActor(r.Context(), actorAdmin), r.PathValue("id"), req.Endpoint,
+	)
+	if err != nil {
+		s.writeNotifPushErr(w, "remove push subscription", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) writeNotifPushErr(w http.ResponseWriter, op string, err error) {
+	switch {
+	case errors.Is(err, notifications.ErrUnknownChannel):
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such channel")
+	case errors.Is(err, notifications.ErrPushUnsupported), errors.Is(err, notifications.ErrInvalidPushSubscription):
+		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
+	default:
+		s.fail(w, op, err)
+	}
+}
+
 func (s *Server) handleNotifHealth(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Notifications == nil {
 		writeError(w, http.StatusServiceUnavailable, CodeInternal, "notifications unavailable")

@@ -128,7 +128,7 @@ CREATE TABLE bidrl_watchlists (
 than BidRL's volume:
 
 | Stage | Cost | What it does |
-|---|---|---|
+| --- | --- | --- |
 | Rules | free, SQL | Drop lots outside the watchlist's locations, categories, and price ceiling, and any already ended. |
 | Embedding rank | one embed per *new* lot | Exactly today's intent path: probes from the query plus cached expansion, cosine against `bidrl_lot_embeddings`, keyword overlap folded on top. Survivors above `min_score`. |
 | Relevance check | one cheap chat call per candidate | A new `watch-judge` model route. Given the watchlist description and the lot's title, description, category, and identification, it answers `relevant` / `not relevant` with one sentence of reason. |
@@ -153,19 +153,25 @@ handful of chat calls, not 400 vision calls.
 
 ### Jobs
 
-Two new cron job definitions, added to `Jobs()`:
+Three scheduled job definitions, added to `Jobs()`: `sweep` and `match` for origin-safe
+automation, plus the local-only saved-lot warning tick.
 
 | Job | Schedule | Does |
-|---|---|---|
+| --- | --- | --- |
 | `sweep` | `0 */6 * * *` (configurable) | Discover open auctions at the selected locations; collect lots not yet stored, oldest-ending auction first. |
 | `match` | `30 */6 * * *` | For each enabled watchlist, run the funnel over lots seen since its `last_run_at`; scan and price survivors; insert findings. |
+| `warn` | `* * * * *` | Local SQL; publishes `bidrl.alert` once per configured saved-lot lead time (default `24h`, `4h`, `1h`, `10m`). |
 
 They are separate on purpose. `sweep` touches BIDRL and must stop on 429/403; `match` never
 touches BIDRL at all and should still run if `sweep` was throttled.
 
 `Schedule` and `TimeZone` are set on the `hostjobs.Def` — the host's cron already rechecks
 policy in its insertion transaction and drops ticks while the plugin is disabled, so the
-kill switch needs no plugin-side help. Concurrency stays `1`.
+kill switch needs no plugin-side help. Concurrency stays `1`. The warning tick is local SQL,
+never opens a browser, and runs even when origin-touching automation is off. It runs every
+minute so a short lead time is not rounded away by a fifteen-minute scheduler tick. The
+`savedAlertLeadTimes` plugin setting accepts values such as `24h`, `4h`, `1h`, and `10m`; an
+empty list disables saved-lot alerts.
 
 ### Budgets and limits
 
@@ -185,9 +191,10 @@ kill switch needs no plugin-side help. Concurrency stays `1`.
 
 `bidrl.sweep.completed`, `bidrl.match.completed`, `bidrl.finding.created`,
 `bidrl.finding.decided`. New findings also publish `bidrl.alert`, which the default
-`plugin-alert` rule delivers to the inbox and any attached ntfy channel. Saved lots
-inside 24 hours of closing publish `bidrl.alert` from the scheduled `warn` job, once
-per lot.
+`plugin-alert` rule delivers to the inbox and any attached external channel. Saved lots
+inside a configured closing window publish `bidrl.alert` from the scheduled `warn` job, once
+per lead time per lot. A lot first seen inside a narrow window fires only that nearest
+window; wider windows are recorded as overtaken rather than replayed later.
 
 ---
 
@@ -307,6 +314,10 @@ still clicking the button.
 - A rejected finding does not reappear after a later `match` run over the same lot.
 - Three consecutive 429/403 responses during a cron `sweep` set the throttle latch, later
   ticks return without opening a browser session, and the UI says so with a resume control.
-- With `automation.enabled` false, or the plugin disabled, no cron tick performs work; a
-  tick dropped for policy is not retried as a backlog.
+- With `automation.enabled` false, or the plugin disabled, no origin-touching cron tick
+  performs work; the local warning tick still checks saved lots. A tick dropped for
+  policy is not retried as a backlog.
+- A saved lot uses the configured `savedAlertLeadTimes` (default `24h`, `4h`, `1h`,
+  `10m`), fires each threshold at most once, and does not replay wider thresholds when
+  it is first noticed inside a narrower one.
 - Favorites survive "Remove ended" and survive deletion of the finding that created them.

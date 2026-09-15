@@ -103,11 +103,12 @@ allowlisted requests, so a page load costs no engine and no session slot.
 in-flight slot and a 400ms minimum interval. HTTP 429 or 403 backs off; three consecutive such responses
 stop the job rather than continuing into a ban.
 
-**Everything is user-triggered except two scheduled ticks, and those default to off.**
+**Origin work is user-triggered except two scheduled crawl ticks, and those default to off.**
 Collection starts from "add auction" or "collect", a scan from "scan", search from
 "search", intent matching from "Ask", SITES listing from "refresh list", pricing from that
 scan or from "reprice", bids from "refresh bids", a single-lot ItemData refresh from
 "enrich", expired-record deletion from "Remove ended", and a watchlist from "Run now".
+A third, local-only tick checks saved lots for the configured closing-alert lead times.
 
 **Bids are current on open.** Every screen that shows a price re-reads it before
 rendering: list views re-read the catalog for the auctions they are about to show (one
@@ -187,9 +188,10 @@ The feed's frames identify the lot only by channel name — the broadcast item o
 carries no id of its own — and `current_bid` arrives as a JSON string on one frame and
 a number on the next. Both shapes are pinned by fixtures captured from production.
 
-The exceptions are `sweep` and `match` — see [automation](#automation). Both check
-`automation.enabled` before doing anything, and it is `false` by default, so a fresh
-install still touches BidRL only when a person asks. Because scheduled work exists at all,
+The exceptions are `sweep`, `match`, and the local saved-lot warning tick — see
+[automation](#automation). `sweep` and `match` check `automation.enabled` before doing
+anything, and it is `false` by default, so a fresh install still touches BidRL only when
+a person asks. The warning tick never touches BidRL or spends AI budget. Because scheduled work exists at all,
 the manifest sets `Automated: true`: the honest reading is that this plugin *can* start
 work without a person, and the per-plugin budget that flag forces is the point of
 declaring it. Jobs still make every operation durable, cancellable, budgeted, and subject
@@ -199,8 +201,9 @@ Images and analyses are cached until the user deletes the auction or removes end
 records; identification does not rerun during a bid refresh. Deletion removes the
 auction's records and blobs. **Expiry does nothing on its own.** The stored `ends_at`
 drives a local countdown; once it passes, the lot or auction still sits in the feed,
-catalog, and collected list. There is no cron and no BidRL poll. "Remove ended" on
-`/bidrl/auctions` deletes auctions whose close (or every dated lot) is in the past,
+catalog, and collected list. There is no scheduled BidRL crawl or bid poll. The local `warn` job still checks saved
+lots once a minute against the configured lead times, without opening a browser or calling
+BidRL. "Remove ended" on `/bidrl/auctions` deletes auctions whose close (or every dated lot) is in the past,
 individual ended lots from auctions that are still open, and stale SITES listings —
 photos, analyses, and comparables included. Lots with no end time are left alone. The
 storage module's finite per-plugin quota applies, and collection stops visibly rather than
@@ -220,7 +223,7 @@ primitive.
 something:
 
 | Basis | May assert a price? |
-|---|---|
+| --- | --- |
 | `exact_text` — model number legible in a photo | yes |
 | `barcode` / SKU | yes |
 | `distinctive_visual_match` | **no** — goes to a "worth opening" bucket, no number |
@@ -264,7 +267,7 @@ condition split (working vs for-parts) does a new search.
 This is why it is the right first real plugin: it touches nearly the whole surface.
 
 | Host capability | Use |
-|---|---|
+| --- | --- |
 | `Browser()` allowlisted sessions | gallery census, `Post` ItemData, `Get` pusher snapshots and photos; bounded comparable-page extraction when search snippets omit prices |
 | `Search()` host-owned web lookup | one SearXNG lookup per lot, ranked eBay → retail → other resale |
 | `AI()` vision, multi-image, structured output | the analyze stage |
@@ -285,10 +288,10 @@ right.
 ## Plugin surface
 
 | Surface | Contract |
-|---|---|
+| --- | --- |
 | Jobs | `collect`, `scan`, `reprice`, `refresh`, `enrich`, `search`, `intent`, `discover`, `watch` — enqueue-only, concurrency 1, two-hour timeout |
 | Jobs | `sweep` (`0 */6 * * *`) and `match` (`30 */6 * * *`) — crawl and watchlist matching, both inert while `automation.enabled` is false |
-| Jobs | `warn` (`*/15 * * * *`) — local SQL; publishes `bidrl.alert` once when a saved lot is inside the 24-hour close window |
+| Jobs | `warn` (`* * * * *`) — local SQL; publishes `bidrl.alert` once per configured saved-lot lead time (default `24h`, `4h`, `1h`, `10m`) |
 | API | `GET/POST /api/plugins/bidrl/auctions`, `GET /auctions/{id}?page=&perPage=`, `DELETE /auctions/{id}`, `POST /auctions/{id}/scan`, `POST /auctions/{id}/refresh`, `POST /auctions/{id}/live?seconds=` |
 | Live | `GET /api/push/bidrl?topics=lot:<id>,…` — host-owned; one `lot:<id>` topic per lot on screen, joined to the BidRL feed while anyone is watching |
 | Events | `bids.refreshed` — many lots moved, refetch. One lot's new price is a push message, not an event: it has no history worth replaying. |
@@ -352,14 +355,15 @@ can be collected from the list instead of a pasted URL.
 ## Watchlists and findings
 
 A watchlist is a saved intent plus the rules that keep its queue short: locations,
-categories, a price ceiling, and a score floor. Running one is still user-triggered
-(`POST /watchlists/{id}/run`) — there is no cron yet.
+categories, a price ceiling, and a score floor. Running one is still available on demand
+(`POST /watchlists/{id}/run`); enabled watchlists are also run by the scheduled `match`
+tick when automation is enabled.
 
 A run is a **funnel, cheapest stage first**, so its cost tracks what you asked for rather
 than how much BidRL listed:
 
 | Stage | Cost | Drops |
-|---|---|---|
+| --- | --- | --- |
 | Rules | free, SQL | Lots outside the watchlist's locations, categories, or price ceiling — and any lot already decided for it |
 | Embedding rank | one embed per changed lot | Everything below the watchlist's `minScore`, then everything past the judge cap of 40 |
 | `watch-judge` | one cheap chat call per survivor | Listings that merely share a word with what you described |
@@ -389,19 +393,20 @@ looked would empty the queue of exactly what it exists to show you.
 
 ## Automation
 
-Two scheduled jobs, and a long list of reasons either might do nothing.
+Three scheduled jobs, and a long list of reasons either might do nothing.
 
 | Job | Cron (UTC) | Touches BidRL | Does |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `sweep` | `0 */6 * * *` | yes | Lists open auctions at the chosen locations, then collects ones not already stored, soonest to close first |
 | `match` | `30 */6 * * *` | no | Runs every enabled watchlist's funnel over what is collected |
-| `warn` | `*/15 * * * *` | no | Publishes `bidrl.alert` once when a saved lot is inside 24 hours of closing |
+| `warn` | `* * * * *` | no | Publishes `bidrl.alert` once per configured saved-lot lead time |
 
 They are separate and offset on purpose. `sweep` is the only scheduled work that reaches
 the origin and must stop when BidRL says so; `match` never reaches it and should still run
 while a sweep is latched, because there is usually a backlog of collected lots no
 watchlist has looked at. `warn` is also local: it runs even when automation is off, because
-a saved lot can close without a crawl.
+a saved lot can close without a crawl, and it checks every minute so a 10-minute warning
+is not missed between coarse crawl ticks.
 
 **`sweep` does nothing unless every guard passes.** Automation off (the default), no
 locations chosen, or a throttle latch each end the tick before a browser session is even
@@ -429,7 +434,11 @@ row. `GET /automation` reports the schedule, both last ticks with what they did,
 latch, and the count waiting in Findings; the Overview shows that as a strip.
 
 The cadence is fixed rather than configurable: job schedules are declared at registration,
-before plugin config is readable. `automation.enabled` is the switch that matters.
+before plugin config is readable. `automation.enabled` controls `sweep` and `match`; the
+saved-lot warning schedule is independent. `savedAlertLeadTimes` defaults to `24h`, `4h`,
+`1h`, and `10m`, and an empty list disables it. Each threshold is durable and fires at
+most once per saved lot. If a lot is first noticed inside a narrower window, wider missed
+windows are marked overtaken rather than replayed.
 
 ## Intent
 
@@ -499,7 +508,7 @@ because they were always the same query — `GET /feed?filter=deals` and
 (`POST/GET /search`); no screen queues it.
 
 | Preset | Means |
-|---|---|
+| --- | --- |
 | All lots | everything collected, scanned or not |
 | Best deals | priced, large gap between bid and the comparable (eBay first) |
 | Worth opening | visually interesting, deliberately unpriced |

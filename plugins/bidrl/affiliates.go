@@ -21,9 +21,13 @@ type pluginConfig struct {
 	// PreferredAffiliateIDs are numeric BidRL affiliate ids (the suffix of the
 	// landing-page slug: turlock-19 → "19"). Empty means every location on
 	// BidRL's SITES menu.
-	PreferredAffiliateIDs []string         `json:"preferredAffiliateIds"`
-	SearchScope           string           `json:"searchScope"`
-	Automation            automationConfig `json:"automation"`
+	PreferredAffiliateIDs []string `json:"preferredAffiliateIds"`
+	SearchScope           string   `json:"searchScope"`
+	// SavedAlertLeadTimes is a list such as ["24h", "4h", "1h", "10m"].
+	// A nil value means the built-in defaults; an explicitly empty list disables
+	// saved-lot alerts.
+	SavedAlertLeadTimes []string         `json:"savedAlertLeadTimes"`
+	Automation          automationConfig `json:"automation"`
 }
 
 func (p *Plugin) cfg() pluginConfig {

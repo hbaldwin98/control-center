@@ -26,6 +26,10 @@ func (s *Service) buildChannel(cfg ChannelConfig) (Channel, error) {
 		return newNtfyChannel(cfg, s.creds, s.opts.HTTPClient)
 	case "webpush":
 		return newWebPushChannel(cfg, s.creds, s.opts.HTTPClient)
+	case "cloudflare":
+		return newCloudflareChannel(cfg, s.creds, s.opts.HTTPClient)
+	case "email":
+		return newEmailChannel(cfg, s.creds)
 	default:
 		return nil, Permanent(fmt.Errorf("notifications: unknown channel kind %q", cfg.Kind))
 	}

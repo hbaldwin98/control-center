@@ -102,6 +102,13 @@ func (p *Plugin) Manifest() host.Manifest {
 						"description":"prefer ranks SITES lots first, only hides the rest, all ignores location.",
 						"enum":["prefer","only","all"]
 					},
+					"savedAlertLeadTimes":{
+						"type":"array",
+						"title":"Saved-lot alert lead times",
+						"description":"Values such as 24h, 4h, 1h, and 10m. Each saved lot fires a threshold at most once; if first seen inside a narrow window, wider missed windows are skipped. Leave empty to disable these alerts.",
+						"items":{"type":"string","pattern":"^[1-9][0-9]*(m|h)$","maxLength":8},
+						"maxItems":12
+					},
 					"automation":{
 						"type":"object",
 						"title":"Automation",
@@ -111,7 +118,7 @@ func (p *Plugin) Manifest() host.Manifest {
 							"enabled":{
 								"type":"boolean",
 								"title":"Run on a schedule",
-								"description":"When off, both scheduled ticks return without touching BidRL or spending anything."
+								"description":"When off, the scheduled collection and watchlist ticks return without touching BidRL or spending anything."
 							},
 							"affiliateIds":{
 								"type":"array",
@@ -126,7 +133,7 @@ func (p *Plugin) Manifest() host.Manifest {
 					}
 				}
 			}`),
-			Defaults: json.RawMessage(`{"preferredAffiliateIds":[],"searchScope":"prefer","automation":{"enabled":false,"affiliateIds":[],"maxAuctionsPerSweep":5,"maxNewLotsPerSweep":400}}`),
+			Defaults: json.RawMessage(`{"preferredAffiliateIds":[],"searchScope":"prefer","savedAlertLeadTimes":["24h","4h","1h","10m"],"automation":{"enabled":false,"affiliateIds":[],"maxAuctionsPerSweep":5,"maxNewLotsPerSweep":400}}`),
 		},
 	}
 }

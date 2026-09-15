@@ -320,6 +320,27 @@ func (p *Plugin) Migrate(m host.Migrator) error {
 			CREATE INDEX bidrl_valuations_lot_id ON bidrl_valuations(lot_id, id);
 			CREATE INDEX bidrl_favorites_created_lot ON bidrl_favorites(created_at DESC, lot_id);
 		`,
+	}, {
+		Version: 17,
+		Name:    "saved_lot_alerts",
+		Up: `
+			CREATE TABLE bidrl_lot_alerts (
+				lot_id       TEXT NOT NULL,
+				lead_seconds INTEGER NOT NULL CHECK (lead_seconds > 0),
+				alerted_at   TEXT NOT NULL,
+				PRIMARY KEY (lot_id, lead_seconds)
+			) STRICT;
+			CREATE INDEX bidrl_lot_alerts_lot ON bidrl_lot_alerts(lot_id);
+
+			-- Migrations 13 and 15 stored the original two warning stages on the lot.
+			-- Preserve those firings when the schedule becomes configurable.
+			INSERT INTO bidrl_lot_alerts(lot_id, lead_seconds, alerted_at)
+				SELECT id, 86400, ending_soon_alerted_at
+				FROM bidrl_lots WHERE ending_soon_alerted_at != '';
+			INSERT INTO bidrl_lot_alerts(lot_id, lead_seconds, alerted_at)
+				SELECT id, 1800, last_call_alerted_at
+				FROM bidrl_lots WHERE last_call_alerted_at != '';
+		`,
 	}})
 }
 
