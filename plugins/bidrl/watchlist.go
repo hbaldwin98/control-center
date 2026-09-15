@@ -372,6 +372,7 @@ func (p *Plugin) storeFindings(ctx context.Context, h host.Host, w watchlist, ke
 		body := fmt.Sprintf("%d new finding%s on %s", created, pluralS(created), w.Name)
 		_ = h.Events().Publish(ctx, "alert", body, alerted{
 			Title: "BIDRL finding", Body: body, WatchlistID: w.ID, Count: created,
+			URL: "/bidrl/findings",
 		})
 	}
 	return created, nil

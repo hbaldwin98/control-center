@@ -161,7 +161,7 @@ func (s *Service) seedDefaults(ctx context.Context) error {
 		defaults := []Rule{
 			{ID: "plugin-alert", Enabled: true, Match: "*.alert",
 				Where:    `string(event.source) != "core" && !string(event.source).startsWith("core.")`,
-				Channels: []string{"inbox"}, Title: "{event.subject}", Body: "{event.payload.body}"},
+				Channels: []string{"inbox"}, Title: "{event.subject}", Body: "{event.payload.body}", URL: "{event.payload.url}"},
 			{ID: "job-dead", Enabled: true, Match: "core.job.dead",
 				Channels: []string{"inbox"}, Title: "Job exhausted retries", Body: "{event.subject}"},
 			{ID: "plugin-budget-exceeded", Enabled: true, Match: "core.plugin.budget_exceeded",

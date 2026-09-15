@@ -89,7 +89,7 @@ func (s *Service) applyRule(ctx context.Context, tx storage.Tx, r storedRule, e 
 }
 
 func (s *Service) applyImmediate(ctx context.Context, tx storage.Tx, r storedRule, e events.Event, payload any, now time.Time) error {
-	title, body, err := render(r.Rule, e, payload, 0)
+	title, body, url, err := render(r.Rule, e, payload, 0)
 	if err != nil {
 		s.logRuleErr(r.ID, err)
 		return nil
@@ -102,7 +102,7 @@ func (s *Service) applyImmediate(ctx context.Context, tx storage.Tx, r storedRul
 		(id, source_event_id, uniqueness_key, rule_id, subject_source, subject_value,
 		 title, body, url, collapsed_count, available_at, created_at, in_inbox, ready_published)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`,
-		id, e.ID, key, r.ID, subjS, subjV, title, body, r.URL, rfc(now), rfc(now), boolInt(inInbox))
+		id, e.ID, key, r.ID, subjS, subjV, title, body, url, rfc(now), rfc(now), boolInt(inInbox))
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func (s *Service) applyThrottled(ctx context.Context, tx storage.Tx, r storedRul
 	if !storage.IsNoRows(err) {
 		return err
 	}
-	title, body, err := render(r.Rule, e, payload, 0)
+	title, body, url, err := render(r.Rule, e, payload, 0)
 	if err != nil {
 		s.logRuleErr(r.ID, err)
 		return nil
@@ -164,7 +164,7 @@ func (s *Service) applyThrottled(ctx context.Context, tx storage.Tx, r storedRul
 		(id, source_event_id, uniqueness_key, rule_id, subject_source, subject_value,
 		 title, body, url, collapsed_count, available_at, created_at, in_inbox, ready_published)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0)`,
-		id, e.ID, key, r.ID, subjS, subjV, title, body, r.URL, rfc(end), rfc(now), boolInt(inInbox))
+		id, e.ID, key, r.ID, subjS, subjV, title, body, url, rfc(end), rfc(now), boolInt(inInbox))
 	if err != nil {
 		return err
 	}
@@ -205,12 +205,12 @@ func (s *Service) attachThrottle(ctx context.Context, tx storage.Tx, r storedRul
 	if err := tx.QueryRow(ctx, `SELECT collapsed_count FROM core_notifications WHERE id = ?`, notifID).Scan(&collapsed); err != nil {
 		return err
 	}
-	title, body, err := render(r.Rule, e, payload, collapsed)
+	title, body, url, err := render(r.Rule, e, payload, collapsed)
 	if err != nil {
 		s.logRuleErr(r.ID, err)
 		return nil
 	}
-	_, err = tx.Exec(ctx, `UPDATE core_notifications SET title = ?, body = ? WHERE id = ?`, title, body, notifID)
+	_, err = tx.Exec(ctx, `UPDATE core_notifications SET title = ?, body = ?, url = ? WHERE id = ?`, title, body, url, notifID)
 	return err
 }
 
@@ -243,13 +243,31 @@ func (s *Service) insertSends(ctx context.Context, tx storage.Tx, notifID, notif
 	return nil
 }
 
-func render(r Rule, e events.Event, payload any, collapsed int) (title, body string, err error) {
+func render(r Rule, e events.Event, payload any, collapsed int) (title, body, url string, err error) {
 	title, err = interpolate(r.Title, e, payload, collapsed)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	body, err = interpolate(r.Body, e, payload, collapsed)
-	return title, body, err
+	if err != nil {
+		return "", "", "", err
+	}
+	url, err = renderURL(r.URL, e, payload, collapsed)
+	return title, body, url, err
+}
+
+func renderURL(tmpl string, e events.Event, payload any, collapsed int) (string, error) {
+	if tmpl == "" {
+		return "", nil
+	}
+	rendered, err := interpolate(tmpl, e, payload, collapsed)
+	if err != nil {
+		return "", err
+	}
+	// URL templates are checked again after interpolation. A payload is data, not
+	// permission to leave the application, so a bad or missing value becomes a
+	// rule error rather than an external redirect.
+	return validateURL(rendered)
 }
 
 func isUniqueErr(err error) bool {

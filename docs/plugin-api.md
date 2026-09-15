@@ -448,9 +448,10 @@ transactions when consumers depend on them being consistent.
 
 Declare every type you expect someone to write a rule against on `Manifest.Events`.
 The Plugins settings tab and Settings → notifications catalog show the prefixed match
-string (`tid.synced`) and each payload field as `{event.payload.body}`. The host does
-not refuse an undeclared `Publish`; the catalog is how the operator knows the shape
-instead of guessing.
+string (`tid.synced`) and each payload field as `{event.payload.body}`. Title, body, and URL
+rule templates can use those declared fields. A URL value must be an application-relative
+path; the host validates it again after interpolation. The host does not refuse an
+undeclared `Publish`; the catalog is how the operator knows the shape instead of guessing.
 
 **To notify the user, publish an event — do not look for a notify API.** The user writes a
 rule against your event type. For the case where you genuinely want to reach them without
@@ -461,6 +462,7 @@ rule automatically.
 ```go
 h.Events().Publish(ctx, "alert", "Auction closes in 30 minutes", map[string]string{
     "body": "6 watched lots still under estimate",
+    "url": "/hello",
 })
 ```
 

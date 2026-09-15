@@ -1,7 +1,9 @@
 package bidrl
 
 import (
+	"database/sql"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +31,8 @@ var defaultWarnLeadTimes = []time.Duration{
 
 type warnCandidate struct {
 	id, title, ends string
+	currentBidCents *int64
+	bidCount        *int
 	// alerted is keyed by the configured lead time in seconds.
 	alerted map[int64]bool
 }
@@ -84,7 +88,7 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 	// the query bounded to saved lots while allowing the configured stage count to
 	// change without dynamic SQL or a read per stage.
 	rows, err := h.Store().Query(jc, `
-		SELECT l.id, l.title, l.ends_at, COALESCE(a.lead_seconds, 0)
+		SELECT l.id, l.title, l.ends_at, l.current_bid_cents, l.bid_count, COALESCE(a.lead_seconds, 0)
 		  FROM bidrl_lots l
 		  LEFT JOIN bidrl_lot_alerts a ON a.lot_id = l.id
 		 WHERE l.ends_at != ''
@@ -97,14 +101,29 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 	byID := make(map[string]*warnCandidate)
 	for rows.Next() {
 		var id, title, ends string
+		var currentBid, bidCount sql.NullInt64
 		var leadSeconds int64
-		if err := rows.Scan(&id, &title, &ends, &leadSeconds); err != nil {
+		if err := rows.Scan(&id, &title, &ends, &currentBid, &bidCount, &leadSeconds); err != nil {
 			rows.Close()
 			return err
 		}
 		c := byID[id]
 		if c == nil {
-			c = &warnCandidate{id: id, title: title, ends: ends, alerted: map[int64]bool{}}
+			var currentBidCents *int64
+			if currentBid.Valid {
+				v := currentBid.Int64
+				currentBidCents = &v
+			}
+			var bids *int
+			if bidCount.Valid {
+				v := int(bidCount.Int64)
+				bids = &v
+			}
+			c = &warnCandidate{
+				id: id, title: title, ends: ends,
+				currentBidCents: currentBidCents, bidCount: bids,
+				alerted: map[int64]bool{},
+			}
 			byID[id] = c
 			lots = append(lots, c)
 		}
@@ -125,7 +144,7 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 			continue
 		}
 		s := stages[stage]
-		body := c.title + " " + fmt.Sprintf(s.phrase, humanWindow(s.lead))
+		body := c.title + " — " + warningBidDetails(c.currentBidCents, c.bidCount) + "; " + fmt.Sprintf(s.phrase, humanWindow(s.lead))
 		if err := h.Store().Tx(jc, func(tx hoststorage.Tx) error {
 			// Insert the selected stage first. Its unique key is the durable
 			// exactly-once guard for the event publication.
@@ -155,6 +174,8 @@ func (p *Plugin) warnJob(jc hostjobs.Context) error {
 			}
 			return h.Events().PublishTx(jc, tx, "alert", body, alerted{
 				Title: s.title, Body: body, LotID: c.id, EndsAt: c.ends,
+				CurrentBidCents: c.currentBidCents, BidCount: c.bidCount,
+				URL: "/bidrl/lot/" + url.PathEscape(c.id),
 			})
 		}); err != nil {
 			return err
@@ -175,6 +196,25 @@ func dueStage(c warnCandidate, stages []warnStage, now time.Time) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func warningBidDetails(currentBidCents *int64, bidCount *int) string {
+	price := "unknown"
+	if currentBidCents != nil {
+		price = bidAmount(*currentBidCents)
+	}
+	bids := "bid count unknown"
+	if bidCount != nil {
+		bids = fmt.Sprintf("%d bid%s", *bidCount, plural(*bidCount))
+	}
+	return "current bid " + price + ", " + bids
+}
+
+func bidAmount(cents int64) string {
+	if cents < 0 {
+		return "-$" + fmt.Sprintf("%d.%02d", (-cents)/100, (-cents)%100)
+	}
+	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
 }
 
 // humanWindow says a warning window the way the alert should read it.

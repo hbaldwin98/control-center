@@ -39,6 +39,48 @@ func TestWarnAlertsOnceWhenAFavoriteIsEndingSoon(t *testing.T) {
 	}
 }
 
+func TestWarnAlertIncludesBidSnapshotAndControlCenterLink(t *testing.T) {
+	ctx := context.Background()
+	h := hosttest.New(t, bidrl.New())
+	h.Run(ctx)
+
+	now := h.Clock.Now().UTC()
+	insertLot(t, h, "fav-1", now.Add(2*time.Hour), now)
+	if _, err := h.DB().Exec(`UPDATE bidrl_lots SET current_bid_cents = 1234, bid_count = 3 WHERE id = 'fav-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := h.POST("/lots/fav-1/favorite", nil); rec.Code != http.StatusOK {
+		t.Fatalf("favorite: %d %s", rec.Code, rec.Body.Bytes())
+	}
+	if err := h.RunJobNow(ctx, "warn", nil); err != nil {
+		t.Fatalf("warn: %v", err)
+	}
+
+	var got struct {
+		Body            string `json:"body"`
+		CurrentBidCents int64  `json:"currentBidCents"`
+		BidCount        int    `json:"bidCount"`
+		URL             string `json:"url"`
+	}
+	for _, e := range h.Events() {
+		if e.Type == "bidrl.alert" {
+			if err := json.Unmarshal(e.Payload, &got); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if got.CurrentBidCents != 1234 || got.BidCount != 3 {
+		t.Fatalf("alert bid snapshot = %+v", got)
+	}
+	if !strings.Contains(got.Body, "current bid $12.34") || !strings.Contains(got.Body, "3 bids") {
+		t.Fatalf("alert body = %q", got.Body)
+	}
+	if got.URL != "/bidrl/lot/fav-1" {
+		t.Fatalf("alert URL = %q", got.URL)
+	}
+}
+
 func TestWarnSkipsLotsThatAreNotSaved(t *testing.T) {
 	ctx := context.Background()
 	h := hosttest.New(t, bidrl.New())

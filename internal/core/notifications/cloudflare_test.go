@@ -55,12 +55,12 @@ func TestCloudflareChannelCarriesNotificationsAndSubscriptionOperations(t *testi
 		t.Fatalf("newCloudflareChannel: %v", err)
 	}
 	if err := ch.Send(context.Background(), Delivery{
-		Notification:   Notification{ID: "notification-1", Title: "Ending soon", Body: "Lot closes in 10 minutes"},
+		Notification:   Notification{ID: "notification-1", Title: "Ending soon", Body: "Lot closes in 10 minutes", URL: "/bidrl/lot/1001"},
 		IdempotencyKey: "send-1",
 	}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	if gotNotification["title"] != "Ending soon" || gotNotification["body"] != "Lot closes in 10 minutes" {
+	if gotNotification["title"] != "Ending soon" || gotNotification["body"] != "Lot closes in 10 minutes" || gotNotification["url"] != "/bidrl/lot/1001" {
 		t.Fatalf("notification = %#v", gotNotification)
 	}
 

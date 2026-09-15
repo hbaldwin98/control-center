@@ -99,4 +99,12 @@ UPDATE core_notification_rules
    AND title = '{event.type}'
    AND body = '{event.subject}';
 `},
+	{Version: 3, Name: "plugin_alert_deep_link", Up: `
+UPDATE core_notification_rules
+   SET url = '{event.payload.url}'
+ WHERE id = 'plugin-alert'
+   AND title = '{event.subject}'
+   AND body = '{event.payload.body}'
+   AND url = '';
+`},
 }

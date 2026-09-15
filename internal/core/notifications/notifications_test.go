@@ -104,6 +104,27 @@ func TestPluginAlertExcludesCore(t *testing.T) {
 	})
 }
 
+func TestPluginAlertRendersPayloadURL(t *testing.T) {
+	f := newNfix(t, nil)
+	if _, err := f.bus.Publish(f.ctx, events.Input{
+		Type: "hello.alert", Source: "hello", Subject: "lot ending",
+		Payload: map[string]any{
+			"body": "current bid $12.34, 3 bids",
+			"url":  "/bidrl/lot/1001",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "deep-linked plugin alert", func() bool {
+		page, err := f.svc.List(f.ctx, InboxQuery{Limit: 20})
+		return err == nil && len(page.Notifications) == 1
+	})
+	page, _ := f.svc.List(f.ctx, InboxQuery{Limit: 20})
+	if got := page.Notifications[0].URL; got != "/bidrl/lot/1001" {
+		t.Fatalf("notification URL = %q", got)
+	}
+}
+
 func TestNotificationEventsDoNotRecurse(t *testing.T) {
 	f := newNfix(t, nil)
 	ctx := WithActor(f.ctx, "admin")
@@ -307,6 +328,12 @@ func TestRejectsSecretChannelSettingsAndBadURL(t *testing.T) {
 		Title: "x", URL: "/jobs?id=1",
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if err := f.svc.PutRule(ctx, Rule{
+		ID: "dynamic-url", Enabled: true, Match: "hello.tick", Channels: []string{"inbox"},
+		Title: "x", URL: "{event.payload.url}",
+	}); err != nil {
+		t.Fatalf("dynamic URL: %v", err)
 	}
 }
 

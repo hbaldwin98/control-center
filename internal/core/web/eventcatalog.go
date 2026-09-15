@@ -41,6 +41,10 @@ func coreCatalogEvents() []catalogEvent {
 		Name: "body", Type: "string", Purpose: "Plain-text details for the inbox and ntfy.",
 		Path: "event.payload.body",
 	}
+	url := eventFieldView{
+		Name: "url", Type: "string", Purpose: "Application-relative path to open when the alert is clicked.",
+		Path: "event.payload.url",
+	}
 	authEndpoint := eventFieldView{
 		Name: "endpoint", Type: "string", Purpose: "Which attempt it was: login, reauth, password, or bootstrap.",
 		Path: "event.payload.endpoint",
@@ -53,7 +57,7 @@ func coreCatalogEvents() []catalogEvent {
 		{
 			Source: "*", Name: "Plugins", Type: "*.alert", Match: "*.alert",
 			Purpose: "Any plugin alert. The default plugin-alert rule uses this pattern.",
-			Fields:  []eventFieldView{body},
+			Fields:  []eventFieldView{body, url},
 		},
 		{
 			Source: "core", Name: "Jobs", Type: events.TypeJobDead, Match: events.TypeJobDead,

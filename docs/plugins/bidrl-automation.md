@@ -193,8 +193,10 @@ empty list disables saved-lot alerts.
 `bidrl.finding.decided`. New findings also publish `bidrl.alert`, which the default
 `plugin-alert` rule delivers to the inbox and any attached external channel. Saved lots
 inside a configured closing window publish `bidrl.alert` from the scheduled `warn` job, once
-per lead time per lot. A lot first seen inside a narrow window fires only that nearest
-window; wider windows are recorded as overtaken rather than replayed later.
+per lead time per lot. The saved-lot alert body includes its stored current bid and bid
+count, and its payload URL opens `/bidrl/lot/:id`; the default rule carries that path into
+push clicks. A lot first seen inside a narrow window fires only that nearest window; wider
+windows are recorded as overtaken rather than replayed later.
 
 ---
 

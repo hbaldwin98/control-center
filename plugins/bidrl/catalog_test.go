@@ -18,10 +18,12 @@ func TestCatalogMatchesThePayloads(t *testing.T) {
 		Kind: "sold", SourceURL: "https://example.test/item", SourceClass: "marketplace",
 		ReusedFromLotID: "lot-0",
 	}
+	bidCount := 3
 	hosttest.CheckEventCatalog(t, New().Manifest(), map[string]any{
 		"alert": alerted{
-			Title: "BIDRL finding", Body: "1 new finding", WatchlistID: "w-1", Count: 1,
-			LotID: "lot-1", EndsAt: "2026-09-03T00:00:00Z",
+			Title: "BIDRL saved lot closing in 10 minutes", Body: "A lot — current bid $12.34, 3 bids; closes within 10 minutes",
+			WatchlistID: "w-1", Count: 1, LotID: "lot-1", EndsAt: "2026-09-03T00:00:00Z",
+			CurrentBidCents: &bid, BidCount: &bidCount, URL: "/bidrl/lot/lot-1",
 		},
 		"finding.created":   findingCreated{WatchlistID: "w-1", Count: 2},
 		"finding.decided":   findingDecided{FindingID: "f-1", LotID: "lot-1", State: "accepted"},

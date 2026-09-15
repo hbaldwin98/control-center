@@ -40,6 +40,29 @@ func validateURL(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
+	if strings.ContainsAny(raw, "{}") {
+		if err := validateTemplate(raw); err != nil {
+			return "", err
+		}
+		// A whole URL may come from one event field (for example
+		// {event.payload.url}), so validate the shape with a safe placeholder and
+		// validate the rendered value again when the event is handled.
+		probe := templateURLProbe(raw)
+		if !strings.HasPrefix(probe, "/") {
+			if !strings.HasPrefix(raw, "{") {
+				return "", ErrInvalidURL
+			}
+			probe = "/" + probe
+		}
+		if _, err := validateStaticURL(probe); err != nil {
+			return "", err
+		}
+		return raw, nil
+	}
+	return validateStaticURL(raw)
+}
+
+func validateStaticURL(raw string) (string, error) {
 	if strings.Contains(raw, `\`) || strings.Contains(raw, "://") || strings.HasPrefix(raw, "//") {
 		return "", ErrInvalidURL
 	}
@@ -54,6 +77,27 @@ func validateURL(raw string) (string, error) {
 		return "", ErrInvalidURL
 	}
 	return u.RequestURI(), nil
+}
+
+func templateURLProbe(raw string) string {
+	var b strings.Builder
+	for {
+		i := strings.IndexByte(raw, '{')
+		if i < 0 {
+			b.WriteString(raw)
+			return b.String()
+		}
+		b.WriteString(raw[:i])
+		rest := raw[i+1:]
+		j := strings.IndexByte(rest, '}')
+		if j < 0 {
+			// validateTemplate reports the useful error; keep this helper total.
+			b.WriteString(rest)
+			return b.String()
+		}
+		b.WriteByte('x')
+		raw = rest[j+1:]
+	}
 }
 
 func throttleSubject(e events.Event) (source, value string) {

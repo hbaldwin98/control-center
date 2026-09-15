@@ -123,24 +123,30 @@ type findingDecided struct {
 // leaves the rest empty, rather than publishing a second shape under the same
 // type.
 type alerted struct {
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	WatchlistID string `json:"watchlistId,omitempty"`
-	Count       int    `json:"count,omitempty"`
-	LotID       string `json:"lotId,omitempty"`
-	EndsAt      string `json:"endsAt,omitempty"`
+	Title           string `json:"title"`
+	Body            string `json:"body"`
+	WatchlistID     string `json:"watchlistId,omitempty"`
+	Count           int    `json:"count,omitempty"`
+	LotID           string `json:"lotId,omitempty"`
+	EndsAt          string `json:"endsAt,omitempty"`
+	CurrentBidCents *int64 `json:"currentBidCents,omitempty"`
+	BidCount        *int   `json:"bidCount,omitempty"`
+	URL             string `json:"url,omitempty"`
 }
 
 func publishedEvents() []host.EventSpec {
 	return []host.EventSpec{
 		event("alert", "A new watchlist finding, or a saved lot entering one configured closing window. Matched by the default plugin-alert rule.",
 			alerted{}, map[string]string{
-				"title":       "Short headline.",
-				"body":        "What happened, ready to send.",
-				"watchlistId": "Watchlist that produced findings, when this is a finding alert.",
-				"count":       "How many new findings, when this is a finding alert.",
-				"lotId":       "The lot, when this is an ending-soon alert.",
-				"endsAt":      "When that lot closes.",
+				"title":           "Short headline.",
+				"body":            "What happened, ready to send.",
+				"watchlistId":     "Watchlist that produced findings, when this is a finding alert.",
+				"count":           "How many new findings, when this is a finding alert.",
+				"lotId":           "The lot, when this is an ending-soon alert.",
+				"endsAt":          "When that lot closes.",
+				"currentBidCents": "Current BIDRL bid in cents, when this is an ending-soon alert.",
+				"bidCount":        "Number of bids, when this is an ending-soon alert.",
+				"url":             "Application-relative Control Center path for the alert.",
 			}),
 		event("finding.created", "A watchlist produced new lots that still need a decision.",
 			findingCreated{}, map[string]string{

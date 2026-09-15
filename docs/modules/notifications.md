@@ -179,10 +179,11 @@ host applies fixed input-size, operation-count, and wall-clock limits. A syntax 
 error rejects the rule at save time; a missing optional payload field evaluates to null,
 and a runtime failure records one rule error without blocking other rules.
 
-`Title` and `Body` use variable interpolation only. Values are escaped for the target
+`Title`, `Body`, and `URL` use variable interpolation. Values are escaped for the target
 channel, and inbox rendering treats body text as plain text rather than HTML. `URL` is
 either empty or a normalized application-relative path; schemes, protocol-relative URLs,
-userinfo, and external hosts are rejected.
+userinfo, and external hosts are rejected both when a rule is saved and after a payload
+value is rendered. A missing optional URL field produces no link.
 
 ---
 
@@ -215,9 +216,11 @@ An enabled external channel (`ntfy`, `webpush`, `cloudflare`, or `email`) is att
 `*.alert` intentionally matches exactly two-segment plugin alert types. Broader plugin
 rules use patterns such as `bidrl.**`; suffix rules use patterns such as `**.failed`.
 The default alert rule also requires the source's first segment not to be `core`. Its
-title is `{event.subject}` and its body is `{event.payload.body}`, so a plugin that puts
-the headline in the subject and details in `payload.body` reaches both the inbox and any
-attached external channel without a custom rule. The administrator may add external
+title is `{event.subject}` and its body is `{event.payload.body}`. Its URL is
+`{event.payload.url}`, when the payload supplies an application-relative path, so an alert
+can deep-link to the record that raised it. A plugin that puts the headline in the subject
+and details in `payload.body` reaches both the inbox and any attached external channel
+without a custom rule. The administrator may add external
 channels to any other rule. The Cloudflare channel's push enrollment endpoints are
 authenticated core routes; the browser never receives its Worker credential.
 
@@ -225,8 +228,8 @@ Plugins declare the events they publish on `Manifest.Events`. `GET /api/admin/no
 returns those types already prefixed (`tid.synced`), each payload field as an interpolable
 path (`event.payload.body`), the envelope paths every template can use (`event.type`,
 `event.subject`, `event.source`, `event.id`, `collapsed`), and the host events the default
-rules already match. Settings renders that catalog next to the rule form so Match and Body
-are filled from the declaration rather than remembered. Publish does not require a
+rules already match. Settings renders that catalog next to the rule form so Match, Body,
+and URL templates can be filled from the declaration rather than remembered. Publish does not require a
 declaration; an undeclared type still delivers, it just does not appear in the catalog.
 
 ---

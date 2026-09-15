@@ -535,7 +535,10 @@ function RuleForm({
                 onChange={(e) => setBody(e.target.value)}
               />
             </Field>
-            <Field label="Url" hint="Optional application-relative path.">
+            <Field
+              label="Url"
+              hint="Optional application-relative path; templates such as {event.payload.url} are allowed."
+            >
               <Input value={url} onChange={(e) => setUrl(e.target.value)} />
             </Field>
             <Field label="Channels" hint="Comma-separated channel ids.">
@@ -590,8 +593,10 @@ function CatalogCard({
       <Stack>
         <Hint>
           Plugins declare the events they publish. Match is what a rule's Match
-          field accepts. Insert a payload path into Body — templates only
-          interpolate flat keys such as <code>{"{event.payload.body}"}</code>.
+          field accepts. Insert a payload path into Body or copy one into URL —
+          templates interpolate keys such as{" "}
+          <code>{"{event.payload.body}"}</code> and
+          <code>{"{event.payload.url}"}</code>.
         </Hint>
         <Async
           state={catalog}

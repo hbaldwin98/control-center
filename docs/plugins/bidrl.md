@@ -399,7 +399,7 @@ Three scheduled jobs, and a long list of reasons either might do nothing.
 | --- | --- | --- | --- |
 | `sweep` | `0 */6 * * *` | yes | Lists open auctions at the chosen locations, then collects ones not already stored, soonest to close first |
 | `match` | `30 */6 * * *` | no | Runs every enabled watchlist's funnel over what is collected |
-| `warn` | `* * * * *` | no | Publishes `bidrl.alert` once per configured saved-lot lead time |
+| `warn` | `* * * * *` | no | Publishes `bidrl.alert` once per configured saved-lot lead time, including the stored current bid, bid count, and a `/bidrl/lot/:id` deep link |
 
 They are separate and offset on purpose. `sweep` is the only scheduled work that reaches
 the origin and must stop when BidRL says so; `match` never reaches it and should still run
@@ -438,7 +438,10 @@ before plugin config is readable. `automation.enabled` controls `sweep` and `mat
 saved-lot warning schedule is independent. `savedAlertLeadTimes` defaults to `24h`, `4h`,
 `1h`, and `10m`, and an empty list disables it. Each threshold is durable and fires at
 most once per saved lot. If a lot is first noticed inside a narrower window, wider missed
-windows are marked overtaken rather than replayed.
+windows are marked overtaken rather than replayed. The warning alert body includes the
+stored current bid and number of bids; its payload also carries `currentBidCents`,
+`bidCount`, and a Control Center `url`, which the default notification rule uses for the
+lot deep link.
 
 ## Intent
 

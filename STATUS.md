@@ -199,7 +199,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Core Cloudflare Worker channel and authenticated browser subscription enrollment | ✅ | Worker owns Web Push encryption/storage; the core keeps its bearer credential server-side. |
 | Core SMTP email fallback | ✅ | STARTTLS and implicit TLS; password/API token remains in credentials. |
 | Creating an external channel attaches it to `plugin-alert` | ✅ | ntfy, webpush, Cloudflare, and email; deleting a channel removes it from rules. |
-| Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen. Event catalog lists declared plugin events and default-rule host events. |
+| Admin rules/channels, credential references, inbox REST + UI | ✅ | Settings + Inbox screen. Event catalog lists declared plugin events and default-rule host events; alert URLs may deep-link from payload fields. |
 
 ## Milestone 10 — `tid` ✅
 
@@ -232,7 +232,7 @@ administrator-owned providers, live model discovery, and a second way to authori
 | Missing-price enrichment | ✅ | If snippets omit prices, read at most two ranked result pages; extracted model and amount must remain literal evidence. |
 | Operator UI | ✅ | Treasure-hunting feed, SITES-first search, sortable decision-focused triage tables, mobile scan rows, auction view, and lot detail with evidence. Declared AI needs are assigned from the plugin screen. |
 | Automation UI | ✅ | An Automation screen: what each tick would do next and what it last did, the latch with a resume control, the Findings backlog, and the settings it runs on. Turning it on stays on the plugin's configuration screen — only the administration API writes config, so a plugin page reports its settings and links to them. |
-| Plugin alerts | ✅ | New watchlist findings publish `bidrl.alert`; saved lots alert once per configured lead time (default 24h, 4h, 1h, 10m). Delivery remains core-owned. |
+| Plugin alerts | ✅ | New watchlist findings publish `bidrl.alert`; saved lots alert once per configured lead time (default 24h, 4h, 1h, 10m) with current bid, bid count, and a Control Center lot deep link. Delivery remains core-owned. |
 | End-to-end acceptance test | ✅ | Fake BIDRL site, vision + grounded-price routes, collect → scan → feed. |
 
 ## Milestone 13 — `push` ✅
