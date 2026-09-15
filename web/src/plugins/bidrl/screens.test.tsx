@@ -97,70 +97,168 @@ function lot(over: Partial<Lot> = {}): Lot {
 
 const routes = new Map<string, unknown>([
   ["/api/plugins/bidrl/lots", { lots: [lot()], latestEventId: 1 }],
-  ["/api/plugins/bidrl/overview", {
-    stats: { auctions: 1, lots: 3, scanned: 2, unscanned: 1, priced: 1, live: 3, ending: 1 },
-    deals: [lot()],
-    closing: [lot()],
-    latestEventId: 1,
-  }],
-  ["/api/plugins/bidrl/feed", { filter: "deals", q: "", lots: [lot()], latestEventId: 1 }],
-  ["/api/plugins/bidrl/auctions", { auctions: [{ id: "42", title: "Test Warehouse", status: "open", lotCount: 3, url: "", endsAt: "", city: "Turlock", affiliateName: "SITES" }], latestEventId: 1 }],
-  ["/api/plugins/bidrl/auctions/42", { auction: { id: "42", title: "Test Warehouse", status: "open", lotCount: 1, url: "https://www.bidrl.com/auction/42" }, lots: [lot()], latestEventId: 1 }],
-  ["/api/plugins/bidrl/auctions/42/index", { title: "Test Warehouse", lots: [{ id: "1001", lotCode: "A1", title: "Keurig coffee maker" }], latestEventId: 1 }],
-  ["/api/plugins/bidrl/lots/1001", { ...lot(), photoUrls: [], latestEventId: 1 }],
+  [
+    "/api/plugins/bidrl/overview",
+    {
+      stats: {
+        auctions: 1,
+        lots: 3,
+        scanned: 2,
+        unscanned: 1,
+        priced: 1,
+        live: 3,
+        ending: 1,
+      },
+      deals: [lot()],
+      closing: [lot()],
+      latestEventId: 1,
+    },
+  ],
+  [
+    "/api/plugins/bidrl/feed",
+    { filter: "deals", q: "", lots: [lot()], latestEventId: 1 },
+  ],
+  [
+    "/api/plugins/bidrl/auctions",
+    {
+      auctions: [
+        {
+          id: "42",
+          title: "Test Warehouse",
+          status: "open",
+          lotCount: 3,
+          url: "",
+          endsAt: "",
+          city: "Turlock",
+          affiliateName: "SITES",
+        },
+      ],
+      latestEventId: 1,
+    },
+  ],
+  [
+    "/api/plugins/bidrl/auctions/42",
+    {
+      auction: {
+        id: "42",
+        title: "Test Warehouse",
+        status: "open",
+        lotCount: 1,
+        url: "https://www.bidrl.com/auction/42",
+      },
+      lots: [lot()],
+      latestEventId: 1,
+    },
+  ],
+  [
+    "/api/plugins/bidrl/auctions/42/index",
+    {
+      title: "Test Warehouse",
+      lots: [{ id: "1001", lotCode: "A1", title: "Keurig coffee maker" }],
+      latestEventId: 1,
+    },
+  ],
+  [
+    "/api/plugins/bidrl/lots/1001",
+    { ...lot(), photoUrls: [], latestEventId: 1 },
+  ],
   ["/api/plugins/bidrl/intent", { search: null, lots: [], latestEventId: 1 }],
   ["/api/plugins/bidrl/sites/auctions", { auctions: [], latestEventId: 1 }],
-  ["/api/plugins/bidrl/lots/1001/favorite", { lotId: "1001", favorite: true, note: "" }],
+  [
+    "/api/plugins/bidrl/lots/1001/favorite",
+    { lotId: "1001", favorite: true, note: "" },
+  ],
   ["/api/plugins/bidrl/lots/2002/favorite", { lotId: "2002", favorite: false }],
-  ["/api/plugins/bidrl/findings", {
-    findings: [finding()],
-    watchlists: [WATCHLIST],
-    state: "new",
-    latestEventId: 1,
-  }],
-  ["/api/plugins/bidrl/watchlists", { watchlists: [WATCHLIST], latestEventId: 1 }],
-  ["/api/plugins/bidrl/automation", {
-    automation: {
-      enabled: true,
-      locations: 2,
-      affiliateIds: ["19", "7"],
-      maxAuctionsPerSweep: 5,
-      maxNewLotsPerSweep: 400,
-      queuedAuctions: 3,
-      watchlists: 1,
-      enabledWatchlists: 1,
-      sweepSchedule: "0 */6 * * *",
-      matchSchedule: "30 */6 * * *",
-      timeZone: "UTC",
-      lastSweepAt: "2026-09-01T06:00:00Z",
-      lastSweepNote: "collected 2 auctions, 140 lots",
-      lastMatchAt: "2026-09-01T06:30:00Z",
-      lastMatchNote: "3 findings from 1 watchlists",
-      throttledUntil: "",
-      throttled: false,
-      newFindings: 3,
+  [
+    "/api/plugins/bidrl/findings",
+    {
+      findings: [finding()],
+      watchlists: [WATCHLIST],
+      state: "new",
+      latestEventId: 1,
     },
-    latestEventId: 1,
-  }],
-  ["/api/plugins/bidrl/findings/wl-1-1001/accept", { id: "wl-1-1001", state: "accepted", lotId: "1001" }],
-  ["/api/plugins/bidrl/findings/wl-1-1001/reject", { id: "wl-1-1001", state: "rejected", lotId: "1001" }],
-  ["/api/plugins/bidrl/favorites", {
-    lots: [lot({ id: "2002", title: "Coleman two-burner stove", favorite: true, savedAt: "2026-08-20T00:00:00Z", favoriteNote: "check the regulator" })],
-    latestEventId: 1,
-  }],
-  ["/api/plugins/bidrl/locations", {
-    locations: [
-      { id: "19", affiliateName: "SITES Turlock", city: "Turlock", lotCount: 3 },
-      { id: "7", affiliateName: "SITES Modesto", city: "Modesto", lotCount: 1 },
-    ],
-    latestEventId: 1,
-  }],
+  ],
+  [
+    "/api/plugins/bidrl/watchlists",
+    { watchlists: [WATCHLIST], latestEventId: 1 },
+  ],
+  [
+    "/api/plugins/bidrl/automation",
+    {
+      automation: {
+        enabled: true,
+        locations: 2,
+        affiliateIds: ["19", "7"],
+        maxAuctionsPerSweep: 5,
+        maxNewLotsPerSweep: 400,
+        queuedAuctions: 3,
+        watchlists: 1,
+        enabledWatchlists: 1,
+        sweepSchedule: "0 */6 * * *",
+        matchSchedule: "30 */6 * * *",
+        timeZone: "UTC",
+        lastSweepAt: "2026-09-01T06:00:00Z",
+        lastSweepNote: "collected 2 auctions, 140 lots",
+        lastMatchAt: "2026-09-01T06:30:00Z",
+        lastMatchNote: "3 findings from 1 watchlists",
+        throttledUntil: "",
+        throttled: false,
+        newFindings: 3,
+      },
+      latestEventId: 1,
+    },
+  ],
+  [
+    "/api/plugins/bidrl/findings/wl-1-1001/accept",
+    { id: "wl-1-1001", state: "accepted", lotId: "1001" },
+  ],
+  [
+    "/api/plugins/bidrl/findings/wl-1-1001/reject",
+    { id: "wl-1-1001", state: "rejected", lotId: "1001" },
+  ],
+  [
+    "/api/plugins/bidrl/favorites",
+    {
+      lots: [
+        lot({
+          id: "2002",
+          title: "Coleman two-burner stove",
+          favorite: true,
+          savedAt: "2026-08-20T00:00:00Z",
+          favoriteNote: "check the regulator",
+        }),
+      ],
+      latestEventId: 1,
+    },
+  ],
+  [
+    "/api/plugins/bidrl/locations",
+    {
+      locations: [
+        {
+          id: "19",
+          affiliateName: "SITES Turlock",
+          city: "Turlock",
+          lotCount: 3,
+        },
+        {
+          id: "7",
+          affiliateName: "SITES Modesto",
+          city: "Modesto",
+          lotCount: 1,
+        },
+      ],
+      latestEventId: 1,
+    },
+  ],
 ]);
 
 /** Enough of EventSource to see which feeds a screen opens, and that it closes them. */
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = [];
-  private readonly callback: (entries: Array<{ isIntersecting: boolean }>) => void;
+  private readonly callback: (
+    entries: Array<{ isIntersecting: boolean }>,
+  ) => void;
 
   constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) {
     this.callback = callback;
@@ -197,7 +295,10 @@ class FakeEventSource {
     set.add(fn);
     this.#listeners.set(type, set);
   }
-  removeEventListener(type: string, fn: (event: { data: string }) => void): void {
+  removeEventListener(
+    type: string,
+    fn: (event: { data: string }) => void,
+  ): void {
     this.#listeners.get(type)?.delete(fn);
   }
   /** Delivers one server-sent event of `type`, framed the way the host's push
@@ -220,7 +321,9 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   // React only suppresses its act() warning when the environment opts in.
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  (
+    globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
   fetchMock = vi.fn((input: string) => {
     const path = String(input).split("?")[0] ?? "";
     const body = routes.get(path);
@@ -295,6 +398,20 @@ describe("bidrl screens", () => {
     expect(container.textContent).toContain(expected);
   });
 
+  it("puts the current listing ahead of the decision report", async () => {
+    await renderAt("/bidrl/lot/1001");
+    const primary = container.querySelector(".bidrl-lot-hero__primary");
+    const report = container.querySelector(".bidrl-lot-report");
+    const source = container.querySelector(".bidrl-lot-hero__source a");
+    expect(primary?.textContent).toContain("Current bid");
+    expect(primary?.textContent).toContain("Time remaining");
+    expect(source?.textContent).toContain("Open on BidRL");
+    expect(primary?.compareDocumentPosition(report ?? primary)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(report?.textContent).toContain("Comparable");
+  });
+
   // The screen exists to answer "what happens next, and what happened last" without
   // opening the job log, so both ticks have to be on it, named and dated.
   it("reports both scheduled ticks and what they last did", async () => {
@@ -317,10 +434,16 @@ describe("bidrl screens", () => {
   });
 
   it("resumes a latched collection from the screen", async () => {
-    const before = routes.get("/api/plugins/bidrl/automation") as { automation: Record<string, unknown> };
+    const before = routes.get("/api/plugins/bidrl/automation") as {
+      automation: Record<string, unknown>;
+    };
     routes.set("/api/plugins/bidrl/automation", {
       ...before,
-      automation: { ...before.automation, throttled: true, throttledUntil: "2026-09-02T06:00:00Z" },
+      automation: {
+        ...before.automation,
+        throttled: true,
+        throttledUntil: "2026-09-02T06:00:00Z",
+      },
     });
     try {
       await renderAt("/bidrl/automation");
@@ -354,23 +477,34 @@ describe("bidrl screens", () => {
     ["/bidrl/lot/1001", "lot:1001"],
   ])("watches the lots %s is showing", async (path, topics) => {
     await renderAt(path);
-    const source = FakeEventSource.opened.find((url) => url.includes("/api/push/bidrl"));
+    const source = FakeEventSource.opened.find((url) =>
+      url.includes("/api/push/bidrl"),
+    );
     expect(source, "no live connection was opened").toBeDefined();
-    expect(new URL(String(source), "http://x").searchParams.get("topics")).toBe(topics);
+    expect(new URL(String(source), "http://x").searchParams.get("topics")).toBe(
+      topics,
+    );
   });
 
   it("opens no connection when there is nothing on screen", async () => {
     routes.set("/api/plugins/bidrl/lots", { lots: [], latestEventId: 1 });
     try {
       await renderAt("/bidrl/lots");
-      expect(FakeEventSource.opened.some((url) => url.includes("/api/push/bidrl"))).toBe(false);
+      expect(
+        FakeEventSource.opened.some((url) => url.includes("/api/push/bidrl")),
+      ).toBe(false);
     } finally {
-      routes.set("/api/plugins/bidrl/lots", { lots: [lot()], latestEventId: 1 });
+      routes.set("/api/plugins/bidrl/lots", {
+        lots: [lot()],
+        latestEventId: 1,
+      });
     }
   });
 
   it("bounds live bid topics even if a caller hands it a giant result", async () => {
-    const lots = Array.from({ length: 600 }, (_, index) => lot({ id: String(index + 1) }));
+    const lots = Array.from({ length: 600 }, (_, index) =>
+      lot({ id: String(index + 1) }),
+    );
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -378,14 +512,21 @@ describe("bidrl screens", () => {
         </MemoryRouter>,
       );
     });
-    const source = FakeEventSource.opened.find((url) => url.includes("/api/push/bidrl"));
+    const source = FakeEventSource.opened.find((url) =>
+      url.includes("/api/push/bidrl"),
+    );
     expect(source).toBeDefined();
-    const topics = new URL(String(source), "http://x").searchParams.get("topics")?.split(",") ?? [];
+    const topics =
+      new URL(String(source), "http://x").searchParams
+        .get("topics")
+        ?.split(",") ?? [];
     expect(topics).toHaveLength(100);
   });
 
   it("loads the next lot page when its scroll sentinel enters view", async () => {
-    const first = Array.from({ length: 50 }, (_, index) => lot({ id: `page1-${index}`, title: `First ${index}` }));
+    const first = Array.from({ length: 50 }, (_, index) =>
+      lot({ id: `page1-${index}`, title: `First ${index}` }),
+    );
     const second = lot({ id: "page2-0", title: "Scrolled lot" });
     fetchMock.mockImplementation((input: string) => {
       const url = String(input);
@@ -393,8 +534,24 @@ describe("bidrl screens", () => {
       let body = routes.get(path);
       if (path === "/api/plugins/bidrl/lots") {
         body = url.includes("page=2")
-          ? { lots: [second], page: 2, perPage: 50, total: 51, totalPages: 2, hasNext: false, latestEventId: 1 }
-          : { lots: first, page: 1, perPage: 50, total: 51, totalPages: 2, hasNext: true, latestEventId: 1 };
+          ? {
+              lots: [second],
+              page: 2,
+              perPage: 50,
+              total: 51,
+              totalPages: 2,
+              hasNext: false,
+              latestEventId: 1,
+            }
+          : {
+              lots: first,
+              page: 1,
+              perPage: 50,
+              total: 51,
+              totalPages: 2,
+              hasNext: true,
+              latestEventId: 1,
+            };
       }
       return Promise.resolve(
         new Response(JSON.stringify(body ?? {}), {
@@ -411,7 +568,9 @@ describe("bidrl screens", () => {
       FakeIntersectionObserver.instances.at(-1)?.trigger();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("page=2"))).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("page=2")),
+    ).toBe(true);
     expect(container.textContent).toContain("51 shown");
   });
 
@@ -419,7 +578,9 @@ describe("bidrl screens", () => {
   // the connection is actually open.
   it("shows the live badge only once the host reports the topics are registered", async () => {
     await renderAt("/bidrl/lots");
-    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    const live = FakeEventSource.instances.find((s) =>
+      s.url.includes("/api/push/bidrl"),
+    );
     expect(live).toBeDefined();
     expect(container.textContent).not.toContain("Live");
 
@@ -438,7 +599,9 @@ describe("bidrl screens", () => {
   // refetching the list it is already showing.
   it("folds a published bid into the price on screen", async () => {
     await renderAt("/bidrl/lots");
-    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    const live = FakeEventSource.instances.find((s) =>
+      s.url.includes("/api/push/bidrl"),
+    );
     expect(live).toBeDefined();
     act(() => live?.emit("ready"));
     const before = fetchMock.mock.calls.length;
@@ -460,7 +623,9 @@ describe("bidrl screens", () => {
   // permanent one, so the feed delivered a message or two and then was gone for good.
   it("lets a dropped connection retry instead of abandoning it", async () => {
     await renderAt("/bidrl/lots");
-    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    const live = FakeEventSource.instances.find((s) =>
+      s.url.includes("/api/push/bidrl"),
+    );
     expect(live).toBeDefined();
     act(() => live?.emit("ready"));
     act(() => live?.emit("available", "lot:1001"));
@@ -479,7 +644,9 @@ describe("bidrl screens", () => {
 
   it("gives up only once the browser has", async () => {
     await renderAt("/bidrl/lots");
-    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    const live = FakeEventSource.instances.find((s) =>
+      s.url.includes("/api/push/bidrl"),
+    );
     // readyState 2 is CLOSED: retrying is over, so holding the object open buys nothing.
     act(() => live?.fail(2));
     expect(live?.closed).toBe(true);
@@ -489,7 +656,9 @@ describe("bidrl screens", () => {
   // left the badge lit over prices that had stopped moving.
   it("drops the badge when the host says a topic is no longer fed", async () => {
     await renderAt("/bidrl/lots");
-    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    const live = FakeEventSource.instances.find((s) =>
+      s.url.includes("/api/push/bidrl"),
+    );
     act(() => live?.emit("ready"));
     act(() => live?.emit("available", "lot:1001"));
     expect(container.textContent).toContain("Live");
@@ -504,7 +673,9 @@ describe("bidrl screens", () => {
 
   it("closes the connection when the screen goes away", async () => {
     await renderAt("/bidrl/lots");
-    const live = FakeEventSource.instances.find((s) => s.url.includes("/api/push/bidrl"));
+    const live = FakeEventSource.instances.find((s) =>
+      s.url.includes("/api/push/bidrl"),
+    );
     expect(live).toBeDefined();
     expect(live?.closed).toBe(false);
     act(() => root.render(<div />));
@@ -513,7 +684,9 @@ describe("bidrl screens", () => {
 
   it("shows every section tab on each screen, with the current one marked", async () => {
     await renderAt("/bidrl/lots");
-    const tabs = [...container.querySelectorAll(".cc-tabs a")].map((a) => a.textContent);
+    const tabs = [...container.querySelectorAll(".cc-tabs a")].map(
+      (a) => a.textContent,
+    );
     expect(tabs).toEqual([
       "Overview",
       "Auctions",
@@ -523,12 +696,16 @@ describe("bidrl screens", () => {
       "Intent",
       "Automation",
     ]);
-    expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
+    expect(
+      container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent,
+    ).toBe("Lots");
   });
 
   it("keeps a lot's detail screen under the Lots tab rather than blanking the strip", async () => {
     await renderAt("/bidrl/lot/1001");
-    expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Lots");
+    expect(
+      container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent,
+    ).toBe("Lots");
   });
 
   it("opens a lot with a decision-first hero and evidence sections", async () => {
@@ -540,9 +717,15 @@ describe("bidrl screens", () => {
     try {
       await renderAt("/bidrl/lot/1001");
       expect(container.querySelector(".bidrl-lot-hero")).not.toBeNull();
-      expect(container.querySelector(".bidrl-lot-hero__gallery")).not.toBeNull();
-      expect(container.querySelector(".bidrl-lot-opportunity")?.textContent).toContain("88% below");
-      expect(container.querySelector(".bidrl-lot-detail-grid__aside")).not.toBeNull();
+      expect(
+        container.querySelector(".bidrl-lot-hero__gallery"),
+      ).not.toBeNull();
+      expect(
+        container.querySelector(".bidrl-lot-opportunity")?.textContent,
+      ).toContain("88% below");
+      expect(
+        container.querySelector(".bidrl-lot-detail-grid__aside"),
+      ).not.toBeNull();
       expect(container.textContent).toContain("Save lot");
       expect(container.textContent).toContain("Auction details");
       expect(container.textContent).toContain("Comparable evidence");
@@ -570,14 +753,16 @@ describe("bidrl screens", () => {
     );
     expect(origin?.closest(".bidrl-crumbs")).not.toBeNull();
     expect(origin?.closest(".cc-page__header")).toBeNull();
-    expect(origin?.getAttribute("href")).toBe("https://www.bidrl.com/auction/42");
+    expect(origin?.getAttribute("href")).toBe(
+      "https://www.bidrl.com/auction/42",
+    );
   });
 
   it("queues a scan from the auction command row", async () => {
     await renderAt("/bidrl/auction/42");
-    const scan = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === "Scan",
-    );
+    const scan = [
+      ...container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent === "Scan");
     expect(scan).toBeDefined();
     await act(async () => {
       scan?.click();
@@ -593,9 +778,15 @@ describe("bidrl screens", () => {
 
   it("reads the catalog's filters out of the query string", async () => {
     await renderAt("/bidrl/lots?filter=deals&bucket=priced&q=keurig");
-    const preset = container.querySelector<HTMLSelectElement>('select[aria-label="Preset"]');
-    const bucket = container.querySelector<HTMLSelectElement>('select[aria-label="Bucket"]');
-    const find = container.querySelector<HTMLInputElement>('input[aria-label="Lot search"]');
+    const preset = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Preset"]',
+    );
+    const bucket = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Bucket"]',
+    );
+    const find = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Lot search"]',
+    );
     expect(preset?.value).toBe("deals");
     expect(bucket?.value).toBe("priced");
     expect(find?.value).toBe("keurig");
@@ -604,14 +795,21 @@ describe("bidrl screens", () => {
   it("asks the API for the filters and meaningful sort named by the URL", async () => {
     await renderAt("/bidrl/lots?filter=deals&bucket=priced");
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((url) =>
-      url.includes("filter=deals") && url.includes("bucket=priced") && url.includes("sort=gap.desc")
-    )).toBe(true);
+    expect(
+      calls.some(
+        (url) =>
+          url.includes("filter=deals") &&
+          url.includes("bucket=priced") &&
+          url.includes("sort=gap.desc"),
+      ),
+    ).toBe(true);
   });
 
   it("keeps the old rows visible with an updating indicator while sorting", async () => {
     let releaseSorted: ((response: Response) => void) | null = null;
-    const fallback = fetchMock.getMockImplementation() as ((input: string) => Promise<Response>) | undefined;
+    const fallback = fetchMock.getMockImplementation() as
+      | ((input: string) => Promise<Response>)
+      | undefined;
     fetchMock.mockImplementation((input: string) => {
       if (String(input).includes("sort=name.asc")) {
         return new Promise<Response>((resolve) => {
@@ -622,7 +820,9 @@ describe("bidrl screens", () => {
     });
 
     await renderAt("/bidrl/lots");
-    const sort = container.querySelector<HTMLSelectElement>('select[aria-label="Sort lots"]');
+    const sort = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Sort lots"]',
+    );
     expect(sort?.value).toBe("lot.asc");
     await act(async () => {
       if (!sort) throw new Error("sort control missing");
@@ -637,10 +837,15 @@ describe("bidrl screens", () => {
     expect(releaseSorted).not.toBeNull();
 
     await act(async () => {
-      releaseSorted?.(new Response(JSON.stringify({
-        lots: [lot({ id: "2002", title: "Sorted coffee maker" })],
-        latestEventId: 2,
-      }), { headers: { "Content-Type": "application/json" } }));
+      releaseSorted?.(
+        new Response(
+          JSON.stringify({
+            lots: [lot({ id: "2002", title: "Sorted coffee maker" })],
+            latestEventId: 2,
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      );
       await Promise.resolve();
     });
     expect(container.textContent).toContain("Sorted coffee maker");
@@ -654,8 +859,20 @@ describe("bidrl screens", () => {
 
   it("keeps every lot as a separate row in table view", async () => {
     const lots = [
-      lot({ id: "1001", lotCode: "1001", title: "Matching item", identification: "Shared model", modelOrSku: "shared" }),
-      lot({ id: "1002", lotCode: "1002", title: "Matching item", identification: "Shared model", modelOrSku: "shared" }),
+      lot({
+        id: "1001",
+        lotCode: "1001",
+        title: "Matching item",
+        identification: "Shared model",
+        modelOrSku: "shared",
+      }),
+      lot({
+        id: "1002",
+        lotCode: "1002",
+        title: "Matching item",
+        identification: "Shared model",
+        modelOrSku: "shared",
+      }),
     ];
     await act(async () => {
       root.render(
@@ -664,7 +881,9 @@ describe("bidrl screens", () => {
         </MemoryRouter>,
       );
     });
-    expect(container.querySelectorAll(".bidrl-lot-table tbody > tr")).toHaveLength(2);
+    expect(
+      container.querySelectorAll(".bidrl-lot-table tbody > tr"),
+    ).toHaveLength(2);
     expect(container.textContent).toContain("Opportunity");
     expect(container.textContent).toContain("Lot 1001");
     expect(container.textContent).toContain("Lot 1002");
@@ -688,7 +907,9 @@ describe("bidrl screens", () => {
           </MemoryRouter>,
         );
       });
-      expect(timer.mock.calls.filter((call) => call[1] === 1_000)).toHaveLength(1);
+      expect(timer.mock.calls.filter((call) => call[1] === 1_000)).toHaveLength(
+        1,
+      );
     } finally {
       timer.mockRestore();
     }
@@ -696,10 +917,15 @@ describe("bidrl screens", () => {
 
   it("lazy-loads lot thumbnails and decodes them asynchronously", async () => {
     const before = routes.get("/api/plugins/bidrl/lots");
-    routes.set("/api/plugins/bidrl/lots", { lots: [lot({ thumbUrl: "/api/blobs/lot-thumb" })], latestEventId: 1 });
+    routes.set("/api/plugins/bidrl/lots", {
+      lots: [lot({ thumbUrl: "/api/blobs/lot-thumb" })],
+      latestEventId: 1,
+    });
     try {
       await renderAt("/bidrl/lots");
-      const image = container.querySelector<HTMLImageElement>(".bidrl-lot-card__img");
+      const image = container.querySelector<HTMLImageElement>(
+        ".bidrl-lot-card__img",
+      );
       expect(image?.loading).toBe("lazy");
       expect(image?.decoding).toBe("async");
     } finally {
@@ -711,18 +937,26 @@ describe("bidrl screens", () => {
     await renderAt("/bidrl/lots");
     const facts = container.querySelector(".bidrl-lot-card__facts");
     expect(facts).not.toBeNull();
-    expect(facts?.querySelector(".bidrl-lot-card__where")?.textContent).toContain("Turlock");
-    expect(facts?.querySelector(".bidrl-lot-card__when")?.textContent).toBeTruthy();
+    expect(
+      facts?.querySelector(".bidrl-lot-card__where")?.textContent,
+    ).toContain("Turlock");
+    expect(
+      facts?.querySelector(".bidrl-lot-card__when")?.textContent,
+    ).toBeTruthy();
     expect(facts?.querySelectorAll(".cc-badge")).toHaveLength(2);
   });
 
   it("reads several locations out of the query string and asks the API for exactly those", async () => {
     await renderAt("/bidrl/lots?affiliate=19,7");
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((url) => url.includes("/lots?") && url.includes("affiliate=19%2C7"))).toBe(true);
-    const pressed = [...container.querySelectorAll('.bidrl-loc-filter [aria-pressed="true"]')].map(
-      (b) => b.textContent,
-    );
+    expect(
+      calls.some(
+        (url) => url.includes("/lots?") && url.includes("affiliate=19%2C7"),
+      ),
+    ).toBe(true);
+    const pressed = [
+      ...container.querySelectorAll('.bidrl-loc-filter [aria-pressed="true"]'),
+    ].map((b) => b.textContent);
     expect(pressed).toHaveLength(2);
   });
 
@@ -734,9 +968,13 @@ describe("bidrl screens", () => {
 
   it("puts a star on every lot in the catalog, pressed only for the ones already saved", async () => {
     await renderAt("/bidrl/lots");
-    const stars = [...container.querySelectorAll<HTMLButtonElement>(".bidrl-star")];
+    const stars = [
+      ...container.querySelectorAll<HTMLButtonElement>(".bidrl-star"),
+    ];
     expect(stars.length).toBeGreaterThan(0);
-    expect(stars.every((b) => b.getAttribute("aria-pressed") === "false")).toBe(true);
+    expect(stars.every((b) => b.getAttribute("aria-pressed") === "false")).toBe(
+      true,
+    );
   });
 
   it("saves a lot by POSTing rather than queueing a job, and reports it straight away", async () => {
@@ -745,41 +983,54 @@ describe("bidrl screens", () => {
     await act(async () => {
       star?.click();
     });
-    const calls = fetchMock.mock.calls.map(
-      (c) => ({ url: String(c[0]), method: (c[1] as RequestInit | undefined)?.method }),
-    );
+    const calls = fetchMock.mock.calls.map((c) => ({
+      url: String(c[0]),
+      method: (c[1] as RequestInit | undefined)?.method,
+    }));
     expect(
-      calls.some((c) => c.url.endsWith("/lots/1001/favorite") && c.method === "POST"),
+      calls.some(
+        (c) => c.url.endsWith("/lots/1001/favorite") && c.method === "POST",
+      ),
     ).toBe(true);
-    expect(container.querySelector(".bidrl-star")?.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      container.querySelector(".bidrl-star")?.getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("shows why a finding surfaced, as the reason rather than a bare score", async () => {
     await renderAt("/bidrl/findings");
     expect(container.textContent).toContain("Camping");
-    expect(container.textContent).toContain("a two-burner camp stove, which is camping gear");
+    expect(container.textContent).toContain(
+      "a two-burner camp stove, which is camping gear",
+    );
   });
 
   it("records a decision by POSTing rather than queueing a job", async () => {
     await renderAt("/bidrl/findings");
-    const accept = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === "Accept",
-    );
+    const accept = [
+      ...container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent === "Accept");
     expect(accept).toBeDefined();
     await act(async () => {
       accept?.click();
     });
-    const calls = fetchMock.mock.calls.map(
-      (c) => ({ url: String(c[0]), method: (c[1] as RequestInit | undefined)?.method }),
-    );
+    const calls = fetchMock.mock.calls.map((c) => ({
+      url: String(c[0]),
+      method: (c[1] as RequestInit | undefined)?.method,
+    }));
     expect(
-      calls.some((c) => c.url.endsWith("/findings/wl-1-1001/accept") && c.method === "POST"),
+      calls.some(
+        (c) =>
+          c.url.endsWith("/findings/wl-1-1001/accept") && c.method === "POST",
+      ),
     ).toBe(true);
   });
 
   it("keeps the Findings tab current while you are editing watchlists", async () => {
     await renderAt("/bidrl/watchlists");
-    expect(container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent).toBe("Findings");
+    expect(
+      container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent,
+    ).toBe("Findings");
   });
 
   it("says what a watchlist narrows to without opening a form", async () => {
@@ -790,15 +1041,17 @@ describe("bidrl screens", () => {
 
   it("says what the schedule is doing on the page you open first", async () => {
     await renderAt("/bidrl");
-    expect(container.textContent).toContain("On, sweeping 2 locations every six hours.");
+    expect(container.textContent).toContain(
+      "On, sweeping 2 locations every six hours.",
+    );
     expect(container.textContent).toContain("collected 2 auctions, 140 lots");
   });
 
   it("offers the overview's counts as links into the catalog that proves them", async () => {
     await renderAt("/bidrl");
-    const targets = [...container.querySelectorAll<HTMLAnchorElement>("a.bidrl-stat")].map(
-      (a) => a.getAttribute("href"),
-    );
+    const targets = [
+      ...container.querySelectorAll<HTMLAnchorElement>("a.bidrl-stat"),
+    ].map((a) => a.getAttribute("href"));
     expect(targets).toContain("/bidrl/lots?filter=deals");
     expect(targets).toContain("/bidrl/lots?ending=soon");
   });
@@ -808,17 +1061,22 @@ describe("bidrl screens", () => {
   it("carries the filters a list was left with into its tab link", async () => {
     await renderAt("/bidrl/lots?filter=deals&bucket=priced");
     await revisit("/bidrl/saved");
-    const lotsTab = [...container.querySelectorAll<HTMLAnchorElement>(".cc-tabs a")].find(
-      (a) => a.textContent === "Lots",
+    const lotsTab = [
+      ...container.querySelectorAll<HTMLAnchorElement>(".cc-tabs a"),
+    ].find((a) => a.textContent === "Lots");
+    expect(lotsTab?.getAttribute("href")).toBe(
+      "/bidrl/lots?filter=deals&bucket=priced",
     );
-    expect(lotsTab?.getAttribute("href")).toBe("/bidrl/lots?filter=deals&bucket=priced");
   });
 
   it("returns a list to the offset it was scrolled to", async () => {
     // The shell's scroller, which is what a screen scrolls inside.
     const main = document.createElement("div");
     main.className = "cc-main";
-    Object.defineProperty(main, "scrollTop", { get: () => 640, configurable: true });
+    Object.defineProperty(main, "scrollTop", {
+      get: () => 640,
+      configurable: true,
+    });
     main.scrollTo = vi.fn();
     document.body.appendChild(main);
     try {
@@ -852,11 +1110,14 @@ describe("bidrl screens", () => {
       await act(async () => {
         await Promise.resolve();
       });
-      const calls = fetchMock.mock.calls.map(
-        (c) => ({ url: String(c[0]), method: (c[1] as RequestInit | undefined)?.method }),
-      );
+      const calls = fetchMock.mock.calls.map((c) => ({
+        url: String(c[0]),
+        method: (c[1] as RequestInit | undefined)?.method,
+      }));
       expect(
-        calls.some((c) => c.url.endsWith("/lots/2002/favorite") && c.method === "DELETE"),
+        calls.some(
+          (c) => c.url.endsWith("/lots/2002/favorite") && c.method === "DELETE",
+        ),
       ).toBe(true);
       expect(container.textContent).not.toContain("Coleman two-burner stove");
     } finally {
@@ -866,7 +1127,9 @@ describe("bidrl screens", () => {
 
   it("routes in-plugin links instead of reloading the document", async () => {
     await renderAt("/bidrl/lots");
-    const internal = [...container.querySelectorAll<HTMLAnchorElement>("a[href^='/bidrl']")];
+    const internal = [
+      ...container.querySelectorAll<HTMLAnchorElement>("a[href^='/bidrl']"),
+    ];
     expect(internal.length).toBeGreaterThan(0);
     for (const a of internal) {
       expect(a.getAttribute("target")).not.toBe("_blank");

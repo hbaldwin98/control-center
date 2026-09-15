@@ -1,25 +1,7 @@
 /** The pieces one lot is made of: its star, its thumb, its title, its note. */
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
-import {
-  Badge,
-  Card,
-  Dash,
-  Hint,
-  Input,
-  Link,
-  Stack,
-} from "@cc/ui";
-import {
-  cents,
-  comparableHint,
-  locationLabelOrEmpty,
-  type Lot,
-} from "./model";
+import { createContext, useContext, useEffect, useState } from "react";
+import { Badge, Card, Dash, Hint, Input, Link, Stack } from "@cc/ui";
+import { cents, comparableHint, locationLabelOrEmpty, type Lot } from "./model";
 import { api } from "./api";
 import { BidrlLink } from "./chrome";
 
@@ -30,7 +12,9 @@ import { BidrlLink } from "./chrome";
  */
 export const FavoriteChanged = createContext<() => void>(() => {});
 
-export function bucketTone(bucket: string): "neutral" | "ok" | "warn" | "danger" {
+export function bucketTone(
+  bucket: string,
+): "neutral" | "ok" | "warn" | "danger" {
   if (bucket === "priced") return "ok";
   if (bucket === "worth_opening" || bucket === "research") return "warn";
   if (bucket === "discarded" || bucket === "rejected") return "danger";
@@ -69,7 +53,9 @@ export function FavoriteStar({ lot }: { lot: Lot }) {
       type="button"
       className={`bidrl-star${saved ? " bidrl-star--on" : ""}`}
       aria-pressed={saved}
-      aria-label={saved ? `Unsave ${lot.title || lot.id}` : `Save ${lot.title || lot.id}`}
+      aria-label={
+        saved ? `Unsave ${lot.title || lot.id}` : `Save ${lot.title || lot.id}`
+      }
       title={saved ? "Saved — remove from Saved" : "Save for later"}
       disabled={busy}
       onClick={(e) => {
@@ -83,10 +69,24 @@ export function FavoriteStar({ lot }: { lot: Lot }) {
   );
 }
 
-export function LotThumb({ lot, className }: { lot: Lot; className?: string | undefined }) {
+export function LotThumb({
+  lot,
+  className,
+}: {
+  lot: Lot;
+  className?: string | undefined;
+}) {
   if (!lot.thumbUrl) {
     /* A box, not a dash: a missing photo must not shorten the row it sits in. */
-    return <div className={className ? `${className}-empty` : "cc-lot-thumb bidrl-thumb-empty"}><Dash /></div>;
+    return (
+      <div
+        className={
+          className ? `${className}-empty` : "cc-lot-thumb bidrl-thumb-empty"
+        }
+      >
+        <Dash />
+      </div>
+    );
   }
   return (
     <img
@@ -101,7 +101,13 @@ export function LotThumb({ lot, className }: { lot: Lot; className?: string | un
   );
 }
 
-export function LotThumbLink({ lot, className }: { lot: Lot; className?: string | undefined }) {
+export function LotThumbLink({
+  lot,
+  className,
+}: {
+  lot: Lot;
+  className?: string | undefined;
+}) {
   const thumb = <LotThumb lot={lot} className={className} />;
   if (!lot.thumbUrl) return thumb;
   return (
@@ -114,7 +120,6 @@ export function LotThumbLink({ lot, className }: { lot: Lot; className?: string 
     </Link>
   );
 }
-
 
 /**
  * The saved note. Only on the lot page: a note is something you write once and read
@@ -185,7 +190,9 @@ export function LotMeta({ lot }: { lot: Lot }) {
   return (
     <>
       {lot.category ? <Badge>{lot.category}</Badge> : null}
-      <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
+      <Badge tone={bucketTone(lot.bucket)}>
+        {lot.bucket.replace("_", " ")}
+      </Badge>
     </>
   );
 }
@@ -198,15 +205,30 @@ export function LotMeta({ lot }: { lot: Lot }) {
 export function LotLocation({ lot }: { lot: Lot }) {
   const label = locationLabelOrEmpty(lot);
   if (!label) return null;
-  return <span className="bidrl-lot-location" title={`Auction location: ${label}`}>{label}</span>;
+  return (
+    <span className="bidrl-lot-location" title={`Auction location: ${label}`}>
+      {label}
+    </span>
+  );
 }
 
-export function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: boolean }) {
-  const ident = lot.identification && lot.identification !== lot.title ? lot.identification : "";
+export function LotTitle({
+  lot,
+  showLotCode = true,
+}: {
+  lot: Lot;
+  showLotCode?: boolean;
+}) {
+  const ident =
+    lot.identification && lot.identification !== lot.title
+      ? lot.identification
+      : "";
   const hint = ident || (showLotCode ? lot.lotCode : "");
   return (
     <>
-      <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</Link>
+      <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
+        {lot.title || lot.id}
+      </Link>
       {hint || lot.url ? (
         <Hint>
           {hint}
@@ -225,24 +247,33 @@ export function LotTitle({ lot, showLotCode = true }: { lot: Lot; showLotCode?: 
 /** The compact identity block used by the triage table. It avoids repeating a long
  * external-link label in every row while keeping lot code, model, and location visible. */
 export function LotTableTitle({ lot }: { lot: Lot }) {
-  const ident = lot.identification && lot.identification !== lot.title ? lot.identification : "";
+  const ident =
+    lot.identification && lot.identification !== lot.title
+      ? lot.identification
+      : "";
   return (
     <div className="bidrl-table-item">
       <LotThumbLink lot={lot} className="bidrl-table-thumb" />
       <div className="bidrl-table-item__body">
         <div className="bidrl-table-item__eyebrow">
-          {lot.lotCode ? `Lot ${lot.lotCode}` : "Lot"}
+          <span className="bidrl-table-item__lot-code">
+            {lot.lotCode ? `Lot ${lot.lotCode}` : "Lot"}
+          </span>
           {lot.category ? <Badge>{lot.category}</Badge> : null}
-          <Badge tone={bucketTone(lot.bucket)}>{lot.bucket.replace("_", " ")}</Badge>
+          <Badge tone={bucketTone(lot.bucket)}>
+            {lot.bucket.replace("_", " ")}
+          </Badge>
         </div>
         <div className="bidrl-table-item__title">
-          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>{lot.title || lot.id}</Link>
+          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
+            {lot.title || lot.id}
+          </Link>
           {lot.url ? (
             <BidrlLink
               href={lot.url}
               ariaLabel={`Open ${lot.title || lot.id} on BidRL`}
             >
-              ↗
+              BidRL ↗
             </BidrlLink>
           ) : null}
         </div>
@@ -256,7 +287,12 @@ export function LotTableTitle({ lot }: { lot: Lot }) {
 }
 
 export function LotComparable({ lot }: { lot: Lot }) {
-  if (lot.priceCents == null) return <span className="bidrl-table-comp__value"><Dash /></span>;
+  if (lot.priceCents == null)
+    return (
+      <span className="bidrl-table-comp__value">
+        <Dash />
+      </span>
+    );
   return (
     <>
       <span className="bidrl-table-comp__value">{cents(lot.priceCents)}</span>
