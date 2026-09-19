@@ -4,6 +4,20 @@
   "short_name": "Control Center",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#fbfbfa",
-  "theme_color": "#3f5bd9"
+  "background_color": "#08090a",
+  "theme_color": "#08090a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon-maskable.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
 }
