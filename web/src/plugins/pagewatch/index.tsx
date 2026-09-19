@@ -11,7 +11,7 @@ import { History } from "./screens/history";
 
 const pagewatch: PluginModule = {
   id: "pagewatch",
-  nav: [{ path: "/pagewatch", label: "Page Watch" }],
+  nav: [{ path: "/pagewatch", label: "Page Watch", icon: "pagewatch" }],
   routes: [{ path: "/pagewatch", element: <History /> }],
   dashboard: {
     summary: "Checks one public page for expected text and content drift every six hours.",

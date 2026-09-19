@@ -6,6 +6,24 @@
  */
 import type { ComponentType, ReactElement } from "react";
 
+export type NavIconName =
+  | "command"
+  | "auction"
+  | "jobs"
+  | "sessions"
+  | "inbox"
+  | "plugins"
+  | "events"
+  | "costs"
+  | "models"
+  | "settings"
+  | "plugin"
+  | "hello"
+  | "pagewatch"
+  | "tid"
+  | "bell"
+  | "search";
+
 /** A committed event as it appears on the wire and in `useEvents`. */
 export type Event<T = unknown> = {
   /** Decimal int64. Compare as BigInt, never as Number. */
@@ -30,7 +48,8 @@ export type NavItem = {
   /** Must stay below `/<plugin-id>`. */
   path: string;
   label: string;
-  icon?: string;
+  /** A shared, frontend-only icon name. Plugins never provide SVG or shell components. */
+  icon?: NavIconName;
   /** Render this plugin entry in the shell's primary command navigation. */
   topLevel?: boolean;
 };

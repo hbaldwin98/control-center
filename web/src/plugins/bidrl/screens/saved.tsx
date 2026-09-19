@@ -89,6 +89,7 @@ export function SavedLots() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL / Lots"
         title="Saved"
         lede="Your starred lots, with photos and comparables kept after auctions close."
         actions={<LiveDot status={live.status} />}

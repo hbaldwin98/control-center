@@ -15,7 +15,7 @@ import { History } from "./screens/history";
 
 const hello: PluginModule = {
   id: "hello",
-  nav: [{ path: "/hello", label: "Hello" }],
+  nav: [{ path: "/hello", label: "Hello", icon: "hello" }],
   routes: [{ path: "/hello", element: <History /> }],
   dashboard: {
     summary: "Ticks a row, a blob, an event, and a tiny AI call every minute.",

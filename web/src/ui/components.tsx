@@ -29,10 +29,12 @@ export function Page({ children }: { children: ReactNode }) {
 }
 
 export function PageHeader({
+    eyebrow,
     title,
     lede,
     actions,
 }: {
+    eyebrow?: ReactNode | undefined;
     title: string;
     lede?: string | undefined;
     actions?: ReactNode | undefined;
@@ -40,6 +42,7 @@ export function PageHeader({
     return (
         <header className="cc-page__header">
             <div className="cc-page__heading">
+                {eyebrow ? <span className="cc-page__eyebrow">{eyebrow}</span> : null}
                 <h1>{title}</h1>
                 {lede ? <p className="cc-page__lede">{lede}</p> : null}
             </div>

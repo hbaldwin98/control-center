@@ -118,6 +118,7 @@ export function LotsCatalog() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL / Lots"
         title="Lots"
         lede="Search collected lots by opportunity, deadline, category, or location."
         actions={<LiveDot status={live.status} />}
@@ -127,6 +128,7 @@ export function LotsCatalog() {
         <Notices message={null} error={null} disabled={disabled} />
         <Card
           title="Catalog"
+          className="bidrl-surface bidrl-catalog-surface"
           actions={
             <>
               {narrowed ? (

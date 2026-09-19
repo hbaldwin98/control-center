@@ -54,6 +54,7 @@ export function IntentSearch() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL / Actions"
         title="Intent"
         lede="Ask for what you actually want — camping gear, not the word camp."
       />

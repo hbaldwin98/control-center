@@ -1,6 +1,6 @@
 /** Navigation and layout shared across screens. */
 import { type ReactNode } from "react";
-import { Button, EmptyState, Link, Metric, Tabs, usePath } from "@cc/ui";
+import { Button, EmptyState, Link, Metric, Tabs, usePath, useSearch } from "@cc/ui";
 import { type LocationGroup } from "./model";
 import { remembered } from "./place";
 
@@ -97,16 +97,29 @@ const BIDRL_TABS = [
     owns: (path: string) => path === "/bidrl",
   },
   {
-    to: "/bidrl/auctions",
-    label: "Auctions",
-    owns: (path: string) =>
-      path === "/bidrl/auctions" || path.startsWith("/bidrl/auction/"),
-  },
-  {
     to: "/bidrl/lots",
     label: "Lots",
     owns: (path: string) =>
       path === "/bidrl/lots" || path.startsWith("/bidrl/lot/"),
+  },
+  {
+    to: "/bidrl/auctions",
+    label: "Auctions",
+    owns: (path: string, search: string) =>
+      (path === "/bidrl/auctions" && new URLSearchParams(search).get("view") !== "sites") ||
+      path.startsWith("/bidrl/auction/"),
+  },
+  {
+    to: "/bidrl/auctions?view=sites",
+    label: "Sites",
+    owns: (path: string, search: string) =>
+      path === "/bidrl/auctions" && new URLSearchParams(search).get("view") === "sites",
+  },
+  {
+    to: "/bidrl/automation",
+    label: "Actions",
+    utility: true,
+    owns: (path: string) => path === "/bidrl/automation",
   },
   {
     to: "/bidrl/findings",
@@ -126,18 +139,14 @@ const BIDRL_TABS = [
     separator: true,
     owns: (path: string) => path === "/bidrl/intent",
   },
-  {
-    to: "/bidrl/automation",
-    label: "Automation",
-    utility: true,
-    owns: (path: string) => path === "/bidrl/automation",
-  },
 ] as const;
 
 export function BidrlTabs() {
   const path = usePath().replace(/\/+$/, "") || "/";
+  const search = useSearch();
   return (
-    <Tabs label="BIDRL sections">
+    <div className="bidrl-tabbar">
+      <Tabs label="BIDRL sections">
       {BIDRL_TABS.map((item) => (
         <Link
           key={item.to}
@@ -147,12 +156,13 @@ export function BidrlTabs() {
               ? `bidrl-tab--utility${"separator" in item && item.separator ? " bidrl-tab--utility-start" : ""}`
               : undefined
           }
-          aria-current={item.owns(path) ? "page" : undefined}
+          aria-current={item.owns(path, search) ? "page" : undefined}
         >
-          {item.label}
+          <span>{item.label}</span>
         </Link>
       ))}
-    </Tabs>
+      </Tabs>
+    </div>
   );
 }
 

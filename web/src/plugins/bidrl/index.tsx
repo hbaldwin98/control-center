@@ -2,8 +2,8 @@
  * BIDRL — score auction lots from photographs, not titles.
  *
  * Imports `@cc/ui` and this directory only. Auction and lot ids come from the path so
- * this module never imports the shell router. One sidebar item; Feed / Auctions / Lots
- * are in-plugin tabs.
+ * this module never imports the shell router. The root Auctions entry is promoted into
+ * the shell; the rest of the workflow stays in the plugin's tab strip.
  *
  * This file is the plugin's manifest and nothing else. The screens behind these routes
  * live in `screens/`, the pieces they are built from in the modules beside this one:
@@ -26,7 +26,7 @@ import "./index.css";
 
 const bidrl: PluginModule = {
   id: "bidrl",
-  nav: [{ path: "/bidrl", label: "Auctions", topLevel: true }],
+  nav: [{ path: "/bidrl", label: "Auctions", icon: "auction", topLevel: true }],
   routes: [
     { path: "/bidrl", element: <Overview /> },
     { path: "/bidrl/auctions", element: <Auctions /> },

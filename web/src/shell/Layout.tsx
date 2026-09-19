@@ -1,24 +1,25 @@
 /** The authenticated frame: navigation, and the outlet core and plugin routes render into. */
 import { useCallback } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Button, api, useSnapshot } from "@cc/ui";
+import { Button, NavIcon, api, useSnapshot } from "@cc/ui";
 import type { NavItem, PluginDescriptor, PluginModule } from "@cc/ui";
 import { useAlertChime } from "../core/AlertSound";
 import { useSession } from "./session";
 
-const dashboardNav: NavItem = { path: "/", label: "Dashboard" };
+const dashboardNav: NavItem = { path: "/", label: "Command", icon: "command" };
 const commandNav: NavItem[] = [
-  dashboardNav,
-  { path: "/jobs", label: "Jobs" },
-  { path: "/sessions", label: "Sessions" },
-  { path: "/inbox", label: "Inbox" },
+  { path: "/jobs", label: "Jobs", icon: "jobs" },
+  { path: "/inbox", label: "Inbox", icon: "inbox" },
 ];
 const systemNav: NavItem[] = [
-  { path: "/plugins", label: "Plugins" },
-  { path: "/events", label: "Events" },
-  { path: "/costs", label: "Costs" },
-  { path: "/models", label: "Models" },
-  { path: "/settings", label: "Settings" },
+  { path: "/plugins", label: "Plugins", icon: "plugins" },
+  { path: "/events", label: "Events", icon: "events" },
+  { path: "/settings", label: "Settings", icon: "settings" },
+];
+const adminNav: NavItem[] = [
+  { path: "/sessions", label: "Sessions", icon: "sessions" },
+  { path: "/costs", label: "Costs", icon: "costs" },
+  { path: "/models", label: "Models", icon: "models" },
 ];
 
 type PluginState = { pluginId: string; enabled: boolean };
@@ -47,7 +48,37 @@ function ShellNavLink({
       title={disabled ? `${item.label} is disabled` : undefined}
       aria-disabled={disabled || undefined}
     >
-      <span>{item.label}</span>
+      <span className={mobile ? "cc-mobile-nav__icon" : "cc-nav__icon"}>
+        <NavIcon name={item.icon ?? "plugin"} />
+      </span>
+      <span className={mobile ? "cc-mobile-nav__label" : undefined}>{item.label}</span>
+    </NavLink>
+  );
+}
+
+function LivePluginLink({
+  plugin,
+  name,
+  disabled,
+}: {
+  plugin: PluginModule;
+  name: string;
+  disabled: boolean;
+}) {
+  const entry = plugin.nav[0];
+  const path = entry?.path ?? `/plugins/${plugin.id}`;
+  return (
+    <NavLink
+      to={path}
+      className={`cc-nav__live-link${disabled ? " cc-nav__live-link--off" : ""}`}
+      title={disabled ? `${name} is disabled` : name}
+      aria-disabled={disabled || undefined}
+    >
+      <span className={`cc-nav__live-dot${disabled ? " cc-nav__live-dot--off" : ""}`} />
+      <span className="cc-nav__live-copy">
+        <span>{name}</span>
+        <small>{disabled ? "Disabled" : "Active"}</small>
+      </span>
     </NavLink>
   );
 }
@@ -76,16 +107,22 @@ export function Layout({
       ? live.data.map((p) => [p.pluginId, p.enabled] as const)
       : descriptors.map((d) => [d.id, d.enabled] as const),
   );
+  const descriptorNames = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor.name]));
   const pluginNav = plugins.flatMap((p) =>
     p.nav.map((n) => ({ ...n, pluginId: p.id })),
   );
   const primaryNav: ShellNavItem[] = [
     dashboardNav,
     ...pluginNav.filter((item) => item.topLevel),
-    ...commandNav.slice(1),
+    ...commandNav,
   ];
   const pluginSectionNav = pluginNav.filter((item) => !item.topLevel);
-  const mobileNav: ShellNavItem[] = [...primaryNav, ...systemNav, ...pluginSectionNav];
+  const mobileNav: ShellNavItem[] = [
+    ...primaryNav,
+    ...systemNav,
+    ...adminNav,
+    ...pluginSectionNav,
+  ];
   const currentItem = mobileNav.find((item) =>
     item.path === "/"
       ? location.pathname === "/"
@@ -99,7 +136,10 @@ export function Layout({
       </a>
       <nav className="cc-nav" aria-label="Primary">
         <div className="cc-nav__brand">
-          Control Center <small>v2</small>
+          <span className="cc-nav__brandmark">
+            <NavIcon name="command" size={18} />
+          </span>
+          <span>Control Center</span>
         </div>
 
         <div className="cc-nav__group">
@@ -120,9 +160,16 @@ export function Layout({
           ))}
         </div>
 
+        <div className="cc-nav__group">
+          <div className="cc-nav__section">Admin</div>
+          {adminNav.map((item) => (
+            <ShellNavLink key={item.path} item={item} />
+          ))}
+        </div>
+
         {pluginSectionNav.length > 0 ? (
           <>
-            <div className="cc-nav__section">Plugins</div>
+            <div className="cc-nav__section">Plugin tools</div>
             {pluginSectionNav.map((item) => (
               <ShellNavLink
                 key={`${item.pluginId}:${item.path}`}
@@ -132,6 +179,18 @@ export function Layout({
             ))}
           </>
         ) : null}
+
+        <div className="cc-nav__live">
+          <div className="cc-nav__section">Live plugins</div>
+          {plugins.map((plugin) => (
+            <LivePluginLink
+              key={plugin.id}
+              plugin={plugin}
+              name={descriptorNames.get(plugin.id) ?? plugin.nav[0]?.label ?? plugin.id}
+              disabled={enabled.get(plugin.id) === false}
+            />
+          ))}
+        </div>
 
         <div className="cc-nav__spacer" />
         <div className="cc-nav__footer">
@@ -146,14 +205,16 @@ export function Layout({
           <div className="cc-topbar__crumb">
             <span className="cc-topbar__context">Command surface</span>
             <span aria-hidden="true">/</span>
-            <strong>{currentItem?.label ?? "Overview"}</strong>
+            <strong>{currentItem?.path === "/" ? "Overview" : currentItem?.label ?? "Overview"}</strong>
           </div>
           <div className="cc-topbar__actions">
             <NavLink className="cc-topbar__action" to="/inbox">
-              Inbox
+              <NavIcon name="inbox" />
+              <span>Inbox</span>
             </NavLink>
             <NavLink className="cc-topbar__action" to="/events">
-              Events
+              <NavIcon name="bell" />
+              <span>Events</span>
             </NavLink>
             <button
               className="cc-topbar__account"

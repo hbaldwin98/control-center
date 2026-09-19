@@ -383,7 +383,7 @@ async function revisit(path: string) {
 
 describe("bidrl screens", () => {
   it.each([
-    ["/bidrl", "BIDRL"],
+    ["/bidrl", "Overview"],
     ["/bidrl/auctions", "Auctions"],
     ["/bidrl/lots", "Lots"],
     ["/bidrl/findings", "Findings"],
@@ -747,12 +747,13 @@ describe("bidrl screens", () => {
     );
     expect(tabs).toEqual([
       "Overview",
-      "Auctions",
       "Lots",
+      "Auctions",
+      "Sites",
+      "Actions",
       "Findings",
       "Saved",
       "Intent",
-      "Automation",
     ]);
     expect(
       container.querySelector('.cc-tabs a[aria-current="page"]')?.textContent,

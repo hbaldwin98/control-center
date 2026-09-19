@@ -108,6 +108,7 @@ export function LotPhotos({ urls }: { urls: string[] }) {
     <>
       <Card
         title="Photos"
+        className="bidrl-gallery-card"
         actions={<Hint>{index + 1} / {count}</Hint>}
       >
         <div className="bidrl-gallery">

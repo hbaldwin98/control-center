@@ -106,6 +106,7 @@ export function Watchlists() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL"
         title="Watchlists"
         lede="Describe what you are after and how far you would drive for it. Running one costs a little: it ranks your collected lots locally, asks a cheap model about the few that survive, and only then reads photographs."
       />

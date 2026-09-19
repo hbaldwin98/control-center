@@ -74,6 +74,7 @@ export function AuctionView() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL / Auctions"
         title={auction?.title ?? "Auction"}
         lede={auction ? undefined : "Auction"}
         actions={<LiveDot status={live.status} />}
@@ -88,13 +89,15 @@ export function AuctionView() {
         <Notices message={notice} error={error} disabled={disabled} />
         {snap.status === "loading" ? <Loading label="Loading auction…" /> : null}
         {snap.error && !disabled ? <Callout tone="danger">{snap.error.message || "Could not load auction."}</Callout> : null}
-        {auction ? (
-          <Grid density="metric">
-            <Metric label="Lots" value={String(auction.lotCount)} />
-            <Metric label="Status" value={auction.status} />
-            <Metric label="Ends" value={auction.endsAt ? <Countdown iso={auction.endsAt} /> : <Dash />} />
-          </Grid>
-        ) : null}
+         {auction ? (
+           <div className="bidrl-auction__metrics">
+             <Grid density="metric">
+               <Metric label="Lots" value={String(auction.lotCount)} />
+               <Metric label="Status" value={auction.status} />
+               <Metric label="Ends" value={auction.endsAt ? <Countdown iso={auction.endsAt} /> : <Dash />} />
+             </Grid>
+           </div>
+         ) : null}
         <div className="bidrl-command">
           <div className="bidrl-command__jobs">
             <Button
@@ -124,6 +127,7 @@ export function AuctionView() {
         {snap.status === "ready" ? (
           <Card
             title="Lots"
+            className="bidrl-surface bidrl-auction-surface"
             actions={
               <>
                 <Field label="Sort">

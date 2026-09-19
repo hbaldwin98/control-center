@@ -130,6 +130,7 @@ export function Findings() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL"
         title="Findings"
         lede="What your watchlists turned up, waiting on you. Accepting saves the lot; rejecting is permanent, and the same lot never costs another call for that watchlist."
       />

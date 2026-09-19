@@ -59,6 +59,7 @@ export function LotView() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL / Lots"
         title={lot?.title ?? "Lot"}
         actions={<LiveDot status={live.status} />}
       />
@@ -109,97 +110,99 @@ export function LotView() {
         ) : null}
         {lot ? (
           <>
-            {lot.photoUrls && lot.photoUrls.length > 0 ? (
-              <section className="bidrl-lot-hero" aria-label="Lot photos">
-                <div className="bidrl-lot-hero__gallery">
-                  <LotPhotos key={lot.id} urls={lot.photoUrls} />
-                </div>
-              </section>
-            ) : null}
-            <Card title="Current listing" className="bidrl-lot-current">
-              <div className="bidrl-lot-current__metrics">
-                <div className="bidrl-lot-current__identity">
-                  <span>Identity</span>
-                  <strong>{lot.title || <Dash />}</strong>
-                  <small>What BidRL says</small>
-                </div>
-                <div>
-                  <span>Price</span>
-                  <strong>
-                    {lot.priceCents == null ? <Dash /> : cents(lot.priceCents)}
-                  </strong>
-                  <small>
-                    {lot.priceCents == null
-                      ? "No estimate"
-                      : comparableHint(lot) || "Comparable"}
-                  </small>
-                </div>
-                <div>
-                  <span>Bids</span>
-                  <strong>{lot.bidCount}</strong>
-                  <small>
-                    {lot.bidCount === 1 ? "1 bid" : `${lot.bidCount} bids`}
-                  </small>
-                </div>
-                <div>
-                  <span>Bid price</span>
-                  <strong>{cents(lot.currentBidCents)}</strong>
-                  <small>Current bid</small>
-                </div>
-                <div>
-                  <span>Time remaining</span>
-                  <strong>
-                    {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
-                  </strong>
-                  <small>
-                    {lot.endsAt ? "Auction close" : "No close time"}
-                  </small>
-                </div>
-              </div>
-              {lot.url ? (
-                <div className="bidrl-lot-current__source">
-                  <BidrlLink href={lot.url}>Open on BidRL ↗</BidrlLink>
-                </div>
+            <div className="bidrl-lot-workspace">
+              {lot.photoUrls && lot.photoUrls.length > 0 ? (
+                <section className="bidrl-lot-hero" aria-label="Lot photos">
+                  <div className="bidrl-lot-hero__gallery">
+                    <LotPhotos key={lot.id} urls={lot.photoUrls} />
+                  </div>
+                </section>
               ) : null}
-              <div className="bidrl-lot-hero__actions">
-                <div className="bidrl-lot-save">
-                  <FavoriteStar lot={lot} />
-                  <span>Save lot</span>
+              <Card title="Current listing" className="bidrl-lot-current bidrl-surface">
+                <div className="bidrl-lot-current__metrics">
+                  <div className="bidrl-lot-current__identity">
+                    <span>Identity</span>
+                    <strong>{lot.title || <Dash />}</strong>
+                    <small>What BidRL says</small>
+                  </div>
+                  <div>
+                    <span>Price</span>
+                    <strong>
+                      {lot.priceCents == null ? <Dash /> : cents(lot.priceCents)}
+                    </strong>
+                    <small>
+                      {lot.priceCents == null
+                        ? "No estimate"
+                        : comparableHint(lot) || "Comparable"}
+                    </small>
+                  </div>
+                  <div>
+                    <span>Bids</span>
+                    <strong>{lot.bidCount}</strong>
+                    <small>
+                      {lot.bidCount === 1 ? "1 bid" : `${lot.bidCount} bids`}
+                    </small>
+                  </div>
+                  <div>
+                    <span>Bid price</span>
+                    <strong>{cents(lot.currentBidCents)}</strong>
+                    <small>Current bid</small>
+                  </div>
+                  <div>
+                    <span>Time remaining</span>
+                    <strong>
+                      {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+                    </strong>
+                    <small>
+                      {lot.endsAt ? "Auction close" : "No close time"}
+                    </small>
+                  </div>
                 </div>
-                <div className="bidrl-lot-hero__jobs">
-                  <Button
-                    variant="primary"
-                    disabled={
-                      disabled ||
-                      busy !== null ||
-                      (lot.basis !== "exact_text" && lot.basis !== "barcode")
-                    }
-                    title={
-                      lot.basis !== "exact_text" && lot.basis !== "barcode"
-                        ? "Repricing needs a model or barcode read from a photo. Enrich first."
-                        : undefined
-                    }
-                    onClick={() =>
-                      void run("reprice", "Reprice", () =>
-                        api.post(`/lots/${encodeURIComponent(id)}/reprice`),
-                      )
-                    }
-                  >
-                    {busy === "reprice" ? "Queueing…" : "Reprice"}
-                  </Button>
-                  <Button
-                    disabled={disabled || busy !== null}
-                    onClick={() =>
-                      void run("enrich", "Enrich", () =>
-                        api.post(`/lots/${encodeURIComponent(id)}/enrich`),
-                      )
-                    }
-                  >
-                    {busy === "enrich" ? "Queueing…" : "Enrich"}
-                  </Button>
+                {lot.url ? (
+                  <div className="bidrl-lot-current__source">
+                    <BidrlLink href={lot.url}>Open on BidRL ↗</BidrlLink>
+                  </div>
+                ) : null}
+                <div className="bidrl-lot-hero__actions">
+                  <div className="bidrl-lot-save">
+                    <FavoriteStar lot={lot} />
+                    <span>Save lot</span>
+                  </div>
+                  <div className="bidrl-lot-hero__jobs">
+                    <Button
+                      variant="primary"
+                      disabled={
+                        disabled ||
+                        busy !== null ||
+                        (lot.basis !== "exact_text" && lot.basis !== "barcode")
+                      }
+                      title={
+                        lot.basis !== "exact_text" && lot.basis !== "barcode"
+                          ? "Repricing needs a model or barcode read from a photo. Enrich first."
+                          : undefined
+                      }
+                      onClick={() =>
+                        void run("reprice", "Reprice", () =>
+                          api.post(`/lots/${encodeURIComponent(id)}/reprice`),
+                        )
+                      }
+                    >
+                      {busy === "reprice" ? "Queueing…" : "Reprice"}
+                    </Button>
+                    <Button
+                      disabled={disabled || busy !== null}
+                      onClick={() =>
+                        void run("enrich", "Enrich", () =>
+                          api.post(`/lots/${encodeURIComponent(id)}/enrich`),
+                        )
+                      }
+                    >
+                      {busy === "enrich" ? "Queueing…" : "Enrich"}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
+            </div>
             <div className="bidrl-lot-detail-grid">
               <div className="bidrl-lot-detail-grid__main">
                 <Card

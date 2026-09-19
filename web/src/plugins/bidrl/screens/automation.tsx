@@ -73,6 +73,7 @@ export function AutomationScreen() {
   return (
     <Page>
       <PageHeader
+        eyebrow="BidRL / Actions"
         title="Automation"
         lede="Two ticks, six hours apart. The sweep collects new auctions at your locations; the match runs your watchlists over what is already collected and never touches BidRL."
       />

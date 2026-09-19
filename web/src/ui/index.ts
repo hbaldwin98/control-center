@@ -7,6 +7,7 @@
 export type {
   Event,
   NavItem,
+  NavIconName,
   PluginDashboard,
   PluginDescriptor,
   PluginModule,
@@ -14,6 +15,8 @@ export type {
   RouteDef,
   Snapshot,
 } from "./types";
+
+export { NavIcon } from "./icons";
 
 export {
   ApiError,
