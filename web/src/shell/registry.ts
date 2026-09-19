@@ -70,6 +70,17 @@ export function validateModules(modules: PluginModule[]): string[] {
         claimedNav.set(n.path, m.id);
       }
     }
+
+    // `entry` is where the plugin opens from. It has to be a path this plugin owns and
+    // one of its own nav items, or the shell would send an operator somewhere the plugin
+    // never declared.
+    if (m.entry !== undefined) {
+      if (!ownsPath(m.id, m.entry)) {
+        problems.push(`plugin "${m.id}" declares entry "${m.entry}" outside /${m.id}`);
+      } else if (!m.nav.some((n) => n.path === m.entry)) {
+        problems.push(`plugin "${m.id}" declares entry "${m.entry}" that is not one of its nav paths`);
+      }
+    }
   }
   return problems;
 }

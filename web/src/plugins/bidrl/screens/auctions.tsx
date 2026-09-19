@@ -127,7 +127,7 @@ function CollectedTable({ auctions }: { auctions: Auction[] }) {
   );
 }
 
-function SitesView({
+export function SitesView({
   groups,
   disabled,
   busy,

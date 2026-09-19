@@ -67,13 +67,26 @@ describe("plugin boundary", () => {
       const violations: string[] = [];
 
       for (const file of sourcesIn(dir)) {
+        // A plugin test sits in the same directory, so it is held to the same rule plus
+        // the test tooling every test needs. Production code gets no such allowance.
+        const isTest = /\.(test|spec)\.tsx?$/.test(file);
+        const allowed = new Set(["@cc/ui", "react"]);
+        if (isTest) {
+          allowed.add("react-dom/client");
+          allowed.add("react-router-dom");
+          allowed.add("vitest");
+        }
+
         for (const spec of importsOf(readFileSync(file, "utf8"))) {
           const where = `${relative(srcDir, file).replace(/\\/g, "/")} -> ${spec}`;
 
-          // Bare specifiers: the sanctioned shared surface, plus real packages.
+          // Bare specifiers: an allowlist, so a new shared surface has to be added
+          // deliberately rather than slipping in under a broad `@cc/` prefix.
           if (!spec.startsWith(".")) {
-            if (spec === "@cc/ui" || spec.startsWith("@cc/ui/")) continue;
-            if (spec.startsWith("@cc/")) violations.push(`${where} (only @cc/ui is shared)`);
+            if (allowed.has(spec)) continue;
+            violations.push(
+              `${where} (allowed: ${[...allowed].sort().join(", ")})`,
+            );
             continue;
           }
 

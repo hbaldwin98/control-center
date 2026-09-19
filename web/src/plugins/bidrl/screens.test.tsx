@@ -13,7 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bidrl from "./index";
 import { LotBrowser } from "./lots";
 import { useLiveBids } from "./live";
-import type { Finding, Lot } from "./model";
+import { SitesView } from "./screens/auctions";
+import { groupByLocation } from "./model";
+import type { Finding, Lot, SitesAuction } from "./model";
 
 function LiveProbe({ lots }: { lots: Lot[] }) {
   const live = useLiveBids(lots);
@@ -1212,5 +1214,50 @@ describe("bidrl screens", () => {
     for (const a of internal) {
       expect(a.getAttribute("target")).not.toBe("_blank");
     }
+  });
+
+  // Each Sites row answers two questions without being opened: has it been collected,
+  // and where is it. The pill and the location label are what the row map emits.
+  it("marks a Sites row collected or ready and names its location", async () => {
+    const collected: SitesAuction = {
+      id: "42",
+      url: "https://www.bidrl.com/auction/42",
+      title: "Test Warehouse",
+      affiliateId: "19",
+      affiliateName: "SITES",
+      city: "Turlock",
+      itemCount: 3,
+      endsAt: "",
+      collected: true,
+    };
+    const incoming: SitesAuction = {
+      ...collected,
+      id: "43",
+      title: "New Warehouse",
+      collected: false,
+    };
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <SitesView
+            groups={groupByLocation([collected, incoming])}
+            disabled={false}
+            busy={null}
+            onCollect={() => {}}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    const pills = [
+      ...container.querySelectorAll(".bidrl-sites-table .pill"),
+    ].map((pill) => pill.textContent);
+    expect(pills).toContain("collected");
+    expect(pills).toContain("ready");
+    expect(
+      container
+        .querySelector(".bidrl-sites-table .source-name")
+        ?.textContent,
+    ).toContain("SITES · Turlock");
   });
 });

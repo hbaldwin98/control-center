@@ -8,7 +8,7 @@ import type { ComponentType, ReactElement } from "react";
 
 export type NavIconName =
   | "command"
-  | "auction"
+  | "gavel"
   | "jobs"
   | "sessions"
   | "inbox"
@@ -18,9 +18,9 @@ export type NavIconName =
   | "models"
   | "settings"
   | "plugin"
-  | "hello"
-  | "pagewatch"
-  | "tid"
+  | "sparkle"
+  | "eye"
+  | "bolt"
   | "bell"
   | "search";
 
@@ -95,6 +95,14 @@ export type PluginModule = {
   id: string;
   nav: NavItem[];
   routes: RouteDef[];
+  /**
+   * The path of the plugin's home screen. Defaults to `nav[0]?.path`.
+   *
+   * Ordering nav for the tab strip should not decide where the plugin opens from:
+   * set `entry` when the home screen is not the first nav item. It must name one of
+   * the plugin's own paths (registration rejects anything else).
+   */
+  entry?: string;
   /** Optional. Without it the plugin still appears on the dashboard, statically. */
   dashboard?: PluginDashboard;
 };

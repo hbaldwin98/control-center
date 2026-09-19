@@ -56,3 +56,91 @@ describe("CloudflarePushSetup", () => {
     }
   });
 });
+
+/** Installs a fake service worker whose push manager starts with no subscription. */
+function stubServiceWorker(registration: unknown): () => void {
+  const original = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+  Object.defineProperty(navigator, "serviceWorker", {
+    configurable: true,
+    value: {
+      register: vi.fn().mockResolvedValue(registration),
+      ready: Promise.resolve(registration),
+    },
+  });
+  vi.stubGlobal("PushManager", class PushManager {});
+  return () => {
+    if (original) Object.defineProperty(navigator, "serviceWorker", original);
+    else Reflect.deleteProperty(navigator, "serviceWorker");
+  };
+}
+
+const pushRoute = "/api/admin/notifications/channels/cloudflare";
+
+describe("CloudflarePushSetup enable", () => {
+  it("subscribes and registers the new subscription when permission is granted", async () => {
+    const subscription = {
+      endpoint: "https://push.example.test/new",
+      unsubscribe: vi.fn().mockResolvedValue(true),
+      toJSON: () => ({
+        endpoint: "https://push.example.test/new",
+        expirationTime: null,
+        keys: { p256dh: "AQ", auth: "Ag" },
+      }),
+    };
+    const registration = {
+      pushManager: {
+        getSubscription: vi.fn().mockResolvedValue(null),
+        subscribe: vi.fn().mockResolvedValue(subscription),
+      },
+    };
+    const restore = stubServiceWorker(registration);
+    vi.stubGlobal("Notification", { permission: "granted" });
+    try {
+      h.routes.set(`${pushRoute}/push-key`, { publicKey: "AQAB" });
+      h.routes.set(`${pushRoute}/push-subscriptions`, {});
+      await h.render(<CloudflarePushSetup channelId="cloudflare" />);
+
+      expect(await h.click("Enable phone push")).toBe(true);
+      await h.settle();
+      await h.settle();
+
+      expect(registration.pushManager.subscribe).toHaveBeenCalledOnce();
+      const call = h.calls.find(
+        (entry) => entry.method === "POST" && entry.path.endsWith("/cloudflare/push-subscriptions"),
+      );
+      expect(call?.body).toEqual({
+        endpoint: "https://push.example.test/new",
+        expirationTime: null,
+        keys: { p256dh: "AQ", auth: "Ag" },
+      });
+      expect(h.text()).toContain("This device is enrolled");
+    } finally {
+      restore();
+    }
+  });
+
+  it("shows the reason and registers nothing when permission is denied", async () => {
+    const registration = {
+      pushManager: {
+        getSubscription: vi.fn().mockResolvedValue(null),
+        subscribe: vi.fn(),
+      },
+    };
+    const restore = stubServiceWorker(registration);
+    const requestPermission = vi.fn().mockResolvedValue("denied");
+    vi.stubGlobal("Notification", { permission: "default", requestPermission });
+    try {
+      await h.render(<CloudflarePushSetup channelId="cloudflare" />);
+
+      expect(await h.click("Enable phone push")).toBe(true);
+      await h.settle();
+
+      expect(requestPermission).toHaveBeenCalled();
+      expect(registration.pushManager.subscribe).not.toHaveBeenCalled();
+      expect(h.text()).toContain("Notification permission was not granted.");
+      expect(h.calls.some((entry) => entry.path.endsWith("/push-subscriptions"))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+});

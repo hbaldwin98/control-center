@@ -16,7 +16,7 @@ import "./index.css";
 
 const tid: PluginModule = {
   id: "tid",
-  nav: [{ path: "/tid", label: "TID", icon: "tid" }],
+  nav: [{ path: "/tid", label: "TID", icon: "bolt" }],
   routes: [{ path: "/tid", element: <Usage /> }],
   dashboard: {
     summary: "Daily kWh from My TID, with a short reading of the last month.",

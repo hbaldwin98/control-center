@@ -58,6 +58,7 @@ import type { PluginModule } from "@cc/ui";
 
 const bidrl: PluginModule = {
   id: "bidrl",
+  entry: "/bidrl",
   nav: [{ path: "/bidrl", label: "BIDRL", icon: "gavel" }],
   routes: [
     { path: "/bidrl", element: <Feed /> },
@@ -73,6 +74,12 @@ const bidrl: PluginModule = {
 
 export default bidrl;
 ```
+
+`entry` is the path the plugin opens from: the roster link in the sidebar and the
+"Open {label}" button on `/plugins/<id>` both use it. It defaults to `nav[0]?.path`, so
+set it only when the home screen is not the first nav item. It must name one of the
+plugin's own paths and equal one of its `nav[].path` values; registration rejects
+anything else.
 
 Registered in one place:
 

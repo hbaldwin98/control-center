@@ -3093,9 +3093,217 @@ tr.bidrl-similar-row td:first-child {
 /* ============================================================================
    BidRL workspace surfaces
    The shared design vocabulary — `.data-table`, `.table-action`, `.pill`,
-   `.view-switch`, `.source-*`, `.lot-main`, `.lots-toolbar` — lives in
-   `@cc/ui`. This file carries only BidRL sizing and layout on top of it.
+   `.view-switch` — lives in `@cc/ui`. The BidRL-only vocabulary it once shared
+   a home with lives here, beside the markup that uses it: `.cc-lot-thumb`,
+   `.lots-toolbar`, `.lot-main`, `.lot-title`, and `.source-*`. This file
+   carries only BidRL sizing and layout on top of the shared rules.
    ========================================================================== */
+
+/* --- BidRL-only vocabulary moved out of @cc/ui --------------------------- */
+
+.cc-lot-thumb {
+  display: block;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.lots-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.lots-toolbar .subhead {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lot-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lot-main .thumb-link {
+  display: block;
+  flex: none;
+}
+
+.lot-main .thumb {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--bg-sunken);
+}
+
+.lot-main .thumb-empty {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+}
+
+.lot-title {
+  min-width: 0;
+}
+
+.lot-title strong a {
+  color: var(--text);
+  font-weight: 510;
+  text-decoration: none;
+}
+
+.lot-title strong a:hover {
+  color: var(--accent-hover);
+}
+
+.lot-title > span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  text-align: left;
+  color: inherit;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 2.5%);
+  cursor: pointer;
+}
+
+.source-card:hover {
+  border-color: var(--border);
+  background: rgb(255 255 255 / 6%);
+}
+
+.source-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.source-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.source-card-head strong {
+  color: var(--text);
+  font-weight: 510;
+}
+
+.source-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.source-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.source-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+}
+
+.source-filter-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-filter {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 2.5%);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.source-filter:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.source-filter.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.source-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-name .dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.source-name .dot.ready {
+  background: var(--warn);
+}
+
+@media (max-width: 1000px) {
+  .source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .source-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 
 /* --- Lots table ---------------------------------------------------------- */
 

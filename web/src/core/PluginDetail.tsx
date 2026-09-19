@@ -126,7 +126,9 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
       const jobRows = jobs.status === "ready" ? jobs.data : [];
       const pulse = pulseOf(jobRows);
       const badge = VERDICTS[verdictOf(state, pulse)];
-      const own = module?.nav[0];
+      const own = module?.entry
+            ? module.nav.find((item) => item.path === module.entry)
+            : module?.nav[0];
       const dashboard = module?.dashboard;
       const lede = dashboard?.summary || state.description;
       const base = `/plugins/${encodeURIComponent(id)}`;

@@ -65,8 +65,7 @@ function LivePluginLink({
   name: string;
   disabled: boolean;
 }) {
-  const entry = plugin.nav[0];
-  const path = entry?.path ?? `/plugins/${plugin.id}`;
+  const path = plugin.entry ?? plugin.nav[0]?.path ?? `/plugins/${plugin.id}`;
   return (
     <NavLink
       to={path}
@@ -172,7 +171,7 @@ export function Layout({
           <div className="cc-nav__live">
             <div className="cc-nav__section">Live plugins</div>
             {plugins.map((plugin) => {
-              const entryPath = plugin.nav[0]?.path;
+              const entryPath = plugin.entry ?? plugin.nav[0]?.path;
               const extras = pluginToolsNav.filter(
                 (item) => item.pluginId === plugin.id && item.path !== entryPath,
               );

@@ -22,6 +22,38 @@ describe("validateModules", () => {
     expect(validateModules([topLevel])).toEqual([]);
   });
 
+  it("accepts a module that omits entry, defaulting to the first nav path", () => {
+    expect(validateModules([hello])).toEqual([]);
+  });
+
+  it("accepts an entry that names one of the plugin's own nav paths", () => {
+    const explicit: PluginModule = {
+      ...hello,
+      entry: "/hello",
+      nav: [
+        { path: "/hello/history", label: "History" },
+        { path: "/hello", label: "Hello" },
+      ],
+    };
+    expect(validateModules([explicit])).toEqual([]);
+  });
+
+  it("rejects an entry outside /<id>", () => {
+    const outsider: PluginModule = { ...hello, entry: "/jobs" };
+    expect(
+      validateModules([outsider]).some((p) => p.includes('entry "/jobs" outside /hello')),
+    ).toBe(true);
+  });
+
+  it("rejects an entry that is not one of the plugin's nav paths", () => {
+    const stray: PluginModule = { ...hello, entry: "/hello/other" };
+    expect(
+      validateModules([stray]).some((p) =>
+        p.includes('entry "/hello/other" that is not one of its nav paths'),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects a path outside /<id>", () => {
     const outsider: PluginModule = {
       id: "hello",
