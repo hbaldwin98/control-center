@@ -116,12 +116,12 @@ export function Layout({
     ...pluginNav.filter((item) => item.topLevel),
     ...commandNav,
   ];
-  const pluginSectionNav = pluginNav.filter((item) => !item.topLevel);
+  const pluginToolsNav = pluginNav.filter((item) => !item.topLevel);
   const mobileNav: ShellNavItem[] = [
     ...primaryNav,
     ...systemNav,
     ...adminNav,
-    ...pluginSectionNav,
+    ...pluginToolsNav,
   ];
   const currentItem = mobileNav.find((item) =>
     item.path === "/"
@@ -130,8 +130,9 @@ export function Layout({
   );
 
   return (
-    <div className="cc-shell">
-      <a className="cc-skip-link" href="#main-content">
+    <>
+      <div className="cc-shell">
+        <a className="cc-skip-link" href="#main-content">
         Skip to content
       </a>
       <nav className="cc-nav" aria-label="Primary">
@@ -167,30 +168,34 @@ export function Layout({
           ))}
         </div>
 
-        {pluginSectionNav.length > 0 ? (
-          <>
-            <div className="cc-nav__section">Plugin tools</div>
-            {pluginSectionNav.map((item) => (
-              <ShellNavLink
-                key={`${item.pluginId}:${item.path}`}
-                item={item}
-                disabled={enabled.get(item.pluginId) === false}
-              />
-            ))}
-          </>
+        {pluginToolsNav.length > 0 || plugins.length > 0 ? (
+          <div className="cc-nav__live">
+            <div className="cc-nav__section">Live plugins</div>
+            {plugins.map((plugin) => {
+              const entryPath = plugin.nav[0]?.path;
+              const extras = pluginToolsNav.filter(
+                (item) => item.pluginId === plugin.id && item.path !== entryPath,
+              );
+              const off = enabled.get(plugin.id) === false;
+              return (
+                <div className="cc-nav__live-item" key={plugin.id}>
+                  <LivePluginLink
+                    plugin={plugin}
+                    name={descriptorNames.get(plugin.id) ?? plugin.nav[0]?.label ?? plugin.id}
+                    disabled={off}
+                  />
+                  {extras.map((item) => (
+                    <ShellNavLink
+                      key={`${plugin.id}:${item.path}`}
+                      item={item}
+                      disabled={off}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         ) : null}
-
-        <div className="cc-nav__live">
-          <div className="cc-nav__section">Live plugins</div>
-          {plugins.map((plugin) => (
-            <LivePluginLink
-              key={plugin.id}
-              plugin={plugin}
-              name={descriptorNames.get(plugin.id) ?? plugin.nav[0]?.label ?? plugin.id}
-              disabled={enabled.get(plugin.id) === false}
-            />
-          ))}
-        </div>
 
         <div className="cc-nav__spacer" />
         <div className="cc-nav__footer">
@@ -231,6 +236,7 @@ export function Layout({
           <Outlet />
         </main>
       </div>
+      </div>
 
       <nav className="cc-mobile-nav" aria-label="Mobile navigation">
         {mobileNav.map((item) => (
@@ -242,6 +248,6 @@ export function Layout({
           />
         ))}
       </nav>
-    </div>
+    </>
   );
 }

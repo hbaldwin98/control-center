@@ -5,7 +5,6 @@ import {
   Badge,
   Button,
   Callout,
-  Card,
   Countdown,
   EmptyState,
   Field,
@@ -14,6 +13,7 @@ import {
   Loading,
   Page,
   PageHeader,
+  Panel,
   PluginDisabledError,
   RelativeTime,
   Select,
@@ -145,9 +145,9 @@ export function Findings() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={error} disabled={disabled} />
-        <Card
+        <Panel
           title="Review queue"
-          className="bidrl-surface bidrl-findings-surface"
+          subhead="What your watchlists turned up, waiting on you. Accepting saves the lot; rejecting is permanent."
           actions={<Link to="/bidrl/watchlists">Watchlists</Link>}
         >
           <Toolbar>
@@ -199,7 +199,7 @@ export function Findings() {
               ))}
             </div>
           ))}
-        </Card>
+        </Panel>
       </Stack>
     </Page>
   );

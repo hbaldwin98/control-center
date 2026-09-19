@@ -15,6 +15,7 @@ import {
   Metric,
   Page,
   PageHeader,
+  Panel,
   PluginDisabledError,
   RelativeTime,
   Stack,
@@ -85,7 +86,7 @@ export function AutomationScreen() {
         {a ? (
           <>
             {a.throttled ? (
-              <Card title="Stopped" className="bidrl-surface bidrl-automation-stop">
+              <Panel title="Stopped">
                 <Stack>
                   <Callout tone="warn">
                     BidRL refused repeated requests, so scheduled collection stopped and will
@@ -104,7 +105,7 @@ export function AutomationScreen() {
                     </Button>
                   </div>
                 </Stack>
-              </Card>
+              </Panel>
             ) : null}
             <div className="bidrl-automation-metrics">
               <Grid density="metric">
@@ -149,9 +150,8 @@ export function AutomationScreen() {
               note={a.lastMatchNote}
               actions={<Link to="/bidrl/watchlists">Watchlists</Link>}
             />
-            <Card
+            <Panel
               title="Settings"
-              className="bidrl-surface bidrl-automation-settings"
               actions={<Link to="/plugins/bidrl/settings">Change them</Link>}
             >
               <Stack>
@@ -170,7 +170,7 @@ export function AutomationScreen() {
                   <strong>{a.maxNewLotsPerSweep}</strong> new lots a tick.
                 </Hint>
               </Stack>
-            </Card>
+            </Panel>
           </>
         ) : null}
       </Stack>

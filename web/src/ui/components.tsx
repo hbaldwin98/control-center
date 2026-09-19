@@ -85,6 +85,45 @@ export function Card({
 }
 
 /**
+ * A section that sits directly on the page background: a heading, optional
+ * subhead and actions, then content. The export's tab panels use this instead of
+ * a `Card`, so surfaces do not stack inside one another. Reach for `Card` only
+ * when the content really is a distinct object with its own frame.
+ */
+export function Panel({
+    title,
+    subhead,
+    actions,
+    className,
+    children,
+}: {
+    title?: ReactNode | undefined;
+    subhead?: ReactNode | undefined;
+    actions?: ReactNode | undefined;
+    className?: string | undefined;
+    children: ReactNode;
+}) {
+    return (
+        <section className={cx("cc-panel", className)}>
+            {title || subhead || actions ? (
+                <header className="cc-panel__head">
+                    <div className="cc-panel__heading">
+                        {title ? <h2 className="cc-panel__title">{title}</h2> : null}
+                        {subhead ? (
+                            <p className="cc-panel__subhead">{subhead}</p>
+                        ) : null}
+                    </div>
+                    {actions ? (
+                        <div className="cc-panel__actions">{actions}</div>
+                    ) : null}
+                </header>
+            ) : null}
+            <div className="cc-panel__body">{children}</div>
+        </section>
+    );
+}
+
+/**
  * A collapsed section that opens on click. Long reference lists (event catalogs,
  * payload fields) live behind one of these so a screen shows what it is about
  * before it shows every detail it holds.

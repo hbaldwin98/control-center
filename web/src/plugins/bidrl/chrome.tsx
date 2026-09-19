@@ -16,20 +16,20 @@ export function ViewToggle({
   onChange: (view: "grid" | "table") => void;
 }) {
   return (
-    <div className="bidrl-seg" role="group" aria-label="Lot view">
-      <Button
-        size="sm"
-        pressed={value === "grid"}
-        onClick={() => onChange("grid")}
-      >
-        Grid
-      </Button>
+    <div className="bidrl-seg view-switch" role="group" aria-label="Lots view">
       <Button
         size="sm"
         pressed={value === "table"}
         onClick={() => onChange("table")}
       >
         Table
+      </Button>
+      <Button
+        size="sm"
+        pressed={value === "grid"}
+        onClick={() => onChange("grid")}
+      >
+        Grid
       </Button>
     </div>
   );

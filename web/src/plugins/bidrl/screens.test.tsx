@@ -945,7 +945,7 @@ describe("bidrl screens", () => {
     expect(
       container.querySelectorAll(".bidrl-lot-table tbody > tr"),
     ).toHaveLength(1);
-    expect(container.textContent).toContain("Opportunity");
+    expect(container.textContent).toContain("Status");
     expect(container.textContent).toContain("1 similar");
 
     const similar = Array.from(container.querySelectorAll("button")).find(
@@ -1008,7 +1008,7 @@ describe("bidrl screens", () => {
     }
   });
 
-  it("puts time, location, and chips in a fixed 2×2 on catalog cards", async () => {
+  it("puts location and time on a compact card with a current-bid price", async () => {
     localStorage.setItem("bidrl.lotView", "grid");
     await renderAt("/bidrl/lots");
     const facts = container.querySelector(".bidrl-lot-card__facts");
@@ -1019,7 +1019,9 @@ describe("bidrl screens", () => {
     expect(
       facts?.querySelector(".bidrl-lot-card__when")?.textContent,
     ).toBeTruthy();
-    expect(facts?.querySelectorAll(".cc-badge")).toHaveLength(2);
+    expect(
+      container.querySelector(".bidrl-lot-card__bid-label")?.textContent,
+    ).toContain("Current bid");
   });
 
   it("reads several locations out of the query string and asks the API for exactly those", async () => {

@@ -1,53 +1,6 @@
-/* The shared design system. Everything the shell, core screens, and plugins render uses
-   these tokens, so one palette change moves the whole application. */
-
-:root {
-  color-scheme: dark;
-  --bg: #08090a;
-  --bg-raised: #191a1b;
-  --bg-sunken: #101112;
-  --bg-hover: #222427;
-  --border: rgb(255 255 255 / 8%);
-  --border-strong: rgb(255 255 255 / 14%);
-  --border-soft: rgb(255 255 255 / 5%);
-  --text: #f7f8f8;
-  --text-muted: #8a8f98;
-  --text-faint: #62666d;
-
-  --accent: #5e6ad2;
-  --accent-hover: #828fff;
-  --accent-active: #4752c4;
-  --accent-text: #ffffff;
-  --accent-soft: rgb(94 106 210 / 16%);
-
-  --ok: #27a644;
-  --ok-soft: rgb(39 166 68 / 14%);
-  --warn: #eab308;
-  --warn-soft: rgb(234 179 8 / 14%);
-  --danger: #dc2626;
-  --danger-soft: rgb(220 38 38 / 14%);
-
-  --radius: 8px;
-  --radius-sm: 6px;
-  --radius-lg: 12px;
-  --shadow: 0 1px 2px rgb(0 0 0 / 42%), 0 14px 32px rgb(0 0 0 / 22%);
-
-  --font: Inter, "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --mono: "Berkeley Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-
-  --nav-width: 236px;
-  --topbar-height: 58px;
-
-  /* One spacing scale. Screens compose these rather than inventing pixel values. */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-7: 32px;
-  --space-8: 48px;
-}
+/* The shared design system's component classes. Design tokens live in
+   `theme.css`; `@cc/ui` exposes both to the shell, core screens, and plugins. */
+@import "./theme.css";
 
 * {
   box-sizing: border-box;
@@ -1942,4 +1895,749 @@ h3 {
   .cc-nav {
     padding: 18px 10px 14px;
   }
+}
+
+/* ---- export component language -------------------------------------------------
+   The export styles every widget from one vocabulary: translucent white surfaces,
+   a hairline border, an 8px radius, near-transparent ghost controls, unfilled
+   status pills, and 510-weight type. These rules replace the earlier opaque
+   `--bg-raised` chrome so core screens and plugin surfaces read the same.
+   ------------------------------------------------------------------------------ */
+
+:root {
+  --text-body: #d0d6e0;
+}
+
+.cc-card,
+.cc-metric {
+  background: rgb(255 255 255 / 2.5%);
+  border-color: var(--border);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 12%);
+}
+
+.cc-card {
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.cc-card--muted {
+  background: rgb(255 255 255 / 1.5%);
+}
+
+.cc-card__title {
+  font-size: 18px;
+  font-weight: 510;
+  letter-spacing: -0.18px;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 510;
+}
+
+.cc-page__heading h1 {
+  font-weight: 510;
+  letter-spacing: -0.022em;
+}
+
+.cc-page__eyebrow {
+  color: var(--accent-hover);
+  font-size: 12px;
+  font-weight: 510;
+  letter-spacing: 0.04em;
+}
+
+.cc-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 2%);
+  color: var(--text-body);
+  font-size: 13px;
+  font-weight: 510;
+}
+
+.cc-button--sm {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.cc-button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: rgb(255 255 255 / 7%);
+  color: var(--text);
+}
+
+.cc-button--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+
+.cc-button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+  color: var(--bg);
+  filter: none;
+}
+
+.cc-button--pressed {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
+.cc-button--pressed:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
+.cc-input,
+.cc-select,
+.cc-textarea {
+  min-height: 38px;
+  padding: 0 11px;
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 2%);
+  color: var(--text-body);
+}
+
+.cc-textarea {
+  padding: 8px 11px;
+}
+
+.cc-input::placeholder {
+  color: var(--text-faint);
+}
+
+.cc-badge {
+  padding: 4px 8px;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 11px;
+  font-weight: 510;
+  line-height: 1.4;
+}
+
+.cc-badge--ok {
+  color: #6fe0a1;
+  border-color: color-mix(in oklab, var(--ok), white 10%);
+}
+
+.cc-badge--warn {
+  color: #f4c657;
+  border-color: color-mix(in oklab, var(--warn), white 10%);
+}
+
+.cc-badge--danger {
+  color: #ff776d;
+  border-color: color-mix(in oklab, var(--danger), white 10%);
+}
+
+.cc-metric {
+  min-height: 104px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+}
+
+.cc-metric__label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 510;
+  letter-spacing: 0.08em;
+}
+
+.cc-metric__value {
+  margin: 15px 0 7px;
+  font-size: 28px;
+  font-weight: 510;
+  letter-spacing: -0.5px;
+}
+
+.cc-metric__hint {
+  font-size: 13px;
+}
+
+.cc-tabs {
+  gap: 5px;
+  border-bottom-color: var(--border-soft);
+}
+
+.cc-tabs a {
+  padding: 11px 12px 12px;
+  font-size: 14px;
+}
+
+.cc-tabs a[aria-current="page"] {
+  font-weight: 510;
+  border-bottom-color: var(--accent-hover);
+}
+
+.cc-nav {
+  background: rgb(255 255 255 / 1.2%);
+  border-right-color: var(--border-soft);
+}
+
+.cc-topbar {
+  background: color-mix(in oklab, var(--bg), transparent 6%);
+}
+
+/* ---- Buttons that carry their weight ---------------------------------------
+   The export's controls read as solid objects, not faint ghosts: a visible
+   fill, a real border, and one saturated indigo action per view. */
+
+.cc-button {
+  background: rgb(255 255 255 / 6%);
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+}
+
+.cc-button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 11%);
+  border-color: rgb(255 255 255 / 22%);
+  color: var(--text);
+}
+
+.cc-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+}
+
+.cc-button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--bg);
+}
+
+.table-action {
+  background: rgb(255 255 255 / 5%);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.table-action:hover {
+  background: rgb(255 255 255 / 10%);
+  border-color: rgb(255 255 255 / 22%);
+}
+
+.table-action.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+}
+
+.table-action.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--bg);
+}
+
+/* ---- One container per surface ---------------------------------------------
+   A card that only holds a table or another card drops its own chrome so borders
+   and fills stop stacking. The outer surface remains the single visual frame. */
+
+.cc-card > .data-table-wrap,
+.cc-card > .cc-table-scroll {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.cc-card .cc-card {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cc-card .cc-card > .data-table-wrap,
+.cc-card .cc-card > .cc-table-scroll {
+  border: 0;
+  background: transparent;
+}
+
+/* ---- Shared data surfaces ---------------------------------------------------
+   The export builds lots, auctions, and sites from one vocabulary: a compact
+   `.pill`, a `.table-action`, and a bordered `.data-table-wrap > .data-table`.
+   Plugins compose these classes through `@cc/ui` instead of restating them. */
+
+.data-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 1.8%);
+}
+
+.data-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.data-table th {
+  height: 40px;
+  padding: 11px 14px;
+  font-size: 10px;
+  font-weight: 590;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.data-table td {
+  height: 58px;
+  padding: 13px 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-table tbody tr:hover td {
+  background: rgb(255 255 255 / 3.5%);
+}
+
+.data-table td strong {
+  display: block;
+  font-weight: 510;
+  color: var(--text);
+}
+
+.data-table td small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.data-table .cc-table__actions,
+.data-table th:last-child,
+.data-table td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.data-table .cc-table__sort {
+  font: inherit;
+}
+
+.table-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.table-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 11px;
+  font-weight: 510;
+  line-height: 1.4;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.pill.success {
+  border-color: color-mix(in oklab, var(--ok), white 10%);
+  color: #6fe0a1;
+}
+
+.pill.warn {
+  border-color: color-mix(in oklab, var(--warn), white 10%);
+  color: #f4c657;
+}
+
+.pill.danger {
+  border-color: color-mix(in oklab, var(--danger), white 10%);
+  color: #ff776d;
+}
+
+.view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: rgb(0 0 0 / 25%);
+}
+
+.view-switch > button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.view-switch > button:hover {
+  color: var(--text);
+}
+
+.view-switch > button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.lots-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.lots-toolbar .subhead {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lot-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lot-main .thumb-link {
+  display: block;
+  flex: none;
+}
+
+.lot-main .thumb {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--bg-sunken);
+}
+
+.lot-main .thumb-empty {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+}
+
+.lot-title {
+  min-width: 0;
+}
+
+.lot-title strong a {
+  color: var(--text);
+  font-weight: 510;
+  text-decoration: none;
+}
+
+.lot-title strong a:hover {
+  color: var(--accent-hover);
+}
+
+.lot-title > span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  text-align: left;
+  color: inherit;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 2.5%);
+  cursor: pointer;
+}
+
+.source-card:hover {
+  border-color: var(--border);
+  background: rgb(255 255 255 / 6%);
+}
+
+.source-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.source-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.source-card-head strong {
+  color: var(--text);
+  font-weight: 510;
+}
+
+.source-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.source-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.source-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+}
+
+.source-filter-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-filter {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 2.5%);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.source-filter:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.source-filter.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.source-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-name .dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.source-name .dot.ready {
+  background: var(--warn);
+}
+
+@media (max-width: 1000px) {
+  .source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .source-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* ---- Panels that sit on the page background --------------------------------
+   The export's tab panels are not cards: a heading, a subhead, actions, then
+   content on the black canvas. Use `Card` only for a distinct object. */
+
+.cc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cc-panel__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.cc-panel__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--weight-heading);
+  letter-spacing: -0.18px;
+  color: var(--text);
+}
+
+.cc-panel__subhead {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.cc-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cc-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ---- Toggle and segmented-control states -----------------------------------
+   The button "carry their weight" fill above has equal specificity to the
+   pressed and view-switch rules, so restate them here, last, to keep the
+   selected state visibly ahead of the resting state. */
+
+.cc-button--pressed,
+.cc-button--pressed:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+.view-switch > .cc-button,
+.view-switch > button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.view-switch > .cc-button:hover:not(:disabled),
+.view-switch > button:hover:not(:disabled) {
+  border: 0;
+  background: rgb(255 255 255 / 7%);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.view-switch > .cc-button[aria-pressed="true"],
+.view-switch > .cc-button[aria-pressed="true"]:hover:not(:disabled),
+.view-switch > button[aria-pressed="true"] {
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+/* ---- Mobile navigation ------------------------------------------------------
+   A fixed, horizontally scrollable bar. It is rendered outside the shell so no
+   ancestor overflow can clip it, and its items never shrink or truncate. */
+
+.cc-mobile-nav {
+  box-sizing: border-box;
+  max-width: 100vw;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cc-mobile-nav__link {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .cc-mobile-nav {
+    width: 100%;
+    gap: 2px;
+    padding: 6px max(10px, env(safe-area-inset-left))
+      calc(6px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-right));
+    scroll-padding-inline: 10px;
+  }
+
+  .cc-mobile-nav__link {
+    flex: 0 0 auto;
+    min-width: 60px;
+    min-height: 46px;
+    padding: 5px 10px;
+  }
+
+  .cc-mobile-nav__label {
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+  }
+}
+
+/* Each plugin is one roster entry; any extra plugin nav item hangs under it. */
+.cc-nav__live-item {
+  display: grid;
+  gap: 2px;
+}
+
+.cc-nav__live-item > .cc-nav__link {
+  margin-left: 15px;
+  min-height: 30px;
+  font-size: 12.5px;
 }

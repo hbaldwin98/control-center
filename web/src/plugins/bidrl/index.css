@@ -1764,10 +1764,10 @@ tr.bidrl-similar-row td:first-child {
 /* ---- redesign workspace ---- */
 
 .cc-page:has(.bidrl-tabbar) .cc-card {
-  border-color: var(--border-soft);
+  border-color: var(--border);
   border-radius: var(--radius);
-  background: rgb(255 255 255 / 3%);
-  box-shadow: none;
+  background: rgb(255 255 255 / 2.5%);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 12%);
 }
 
 .cc-page:has(.bidrl-tabbar) .cc-card__head {
@@ -1775,8 +1775,9 @@ tr.bidrl-similar-row td:first-child {
 }
 
 .cc-page:has(.bidrl-tabbar) .cc-card__title {
-  font-size: 16px;
-  font-weight: 590;
+  font-size: 18px;
+  font-weight: 510;
+  letter-spacing: -0.18px;
 }
 
 .bidrl-tabbar {
@@ -2463,39 +2464,76 @@ tr.bidrl-similar-row td:first-child {
     text-align: left;
   }
 
-  /* Keep the workspace table a table. The shared scroll wrapper owns the horizontal
-     gesture, which preserves the export's dense columns without page overflow. */
-  .bidrl-lot-table--workspace {
-    display: table;
-    min-width: 860px;
-  }
-
-  .bidrl-lot-table--workspace thead {
-    display: table-header-group;
-  }
-
-  .bidrl-lot-table--workspace tbody {
-    display: table-row-group;
-  }
-
-  .bidrl-lot-table--workspace tbody tr {
-    display: table-row;
-    padding: 0;
-    border-bottom: 0;
-  }
-
-  .bidrl-lot-table--workspace tbody td {
-    display: table-cell !important;
-    width: auto !important;
+  /* A phone cannot show the dense columns without horizontal scrolling, so each
+     row becomes a two-line block: identity, then price/time and status/action. */
+  .bidrl-lot-table--workspace.data-table {
+    display: block;
     min-width: 0;
-    padding: 10px 10px 10px 0;
+  }
+
+  .bidrl-lot-table--workspace.data-table thead {
+    display: none;
+  }
+
+  .bidrl-lot-table--workspace.data-table tbody,
+  .bidrl-lot-table--workspace.data-table tbody tr,
+  .bidrl-lot-table--workspace.data-table tbody td {
+    display: block;
+    width: auto;
+  }
+
+  .bidrl-lot-table--workspace.data-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 12px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--border-soft);
   }
 
-  .bidrl-lot-table--workspace tbody td:nth-child(4),
-  .bidrl-lot-table--workspace tbody td:nth-child(5),
-  .bidrl-lot-table--workspace tbody td:nth-child(n + 7) {
-    display: table-cell !important;
+  .bidrl-lot-table--workspace.data-table tbody td {
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+
+  .bidrl-lot-table--workspace.data-table .lot-main {
+    grid-column: 1 / -1;
+  }
+
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__source,
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__bids {
+    display: none;
+  }
+
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__bid {
+    grid-column: 1;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 510;
+  }
+
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__closes {
+    grid-column: 2;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: right;
+  }
+
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__status {
+    grid-column: 1;
+    margin-top: 4px;
+  }
+
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__open {
+    grid-column: 2;
+    margin-top: 4px;
+    text-align: right;
+  }
+
+  .bidrl-lot-table--workspace.data-table .bidrl-lot-table__why {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
   .bidrl-lot-grid--workspace {
@@ -3158,4 +3196,186 @@ tr.bidrl-similar-row td:first-child {
   .bidrl-lot-workspace .bidrl-lot-current__identity {
     grid-column: 1 / -1;
   }
+}
+
+/* ============================================================================
+   BidRL workspace surfaces
+   The shared design vocabulary — `.data-table`, `.table-action`, `.pill`,
+   `.view-switch`, `.source-*`, `.lot-main`, `.lots-toolbar` — lives in
+   `@cc/ui`. This file carries only BidRL sizing and layout on top of it.
+   ========================================================================== */
+
+/* --- Lots table ---------------------------------------------------------- */
+
+.bidrl-lot-table.data-table {
+  min-width: 860px;
+  table-layout: auto;
+}
+
+.bidrl-lot-table.data-table th:nth-child(n),
+.bidrl-lot-table.data-table td:nth-child(n) {
+  width: auto;
+}
+
+.bidrl-lot-table.data-table th {
+  padding: 11px 14px;
+}
+
+.bidrl-lot-table.data-table td {
+  padding: 13px 14px;
+  vertical-align: middle;
+}
+
+.bidrl-lot-table__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bidrl-lot-table__closes,
+.bidrl-lot-table__bid {
+  white-space: nowrap;
+}
+
+.bidrl-similar-toggle {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+/* --- Lots grid ----------------------------------------------------------- */
+
+.bidrl-lot-grid--workspace {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card--workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 2.5%);
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card--workspace:hover {
+  border-color: var(--border);
+  background: rgb(255 255 255 / 6%);
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__media {
+  position: relative;
+  height: 132px;
+  margin: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__img,
+.bidrl-lot-grid--workspace .bidrl-lot-card__img-link,
+.bidrl-lot-grid--workspace .bidrl-lot-card__img-link img {
+  display: block;
+  width: 100%;
+  height: 132px;
+  object-fit: cover;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 510;
+  color: var(--text);
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__title a:hover {
+  color: var(--accent-hover);
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__facts {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__bid {
+  color: var(--text);
+  font-weight: 510;
+}
+
+.bidrl-lot-grid--workspace .bidrl-lot-card__bid-label {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* --- Auctions + sites ---------------------------------------------------- */
+
+.bidrl-auctions-table.data-table {
+  min-width: 760px;
+}
+
+.bidrl-sites-table.data-table {
+  min-width: 760px;
+}
+
+.bidrl-auction-table__name a {
+  color: var(--text);
+  font-weight: 510;
+  text-decoration: none;
+}
+
+.bidrl-auction-table__name a:hover {
+  color: var(--accent-hover);
+}
+
+.bidrl-source-search {
+  min-width: 240px;
+}
+
+@media (max-width: 700px) {
+  .bidrl-source-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .bidrl-lot-grid--workspace {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .bidrl-lot-grid--workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lot-main .bidrl-star {
+  margin-left: auto;
+  flex: none;
 }

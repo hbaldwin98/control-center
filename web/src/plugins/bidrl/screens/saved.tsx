@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import {
   Button,
   Callout,
-  Card,
   Field,
   Hint,
   Input,
   Loading,
   Page,
   PageHeader,
+  Panel,
   PluginDisabledError,
   Select,
   Stack,
@@ -97,9 +97,9 @@ export function SavedLots() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
-        <Card
+        <Panel
           title="Saved lots"
-          className="bidrl-surface bidrl-saved-surface"
+          subhead="Lots you flagged to watch. Revisit the ones closing soonest."
           actions={
             <>
               {narrowed ? (
@@ -246,7 +246,7 @@ export function SavedLots() {
               </>
             </FavoriteChanged.Provider>
           ) : null}
-        </Card>
+        </Panel>
       </Stack>
     </Page>
   );

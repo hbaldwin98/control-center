@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Callout,
-  Card,
   EmptyState,
   Field,
   Hint,
@@ -15,6 +14,7 @@ import {
   Loading,
   Page,
   PageHeader,
+  Panel,
   PluginDisabledError,
   Stack,
   Toolbar,
@@ -113,7 +113,7 @@ export function Watchlists() {
       <Stack>
         <BidrlTabs />
         <Notices message={notice} error={error} disabled={disabled} />
-        <Card title="New watchlist" className="bidrl-surface bidrl-watchlists-form">
+        <Panel title="New watchlist" subhead="Describe the gear you want; run it whenever you like. Nothing happens on its own.">
           <Stack>
             <Toolbar>
               <Field label="Name">
@@ -190,8 +190,8 @@ export function Watchlists() {
               </Button>
             </div>
           </Stack>
-        </Card>
-        <Card title="Your watchlists" className="bidrl-surface bidrl-watchlists-surface">
+        </Panel>
+        <Panel title="Your watchlists">
           {snap.status === "loading" ? <Loading label="Loading watchlists…" /> : null}
           {snap.status === "ready" && snap.data.watchlists.length === 0 ? (
             <EmptyState>Nothing watched yet.</EmptyState>
@@ -253,7 +253,7 @@ export function Watchlists() {
                 </div>
               ))
             : null}
-        </Card>
+        </Panel>
       </Stack>
     </Page>
   );

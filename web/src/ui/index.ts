@@ -71,6 +71,7 @@ export {
   Money,
   Page,
   PageHeader,
+  Panel,
   RelativeTime,
   Countdown,
   Row,

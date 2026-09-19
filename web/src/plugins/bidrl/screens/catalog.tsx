@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   Button,
   Callout,
-  Card,
   Checkbox,
   Field,
   Hint,
@@ -10,6 +9,7 @@ import {
   Loading,
   Page,
   PageHeader,
+  Panel,
   PluginDisabledError,
   Select,
   Stack,
@@ -118,21 +118,28 @@ export function LotsCatalog() {
   return (
     <Page>
       <PageHeader
-        eyebrow="BidRL / Lots"
-        title="Lots"
-        lede="Search collected lots by opportunity, deadline, category, or location."
+        eyebrow="Plugin / BidRL"
+        title="Auction workspace"
+        lede="See what is closing, what is underpriced, and what still needs a first pass."
         actions={<LiveDot status={live.status} />}
       />
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
-        <Card
+        <Panel
           title="All lots"
-          className="bidrl-surface bidrl-catalog-surface bidrl-lots-surface"
+          subhead="Collected lots, newest signals first. Switch between a dense table and a visual scan."
           actions={narrowed ? <Button size="sm" onClick={clearAll}>Clear filters</Button> : null}
         >
-          <div className="bidrl-lot-controlbar">
-            <Toolbar>
+          <div className="lots-toolbar">
+            <span className="subhead">
+              {snap.status === "ready"
+                ? `Showing ${snap.lots.length}${snap.hasMore ? ` of ${snap.total}` : ""} · select a row or card to inspect`
+                : "Search collected lots by opportunity, deadline, category, or location."}
+            </span>
+            <ViewToggle value={view} onChange={setView} />
+          </div>
+          <Toolbar>
               <Field label="Show">
                 <Select
                   value={filter}
@@ -176,11 +183,6 @@ export function LotsCatalog() {
                 </Select>
               </Field>
             </Toolbar>
-            <div className="bidrl-lot-view-toggle">
-              <span className="bidrl-eyebrow">Display</span>
-              <ViewToggle value={view} onChange={setView} />
-            </div>
-          </div>
           <details
             className="bidrl-advanced-filters bidrl-lot-filters"
             open={advancedOpen}
@@ -254,7 +256,6 @@ export function LotsCatalog() {
             </div>
           </details>
           <div className="bidrl-lots-summary">
-            <span className="bidrl-eyebrow">{view === "table" ? "Lots table" : "Lots grid"}</span>
             <Hint>
               {filterLabel(filter)}
               {snap.status === "ready"
@@ -291,7 +292,7 @@ export function LotsCatalog() {
               />
             </>
           ) : null}
-        </Card>
+        </Panel>
       </Stack>
     </Page>
   );

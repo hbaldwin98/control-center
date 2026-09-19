@@ -1,0 +1,77 @@
+/* ============================================================================
+   Control Center design tokens — the single source of truth.
+
+   Everything the shell, core screens, and plugins render reads these
+   custom properties. Change a value here and the whole application follows.
+   Component classes and shared widgets live in `styles.css`; plugins consume
+   both through `@cc/ui`. Plugins never define their own palette or type scale.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces and text */
+  --bg: #08090a;
+  --bg-raised: #191a1b;
+  --bg-sunken: #101112;
+  --bg-hover: #222427;
+  --border: rgb(255 255 255 / 8%);
+  --border-strong: rgb(255 255 255 / 14%);
+  --border-soft: rgb(255 255 255 / 5%);
+  --text: #f7f8f8;
+  --text-body: #d0d6e0;
+  --text-muted: #8a8f98;
+  --text-faint: #62666d;
+
+  /* Indigo accent. Reserved for active navigation, links, selected rows, and
+     one primary action per view. */
+  --accent: #5e6ad2;
+  --accent-hover: #828fff;
+  --accent-active: #4752c4;
+  --accent-text: #ffffff;
+  --accent-soft: rgb(94 106 210 / 16%);
+
+  /* Status. Muted on surfaces, pastel as text on pills. */
+  --ok: #27a644;
+  --ok-soft: rgb(39 166 68 / 14%);
+  --warn: #eab308;
+  --warn-soft: rgb(234 179 8 / 14%);
+  --danger: #dc2626;
+  --danger-soft: rgb(220 38 38 / 14%);
+
+  /* Radii and elevation */
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 42%), 0 14px 32px rgb(0 0 0 / 22%);
+  --ring: 0 0 0 1px rgb(0 0 0 / 12%);
+
+  /* Typography */
+  --font: Inter, "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Berkeley Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --weight-body: 450;
+  --weight-strong: 510;
+  --weight-heading: 510;
+  --tracking-display: -0.022em;
+
+  /* Motion */
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --nav-width: 236px;
+  --topbar-height: 58px;
+  --container-max: 1200px;
+
+  /* One spacing scale. Screens compose these rather than inventing pixel values. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+}

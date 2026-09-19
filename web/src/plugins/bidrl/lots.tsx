@@ -1,20 +1,17 @@
 /** A list of lots, as cards or as a table, with near-identical lots folded together. */
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Badge,
   Button,
   Countdown,
   Dash,
   EmptyState,
   Hint,
   Link,
-  Table,
   useNow,
 } from "@cc/ui";
 import {
   LOT_SORT_DEFAULTS,
   cents,
-  comparableHint,
   gapTone,
   groupSimilarLots,
   hasEnded,
@@ -27,16 +24,24 @@ import {
   type SortState,
 } from "./model";
 import { useColumnSort, SortedHead } from "./sorting";
-import { BidrlLink } from "./chrome";
-import {
-  FavoriteStar,
-  LotThumbLink,
-  LotLocation,
-  LotTableTitle,
-  LotComparable,
-  bucketTone,
-  savedOn,
-} from "./lotparts";
+import { FavoriteStar, LotThumbLink, bucketTone } from "./lotparts";
+
+/** The one-word state the design prints in the table, derived only from real fields. */
+function lotStatus(lot: Lot): { label: string; tone: string } {
+  if (lot.priceCents == null) return { label: "unpriced", tone: "warn" };
+  if (lot.bucket === "priced") return { label: "priced", tone: "success" };
+  const tone = bucketTone(lot.bucket);
+  const className = tone === "ok" ? "success" : tone === "neutral" ? "" : tone;
+  return { label: lot.bucket.replace(/_/g, " "), tone: className };
+}
+
+/** Site and city, split so a row can print a strong line and a quiet one. */
+function lotSource(lot: Lot): { site: string; city: string } {
+  const city = locationLabelOrEmpty(lot);
+  const site =
+    lot.affiliateName && lot.affiliateName !== city ? lot.affiliateName : city;
+  return { site, city: site === city ? "" : city };
+}
 
 type LotTableRowProps = {
   lot: Lot;
@@ -57,63 +62,65 @@ function LotTableRow({
   similarOpen = false,
   onToggleSimilar,
 }: LotTableRowProps) {
-  const gap =
-    lot.dealScore == null ? "No comparable" : `${pct(lot.dealScore)} below`;
-  const gapClass = `bidrl-table-gap__value bidrl-table-gap__value--${gapTone(lot.dealScore)}`;
+  const status = lotStatus(lot);
+  const { site, city } = lotSource(lot);
   return (
     <tr className={extraClass}>
-      <td className="bidrl-table-cell--save">
-        <FavoriteStar lot={lot} />
-      </td>
-      <td className="bidrl-table-cell--item">
-        <LotTableTitle lot={lot} />
-        {showSaved && lot.favoriteNote ? (
-          <span className="bidrl-table-cell__note">{lot.favoriteNote}</span>
-        ) : null}
-        {similarCount > 0 ? (
-          <Button size="sm" pressed={similarOpen} onClick={onToggleSimilar}>
-            {similarOpen ? "Hide similar" : `${similarCount} similar`}
-          </Button>
-        ) : null}
-      </td>
-      <td className="bidrl-table-cell--bid">
-        <strong>
-          <span className="bidrl-table-cell__label">Current bid</span>
-          {cents(lot.currentBidCents)}
-        </strong>
-        <Hint>
-          {lot.bidCount
-            ? `${lot.bidCount} bid${lot.bidCount === 1 ? "" : "s"}`
-            : "No bids"}
-        </Hint>
-      </td>
-      <td className="bidrl-table-cell--comp">
-        <div className="bidrl-table-comp">
-          <LotComparable lot={lot} />
-        </div>
-      </td>
-      <td className="bidrl-table-cell--gap">
-        <div className="bidrl-table-gap">
-          <span className={gapClass}>{gap}</span>
-          {lot.priceCents != null ? (
-            <span className="bidrl-table-gap__comp">
-              vs {cents(lot.priceCents)}
+      <td>
+        <div className="lot-main">
+          <LotThumbLink lot={lot} className="thumb" />
+          <div className="lot-title">
+            <strong>
+              <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
+                {lot.title || lot.id}
+              </Link>
+            </strong>
+            <span>
+              {[lot.lotCode ? `Lot ${lot.lotCode}` : "", lot.category]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
-          ) : null}
+            {showSaved && lot.favoriteNote ? (
+              <span className="bidrl-table-cell__note">{lot.favoriteNote}</span>
+            ) : null}
+          </div>
+          <FavoriteStar lot={lot} />
         </div>
       </td>
-      <td className="bidrl-table-cell--ends">
-        <span className="bidrl-table-cell__label">Time left</span>
+      <td className="bidrl-lot-table__source">
+        {site || <Dash />}
+        {city ? <small>{city}</small> : null}
+      </td>
+      <td className="bidrl-lot-table__bid">{cents(lot.currentBidCents)}</td>
+      <td className="bidrl-lot-table__bids">{lot.bidCount ?? 0}</td>
+      <td className="bidrl-lot-table__closes">
         {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
       </td>
+      <td className="bidrl-lot-table__status">
+        <span className={`pill${status.tone ? ` ${status.tone}` : ""}`}>
+          {status.label}
+        </span>
+        {similarCount > 0 ? (
+          <button
+            type="button"
+            className="table-action bidrl-similar-toggle"
+            onClick={onToggleSimilar}
+          >
+            {similarOpen ? "Hide similar" : `${similarCount} similar`}
+          </button>
+        ) : null}
+      </td>
       {showWhy ? (
-        <td className="bidrl-table-cell--why">{lot.matchReason || <Dash />}</td>
+        <td className="bidrl-lot-table__why">{lot.matchReason || <Dash />}</td>
       ) : null}
-      {showSaved ? (
-        <td className="bidrl-table-cell--saved">
-          {savedOn(lot.savedAt) || <Dash />}
-        </td>
-      ) : null}
+      <td className="bidrl-lot-table__open">
+        <Link
+          className="table-action"
+          to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
+        >
+          Open
+        </Link>
+      </td>
     </tr>
   );
 }
@@ -151,6 +158,7 @@ export function LotTableRows({
 export const LotCard = memo(function LotCard({ lot }: { lot: Lot }) {
   const now = useNow();
   const ended = hasEnded(lot.endsAt, now);
+  const location = locationLabelOrEmpty(lot);
   return (
     <>
       <div className="bidrl-lot-card__media">
@@ -165,60 +173,28 @@ export const LotCard = memo(function LotCard({ lot }: { lot: Lot }) {
         ) : null}
         <FavoriteStar lot={lot} />
       </div>
-      <div className="bidrl-lot-card__title">
-        <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
-          {lot.title || lot.id}
-        </Link>
-        {(lot.identification && lot.identification !== lot.title) || lot.lotCode || locationLabelOrEmpty(lot) || lot.url ? (
-          <div className="bidrl-lot-card__subline">
-            {lot.identification && lot.identification !== lot.title ? (
-              <span>{lot.identification}</span>
-            ) : null}
-            {lot.lotCode ? <span>Lot {lot.lotCode}</span> : null}
-            {locationLabelOrEmpty(lot) ? (
-              <span className="bidrl-lot-card__location">{locationLabelOrEmpty(lot)}</span>
-            ) : null}
-            {lot.url ? (
-              <BidrlLink
-                href={lot.url}
-                ariaLabel={`Open ${lot.title || lot.id} on BidRL`}
-              >
-                BidRL ↗
-              </BidrlLink>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      <div className="bidrl-lot-card__price">
-        <span className="bidrl-lot-card__bid">
-          <span className="bidrl-lot-card__bid-label">Current bid</span>
-          {cents(lot.currentBidCents)}
-        </span>
-        {lot.priceCents != null ? (
-          <span className="bidrl-lot-card__comp">
-            vs {cents(lot.priceCents)}
-            {comparableHint(lot) ? ` ${comparableHint(lot)}` : ""}
+      <div className="bidrl-lot-card__body">
+        <h3 className="bidrl-lot-card__title">
+          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
+            {lot.title || lot.id}
+          </Link>
+        </h3>
+        <div className="bidrl-lot-card__facts">
+          <span className="bidrl-lot-card__where">
+            {[location, lot.bidCount ? `${lot.bidCount} bids` : ""]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
-        ) : (
-          <span className="bidrl-lot-card__comp" />
-        )}
-      </div>
-      <div className="bidrl-lot-card__facts">
-        <div className="bidrl-lot-card__when">
-          <span className="bidrl-lot-card__when-label">Time left</span>
-          {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+          <span className="bidrl-lot-card__when">
+            {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
+          </span>
         </div>
-        <div className="bidrl-lot-card__where">
-          {locationLabelOrEmpty(lot) ? <LotLocation lot={lot} /> : <Dash />}
+        <div className="bidrl-lot-card__price">
+          <span className="bidrl-lot-card__bid">
+            {cents(lot.currentBidCents)}
+          </span>
+          <span className="bidrl-lot-card__bid-label">Current bid</span>
         </div>
-        {lot.category ? (
-          <Badge>{lot.category}</Badge>
-        ) : (
-          <span className="bidrl-lot-card__chip-slot" />
-        )}
-        <Badge tone={bucketTone(lot.bucket)}>
-          {lot.bucket.replace("_", " ")}
-        </Badge>
       </div>
       {lot.favoriteNote ? (
         <p className="bidrl-note">{lot.favoriteNote}</p>
@@ -356,52 +332,48 @@ export function LotBrowser({
   }
 
   return (
-    <Table
-      className="bidrl-lot-table bidrl-lot-table--workspace"
-      head={
-        <>
-          <th>
-            <span className="cc-sr-only">Saved</span>
-          </th>
-          <SortedHead column="name" sort={sort} onSort={onSort}>
-            Item
-          </SortedHead>
-          <SortedHead column="bid" sort={sort} onSort={onSort} numeric>
-            Bid
-          </SortedHead>
-          <SortedHead column="price" sort={sort} onSort={onSort} numeric>
-            Comparable
-          </SortedHead>
-          <SortedHead column="gap" sort={sort} onSort={onSort} numeric>
-            Opportunity
-          </SortedHead>
-          <SortedHead column="ends" sort={sort} onSort={onSort}>
-            Closes
-          </SortedHead>
-          {showWhy ? (
-            <SortedHead column="why" sort={sort} onSort={onSort}>
-              Why
+    <div className="data-table-wrap">
+      <table className="data-table bidrl-lot-table bidrl-lot-table--workspace">
+        <thead>
+          <tr>
+            <SortedHead column="name" sort={sort} onSort={onSort}>
+              Lot
             </SortedHead>
-          ) : null}
-          {showSaved ? (
-            <SortedHead column="saved" sort={sort} onSort={onSort}>
-              Saved
+            <SortedHead column="location" sort={sort} onSort={onSort}>
+              Auction
             </SortedHead>
-          ) : null}
-        </>
-      }
-    >
-      {groups.map((group) => (
-        <LotGroupRows
-          key={group.key}
-          group={group}
-          open={Boolean(open[group.key])}
-          onToggle={() => toggle(group.key)}
-          showWhy={showWhy}
-          showSaved={showSaved}
-        />
-      ))}
-    </Table>
+            <SortedHead column="bid" sort={sort} onSort={onSort}>
+              Current bid
+            </SortedHead>
+            <th>Bids</th>
+            <SortedHead column="ends" sort={sort} onSort={onSort}>
+              Closes
+            </SortedHead>
+            <th>Status</th>
+            {showWhy ? (
+              <SortedHead column="why" sort={sort} onSort={onSort}>
+                Why
+              </SortedHead>
+            ) : null}
+            <th className="cc-table__actions">
+              <span className="cc-sr-only">Open</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((group) => (
+            <LotGroupRows
+              key={group.key}
+              group={group}
+              open={Boolean(open[group.key])}
+              onToggle={() => toggle(group.key)}
+              showWhy={showWhy}
+              showSaved={showSaved}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

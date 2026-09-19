@@ -5,13 +5,13 @@ import {
 import {
   Button,
   Callout,
-  Card,
   EmptyState,
   Field,
   Hint,
   Loading,
   Page,
   PageHeader,
+  Panel,
   PluginDisabledError,
   Stack,
   Textarea,
@@ -61,7 +61,7 @@ export function IntentSearch() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={intentError} disabled={disabled} />
-        <Card title="Intent" className="bidrl-surface bidrl-intent-surface">
+        <Panel title="Intent" subhead="Describe what you are after; BIDRL ranks collected lots against it.">
           <Stack>
             <Hint>
               One chat call turns your intent into related gear (headlamp, lantern, tent —
@@ -118,9 +118,9 @@ export function IntentSearch() {
               </Hint>
             ) : null}
           </Stack>
-        </Card>
+        </Panel>
         {search && (search.status === "ready" || intentRunning) ? (
-          <Card title="Matches" className="bidrl-surface bidrl-intent-results" actions={<ViewToggle value={view} onChange={setView} />}>
+          <Panel title="Matches" actions={<ViewToggle value={view} onChange={setView} />}>
             {intent.status === "loading" || intentRunning ? <Loading label="Matching lots to your intent…" /> : null}
             {intent.status === "error" && !disabled ? <Callout tone="danger">{intent.error.message}</Callout> : null}
             {intent.status === "ready" && search.status === "ready" ? (
@@ -131,15 +131,15 @@ export function IntentSearch() {
                 groupSimilar={false}
               />
             ) : null}
-          </Card>
+          </Panel>
         ) : (
-          <Card title="Matches" className="bidrl-surface bidrl-intent-results">
+          <Panel title="Matches">
             <EmptyState>
               Describe what you want to do and BIDRL ranks every collected lot against it. Nothing is
               fetched from BidRL and no photograph is sent — this reads titles and descriptions you
               have already collected.
             </EmptyState>
-          </Card>
+          </Panel>
         )}
       </Stack>
     </Page>
