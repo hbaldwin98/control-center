@@ -85,7 +85,7 @@ export function AutomationScreen() {
         {a ? (
           <>
             {a.throttled ? (
-              <Card title="Stopped">
+              <Card title="Stopped" className="bidrl-surface bidrl-automation-stop">
                 <Stack>
                   <Callout tone="warn">
                     BidRL refused repeated requests, so scheduled collection stopped and will
@@ -106,32 +106,34 @@ export function AutomationScreen() {
                 </Stack>
               </Card>
             ) : null}
-            <Grid density="metric">
-              <Metric
-                label="Schedule"
-                value={a.throttled ? "Stopped" : a.enabled ? "On" : "Off"}
-                hint={automationSummary(a)}
-                tone={a.throttled ? "warn" : a.enabled ? "ok" : "neutral"}
-              />
-              <Metric
-                label="Locations"
-                value={String(a.locations)}
-                hint={a.locations === 0 ? "the sweep does nothing" : automationLocations(a, labels).join(", ")}
-                tone={a.enabled && a.locations === 0 ? "warn" : "neutral"}
-              />
-              <Metric
-                label="Queued auctions"
-                value={String(a.queuedAuctions)}
-                hint={`up to ${a.maxAuctionsPerSweep} a tick`}
-              />
-              <StatLink
-                to="/bidrl/findings"
-                label="To review"
-                value={String(a.newFindings)}
-                hint={a.newFindings > 0 ? "waiting on you" : "nothing waiting"}
-                tone={a.newFindings > 0 ? "ok" : "neutral"}
-              />
-            </Grid>
+            <div className="bidrl-automation-metrics">
+              <Grid density="metric">
+                <Metric
+                  label="Schedule"
+                  value={a.throttled ? "Stopped" : a.enabled ? "On" : "Off"}
+                  hint={automationSummary(a)}
+                  tone={a.throttled ? "warn" : a.enabled ? "ok" : "neutral"}
+                />
+                <Metric
+                  label="Locations"
+                  value={String(a.locations)}
+                  hint={a.locations === 0 ? "the sweep does nothing" : automationLocations(a, labels).join(", ")}
+                  tone={a.enabled && a.locations === 0 ? "warn" : "neutral"}
+                />
+                <Metric
+                  label="Queued auctions"
+                  value={String(a.queuedAuctions)}
+                  hint={`up to ${a.maxAuctionsPerSweep} a tick`}
+                />
+                <StatLink
+                  to="/bidrl/findings"
+                  label="To review"
+                  value={String(a.newFindings)}
+                  hint={a.newFindings > 0 ? "waiting on you" : "nothing waiting"}
+                  tone={a.newFindings > 0 ? "ok" : "neutral"}
+                />
+              </Grid>
+            </div>
             <TickCard
               title="Sweep"
               schedule={`${a.sweepSchedule} (${a.timeZone})`}
@@ -149,6 +151,7 @@ export function AutomationScreen() {
             />
             <Card
               title="Settings"
+              className="bidrl-surface bidrl-automation-settings"
               actions={<Link to="/plugins/bidrl/settings">Change them</Link>}
             >
               <Stack>
@@ -192,7 +195,7 @@ function TickCard({
   actions?: ReactNode;
 }) {
   return (
-    <Card title={title} actions={actions ?? null}>
+    <Card title={title} className="bidrl-surface bidrl-automation-tick" actions={actions ?? null}>
       <Stack>
         <div className="bidrl-automation">
           <Badge>{schedule}</Badge>

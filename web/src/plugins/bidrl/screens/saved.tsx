@@ -99,6 +99,7 @@ export function SavedLots() {
         <Notices message={null} error={null} disabled={disabled} />
         <Card
           title="Saved lots"
+          className="bidrl-surface bidrl-saved-surface"
           actions={
             <>
               {narrowed ? (

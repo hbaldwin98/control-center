@@ -339,6 +339,7 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource);
   // The place memory is per visit, not per test.
   sessionStorage.clear();
+  localStorage.removeItem("bidrl.lotView");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -347,6 +348,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.removeItem("bidrl.lotView");
   vi.unstubAllGlobals();
 });
 
@@ -994,6 +996,7 @@ describe("bidrl screens", () => {
       latestEventId: 1,
     });
     try {
+      localStorage.setItem("bidrl.lotView", "grid");
       await renderAt("/bidrl/lots");
       const image = container.querySelector<HTMLImageElement>(
         ".bidrl-lot-card__img",
@@ -1006,6 +1009,7 @@ describe("bidrl screens", () => {
   });
 
   it("puts time, location, and chips in a fixed 2×2 on catalog cards", async () => {
+    localStorage.setItem("bidrl.lotView", "grid");
     await renderAt("/bidrl/lots");
     const facts = container.querySelector(".bidrl-lot-card__facts");
     expect(facts).not.toBeNull();

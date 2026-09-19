@@ -113,7 +113,7 @@ export function Watchlists() {
       <Stack>
         <BidrlTabs />
         <Notices message={notice} error={error} disabled={disabled} />
-        <Card title="New watchlist">
+        <Card title="New watchlist" className="bidrl-surface bidrl-watchlists-form">
           <Stack>
             <Toolbar>
               <Field label="Name">
@@ -191,7 +191,7 @@ export function Watchlists() {
             </div>
           </Stack>
         </Card>
-        <Card title="Your watchlists">
+        <Card title="Your watchlists" className="bidrl-surface bidrl-watchlists-surface">
           {snap.status === "loading" ? <Loading label="Loading watchlists…" /> : null}
           {snap.status === "ready" && snap.data.watchlists.length === 0 ? (
             <EmptyState>Nothing watched yet.</EmptyState>

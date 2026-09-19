@@ -67,6 +67,9 @@ function LotTableRow({
       </td>
       <td className="bidrl-table-cell--item">
         <LotTableTitle lot={lot} />
+        {showSaved && lot.favoriteNote ? (
+          <span className="bidrl-table-cell__note">{lot.favoriteNote}</span>
+        ) : null}
         {similarCount > 0 ? (
           <Button size="sm" pressed={similarOpen} onClick={onToggleSimilar}>
             {similarOpen ? "Hide similar" : `${similarCount} similar`}
@@ -166,10 +169,14 @@ export const LotCard = memo(function LotCard({ lot }: { lot: Lot }) {
         <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
           {lot.title || lot.id}
         </Link>
-        {(lot.identification && lot.identification !== lot.title) || lot.url ? (
+        {(lot.identification && lot.identification !== lot.title) || lot.lotCode || locationLabelOrEmpty(lot) || lot.url ? (
           <div className="bidrl-lot-card__subline">
             {lot.identification && lot.identification !== lot.title ? (
               <span>{lot.identification}</span>
+            ) : null}
+            {lot.lotCode ? <span>Lot {lot.lotCode}</span> : null}
+            {locationLabelOrEmpty(lot) ? (
+              <span className="bidrl-lot-card__location">{locationLabelOrEmpty(lot)}</span>
             ) : null}
             {lot.url ? (
               <BidrlLink
@@ -335,7 +342,7 @@ export function LotBrowser({
 
   if (view === "grid") {
     return (
-      <div className="bidrl-lot-grid">
+      <div className="bidrl-lot-grid bidrl-lot-grid--workspace">
         {groups.map((group) => (
           <LotGroupCard
             key={group.key}
@@ -350,7 +357,7 @@ export function LotBrowser({
 
   return (
     <Table
-      className="bidrl-lot-table"
+      className="bidrl-lot-table bidrl-lot-table--workspace"
       head={
         <>
           <th>
@@ -418,7 +425,7 @@ export const LotGroupCard = memo(
     if (!head) return null;
     const rest = group.lots.slice(1);
     return (
-      <article className="bidrl-lot-card">
+      <article className="bidrl-lot-card bidrl-lot-card--workspace">
         <LotCard lot={head} />
         {rest.length > 0 ? (
           <>

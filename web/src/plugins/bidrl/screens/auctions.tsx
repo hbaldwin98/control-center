@@ -4,7 +4,6 @@ import {
   useState,
 } from "react";
 import {
-  Badge,
   Button,
   Callout,
   Card,
@@ -29,18 +28,20 @@ import {
   SITES_SORT_DEFAULTS,
   cleanupMessage,
   groupByLocation,
+  locationLabel,
   sortAuctions,
   sortSitesAuctions,
   type Auction,
   type AuctionSortColumn,
   type CleanupResult,
   type SitesAuction,
+  type SitesSortColumn,
   type LocationGroup,
 } from "../model";
 import { api } from "../api";
 import { useAuctions, useSites } from "../data";
 import { useColumnSort, SortedHead } from "../sorting";
-import { BidrlLink, LocationSections, BidrlTabs } from "../chrome";
+import { BidrlLink, BidrlTabs } from "../chrome";
 import { useAction, Notices } from "../actions";
 
 function CollectedTable({ auctions }: { auctions: Auction[] }) {
@@ -48,24 +49,125 @@ function CollectedTable({ auctions }: { auctions: Auction[] }) {
   const rows = useMemo(() => sortAuctions(auctions, sort), [auctions, sort]);
   return (
     <Table
+      className="bidrl-auctions-table"
       head={
         <>
           <SortedHead column="title" sort={sort} onSort={onSort}>Auction</SortedHead>
+          <th>Location</th>
           <SortedHead column="status" sort={sort} onSort={onSort}>Status</SortedHead>
           <SortedHead column="lots" sort={sort} onSort={onSort} numeric>Lots</SortedHead>
           <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+          <th><span className="cc-sr-only">Open</span></th>
         </>
       }
     >
       {rows.map((a) => (
         <tr key={a.id}>
-          <td>
+          <td className="bidrl-auction-table__name">
             <Link to={`/bidrl/auction/${encodeURIComponent(a.id)}`}>{a.title || a.id}</Link>
             {a.url ? <Hint><BidrlLink href={a.url} /></Hint> : null}
           </td>
-          <td><Badge>{a.status}</Badge></td>
+          <td className="bidrl-auction-table__location">{locationLabel(a)}</td>
+          <td>
+            <span className="bidrl-auction-status">
+              <span className={`bidrl-auction-status__dot bidrl-auction-status__dot--${statusTone(a.status)}`} />
+              {a.status || "Unknown"}
+            </span>
+          </td>
           <td className="cc-num">{a.lotCount}</td>
           <td>{a.endsAt ? <Countdown iso={a.endsAt} /> : <Dash />}</td>
+          <td className="bidrl-auction-table__action">
+            <Link to={`/bidrl/auction/${encodeURIComponent(a.id)}`}>Open</Link>
+          </td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+function statusTone(status: string): "ok" | "warn" | "danger" | "neutral" {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("error") || normalized.includes("fail")) return "danger";
+  if (normalized.includes("pending") || normalized.includes("scan")) return "warn";
+  if (normalized.includes("ready") || normalized.includes("active") || normalized.includes("open")) {
+    return "ok";
+  }
+  return "neutral";
+}
+
+function SiteSourceOverview({ groups }: { groups: LocationGroup<SitesAuction>[] }) {
+  return (
+    <div className="bidrl-sites-overview" aria-label="SITES source overview">
+      {groups.map((group) => {
+        const collected = group.items.filter((auction) => auction.collected).length;
+        const lots = group.items.reduce((total, auction) => total + auction.itemCount, 0);
+        return (
+          <article className="bidrl-source-summary" key={group.key}>
+            <span className="bidrl-eyebrow">SITES source</span>
+            <strong>{group.label}</strong>
+            <span>{group.items.length} auctions · {lots} lots</span>
+            <small>{collected} collected</small>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function SitesIncomingTable({
+  auctions,
+  disabled,
+  busy,
+  onCollect,
+}: {
+  auctions: SitesAuction[];
+  disabled: boolean;
+  busy: string | null;
+  onCollect: (url: string) => void;
+}) {
+  const { sort, onSort } = useColumnSort<SitesSortColumn>(SITES_SORT_DEFAULTS);
+  const rows = useMemo(() => sortSitesAuctions(auctions, sort), [auctions, sort]);
+  return (
+    <Table
+      className="bidrl-sites-table"
+      head={
+        <>
+          <th>Location</th>
+          <SortedHead column="title" sort={sort} onSort={onSort}>Auction</SortedHead>
+          <SortedHead column="lots" sort={sort} onSort={onSort} numeric>Lots</SortedHead>
+          <SortedHead column="ends" sort={sort} onSort={onSort}>Ends</SortedHead>
+          <th><span className="cc-sr-only">Collection</span></th>
+        </>
+      }
+    >
+      {rows.map((auction) => (
+        <tr key={auction.id}>
+          <td className="bidrl-sites-table__location">{locationLabel(auction)}</td>
+          <td className="bidrl-sites-table__name">
+            {auction.collected ? (
+              <Link to={`/bidrl/auction/${encodeURIComponent(auction.id)}`}>
+                {auction.title || auction.id}
+              </Link>
+            ) : (
+              <strong>{auction.title || auction.id}</strong>
+            )}
+            {auction.url ? <Hint><BidrlLink href={auction.url} /></Hint> : null}
+          </td>
+          <td className="cc-num">{auction.itemCount}</td>
+          <td>{auction.endsAt ? <Countdown iso={auction.endsAt} /> : <Dash />}</td>
+          <td className="bidrl-sites-table__action">
+            {auction.collected ? (
+              <span className="bidrl-row-state bidrl-row-state--ok">Collected</span>
+            ) : (
+              <Button
+                size="sm"
+                disabled={disabled || busy !== null}
+                onClick={() => onCollect(auction.url)}
+              >
+                Collect
+              </Button>
+            )}
+          </td>
         </tr>
       ))}
     </Table>
@@ -84,62 +186,24 @@ function SiteCards({
   onCollect: (url: string) => void;
 }) {
   return (
-    <div className="bidrl-site-grid">
-      {groups.map((group) => {
-        const rows = sortSitesAuctions(group.items, {
-          column: "title",
-          dir: SITES_SORT_DEFAULTS.title,
-        });
-        const collected = rows.filter((auction) => auction.collected).length;
-        return (
-          <article className="bidrl-site-card" key={group.key}>
-            <header className="bidrl-site-card__head">
-              <div>
-                <span className="bidrl-eyebrow">SITES location</span>
-                <h3>{group.label}</h3>
-              </div>
-              <Badge tone={collected === rows.length ? "ok" : "neutral"}>
-                {rows.length} auctions
-              </Badge>
-            </header>
-            <div className="bidrl-site-card__rows">
-              {rows.slice(0, 4).map((auction) => (
-                <div className="bidrl-site-card__row" key={auction.id}>
-                  <div>
-                    {auction.collected ? (
-                      <Link to={`/bidrl/auction/${encodeURIComponent(auction.id)}`}>
-                        {auction.title}
-                      </Link>
-                    ) : (
-                      <strong>{auction.title}</strong>
-                    )}
-                    <small>
-                      {auction.itemCount} lots
-                      {auction.endsAt ? <> · <Countdown iso={auction.endsAt} /></> : null}
-                    </small>
-                  </div>
-                  {auction.collected ? (
-                    <span className="bidrl-site-card__state">Collected</span>
-                  ) : (
-                    <Button
-                      size="sm"
-                      disabled={disabled || busy !== null}
-                      onClick={() => onCollect(auction.url)}
-                    >
-                      Collect
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <footer className="bidrl-site-card__foot">
-              <span>{collected} of {rows.length} collected</span>
-              {rows.length > 4 ? <span>+{rows.length - 4} more</span> : null}
-            </footer>
-          </article>
-        );
-      })}
-    </div>
+    <>
+      <SiteSourceOverview groups={groups} />
+      <div className="bidrl-sites-incoming">
+        <div className="bidrl-surface__subhead">
+          <div>
+            <span className="bidrl-eyebrow">Incoming auctions</span>
+            <strong>Available to collect</strong>
+          </div>
+          <Hint>{groups.reduce((count, group) => count + group.items.length, 0)} listed</Hint>
+        </div>
+        <SitesIncomingTable
+          auctions={groups.flatMap((group) => group.items)}
+          disabled={disabled}
+          busy={busy}
+          onCollect={onCollect}
+        />
+      </div>
+    </>
   );
 }
 
@@ -152,10 +216,11 @@ export function Auctions() {
   const [cleaning, setCleaning] = useState(false);
   const disabled = auctions.error instanceof PluginDisabledError;
   const collected = auctions.status === "ready" ? auctions.data.auctions : [];
-  const collectedGroups = useMemo(() => groupByLocation(collected), [collected]);
   const siteList = sites.status === "ready" ? sites.data.auctions : [];
   const siteGroups = useMemo(() => groupByLocation(siteList), [siteList]);
   const showingSites = view === "sites";
+  const sitesDisabled = sites.error instanceof PluginDisabledError;
+  const pluginDisabled = disabled || sitesDisabled;
 
   const add = (auctionURL: string) =>
     run("add", "Collect", async () => {
@@ -201,10 +266,10 @@ export function Auctions() {
       />
       <Stack>
         <BidrlTabs />
-        <Notices message={notice} error={error} disabled={disabled} />
+        <Notices message={notice} error={error} disabled={pluginDisabled} />
         {!showingSites ? (
           <>
-            <Card title="Add auction" className="bidrl-surface bidrl-surface--quiet">
+            <Card title="Add auction" className="bidrl-surface bidrl-surface--quiet bidrl-intake-surface">
               <Stack>
                 <Hint>
                   Paste a BIDRL auction or print-catalog URL. Collection runs only when you ask;
@@ -232,7 +297,7 @@ export function Auctions() {
             </Card>
             <Card
               title={`Collected auctions${collected.length > 0 ? ` (${collected.length})` : ""}`}
-              className="bidrl-surface"
+              className="bidrl-surface bidrl-auctions-surface"
               actions={
                 <Button size="sm" disabled={disabled || busy !== null || cleaning} onClick={() => void cleanup()}>
                   {cleaning ? "Removing…" : "Remove ended"}
@@ -245,9 +310,7 @@ export function Auctions() {
               {auctions.status === "loading" ? <Loading label="Loading auctions…" /> : null}
               {auctions.status === "error" && !disabled ? <Callout tone="danger">{auctions.error.message}</Callout> : null}
               {auctions.status === "ready" && collected.length > 0 ? (
-                <LocationSections groups={collectedGroups} empty="No collected auctions yet.">
-                  {(group) => <CollectedTable auctions={group} />}
-                </LocationSections>
+                <CollectedTable auctions={collected} />
               ) : auctions.status === "ready" ? (
                 <EmptyState>No collected auctions yet. Add a URL or collect from Sites.</EmptyState>
               ) : null}
@@ -257,7 +320,7 @@ export function Auctions() {
         {showingSites ? (
           <Card
             title="SITES locations"
-            className="bidrl-surface"
+            className="bidrl-surface bidrl-sites-surface"
             actions={
               <Button size="sm" disabled={disabled || busy !== null} onClick={() => void refreshSites()}>
                 {busy === "sites" ? "Queueing…" : "Refresh list"}
@@ -265,10 +328,14 @@ export function Auctions() {
             }
           >
             <Hint>Available auctions are grouped by location. Collect only the work you want to scan.</Hint>
+            {sites.status === "loading" ? <Loading label="Loading Sites auctions…" /> : null}
+            {sites.status === "error" && !sitesDisabled ? (
+              <Callout tone="danger">{sites.error.message}</Callout>
+            ) : null}
             {sites.status === "ready" && siteList.length > 0 ? (
               <SiteCards
                 groups={siteGroups}
-                disabled={disabled}
+                disabled={pluginDisabled}
                 busy={busy}
                 onCollect={(auctionURL) => void add(auctionURL)}
               />

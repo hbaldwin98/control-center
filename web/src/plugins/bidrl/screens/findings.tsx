@@ -15,6 +15,7 @@ import {
   Page,
   PageHeader,
   PluginDisabledError,
+  RelativeTime,
   Select,
   Stack,
   Toolbar,
@@ -74,6 +75,13 @@ function FindingRow({
             <span className="bidrl-finding__said">Matched because</span> {finding.reason}
           </p>
         ) : null}
+      </div>
+      <div className="bidrl-finding__signal" aria-label={`Score ${finding.score}`}>
+        <strong>{finding.score.toFixed(2)}</strong>
+        <small>score</small>
+      </div>
+      <div className="bidrl-finding__date">
+        <RelativeTime at={finding.createdAt} />
       </div>
       {finding.state === "new" ? (
         <div className="bidrl-finding__actions">
@@ -139,6 +147,7 @@ export function Findings() {
         <Notices message={null} error={error} disabled={disabled} />
         <Card
           title="Review queue"
+          className="bidrl-surface bidrl-findings-surface"
           actions={<Link to="/bidrl/watchlists">Watchlists</Link>}
         >
           <Toolbar>

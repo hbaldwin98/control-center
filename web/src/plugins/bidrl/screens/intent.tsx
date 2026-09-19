@@ -61,7 +61,7 @@ export function IntentSearch() {
       <Stack>
         <BidrlTabs />
         <Notices message={null} error={intentError} disabled={disabled} />
-        <Card title="Intent">
+        <Card title="Intent" className="bidrl-surface bidrl-intent-surface">
           <Stack>
             <Hint>
               One chat call turns your intent into related gear (headlamp, lantern, tent —
@@ -120,7 +120,7 @@ export function IntentSearch() {
           </Stack>
         </Card>
         {search && (search.status === "ready" || intentRunning) ? (
-          <Card title="Matches" actions={<ViewToggle value={view} onChange={setView} />}>
+          <Card title="Matches" className="bidrl-surface bidrl-intent-results" actions={<ViewToggle value={view} onChange={setView} />}>
             {intent.status === "loading" || intentRunning ? <Loading label="Matching lots to your intent…" /> : null}
             {intent.status === "error" && !disabled ? <Callout tone="danger">{intent.error.message}</Callout> : null}
             {intent.status === "ready" && search.status === "ready" ? (
@@ -133,7 +133,7 @@ export function IntentSearch() {
             ) : null}
           </Card>
         ) : (
-          <Card title="Matches">
+          <Card title="Matches" className="bidrl-surface bidrl-intent-results">
             <EmptyState>
               Describe what you want to do and BIDRL ranks every collected lot against it. Nothing is
               fetched from BidRL and no photograph is sent — this reads titles and descriptions you

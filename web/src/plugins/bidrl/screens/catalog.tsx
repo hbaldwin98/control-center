@@ -127,65 +127,62 @@ export function LotsCatalog() {
         <BidrlTabs />
         <Notices message={null} error={null} disabled={disabled} />
         <Card
-          title="Catalog"
-          className="bidrl-surface bidrl-catalog-surface"
-          actions={
-            <>
-              {narrowed ? (
-                <Button size="sm" onClick={clearAll}>
-                  Clear filters
-                </Button>
-              ) : null}
-              <ViewToggle value={view} onChange={setView} />
-            </>
-          }
+          title="All lots"
+          className="bidrl-surface bidrl-catalog-surface bidrl-lots-surface"
+          actions={narrowed ? <Button size="sm" onClick={clearAll}>Clear filters</Button> : null}
         >
-          <Toolbar>
-            <Field label="Show">
-              <Select
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                aria-label="Preset"
-              >
-                {LOT_PRESETS.map((preset) => (
-                  <option key={preset.value} value={preset.value}>
-                    {preset.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Find">
-              <Input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") setQ(draft);
-                }}
-                placeholder="Title, identification, model, category…"
-                disabled={disabled}
-                aria-label="Lot search"
-              />
-            </Field>
-            <Button disabled={disabled} onClick={() => setQ(draft)}>
-              Find
-            </Button>
-            <Field label="Sort">
-              <Select
-                value={lotSortParam(sort)}
-                onChange={(e) => setSortParam(e.target.value)}
-                aria-label="Sort lots"
-              >
-                <option value="gap.desc">Best opportunities</option>
-                <option value="ends.asc">Closing soon</option>
-                <option value="bid.asc">Lowest bid</option>
-                <option value="price.desc">Highest comparable</option>
-                <option value="name.asc">Name</option>
-                <option value="lot.asc">Lot code</option>
-              </Select>
-            </Field>
-          </Toolbar>
+          <div className="bidrl-lot-controlbar">
+            <Toolbar>
+              <Field label="Show">
+                <Select
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  aria-label="Preset"
+                >
+                  {LOT_PRESETS.map((preset) => (
+                    <option key={preset.value} value={preset.value}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Find">
+                <Input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setQ(draft);
+                  }}
+                  placeholder="Title, identification, model, category…"
+                  disabled={disabled}
+                  aria-label="Lot search"
+                />
+              </Field>
+              <Button disabled={disabled} onClick={() => setQ(draft)}>
+                Find
+              </Button>
+              <Field label="Sort">
+                <Select
+                  value={lotSortParam(sort)}
+                  onChange={(e) => setSortParam(e.target.value)}
+                  aria-label="Sort lots"
+                >
+                  <option value="gap.desc">Best opportunities</option>
+                  <option value="ends.asc">Closing soon</option>
+                  <option value="bid.asc">Lowest bid</option>
+                  <option value="price.desc">Highest comparable</option>
+                  <option value="name.asc">Name</option>
+                  <option value="lot.asc">Lot code</option>
+                </Select>
+              </Field>
+            </Toolbar>
+            <div className="bidrl-lot-view-toggle">
+              <span className="bidrl-eyebrow">Display</span>
+              <ViewToggle value={view} onChange={setView} />
+            </div>
+          </div>
           <details
-            className="bidrl-advanced-filters"
+            className="bidrl-advanced-filters bidrl-lot-filters"
             open={advancedOpen}
             onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
           >
@@ -256,12 +253,15 @@ export function LotsCatalog() {
               ) : null}
             </div>
           </details>
-          <Hint>
-            {filterLabel(filter)}
-            {snap.status === "ready"
-              ? ` · ${snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} shown`}`
-              : ""}
-          </Hint>
+          <div className="bidrl-lots-summary">
+            <span className="bidrl-eyebrow">{view === "table" ? "Lots table" : "Lots grid"}</span>
+            <Hint>
+              {filterLabel(filter)}
+              {snap.status === "ready"
+                ? ` · ${snap.hasMore ? `${snap.lots.length} of ${snap.total} loaded` : `${snap.lots.length} shown`}`
+                : ""}
+            </Hint>
+          </div>
           {snap.status === "loading" ? <Loading label="Loading lots…" /> : null}
           {snap.error && !disabled ? (
             <Callout tone="danger">

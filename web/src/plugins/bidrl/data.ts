@@ -419,9 +419,9 @@ export function useIntent(): UseSnapshotResult<IntentPage> {
 export function useLotView(): ["grid" | "table", (view: "grid" | "table") => void] {
   const [view, setView] = useState<"grid" | "table">(() => {
     try {
-      return localStorage.getItem("bidrl.lotView") === "table" ? "table" : "grid";
+      return localStorage.getItem("bidrl.lotView") === "grid" ? "grid" : "table";
     } catch {
-      return "grid";
+      return "table";
     }
   });
   const change = (next: "grid" | "table") => {

@@ -80,7 +80,8 @@ export function LotPhotos({ urls }: { urls: string[] }) {
           onClick={() => step(-1)}
           aria-label="Previous photo"
         >
-          Prev
+          <span aria-hidden="true">&lsaquo;</span>
+          <span className="cc-sr-only">Previous</span>
         </Button>
       ) : null}
       <button
@@ -98,7 +99,8 @@ export function LotPhotos({ urls }: { urls: string[] }) {
           onClick={() => step(1)}
           aria-label="Next photo"
         >
-          Next
+          <span aria-hidden="true">&rsaquo;</span>
+          <span className="cc-sr-only">Next</span>
         </Button>
       ) : null}
     </div>
@@ -129,6 +131,25 @@ export function LotPhotos({ urls }: { urls: string[] }) {
                   <img src={src} alt="" loading="lazy" decoding="async" />
                 </button>
               ))}
+            </div>
+          ) : null}
+          {count > 1 ? (
+            <div className="bidrl-gallery__controls" aria-live="polite">
+              <Button
+                size="sm"
+                onClick={() => step(-1)}
+                aria-label="Previous photo"
+              >
+                <span aria-hidden="true">&larr;</span> Previous
+              </Button>
+              <span>{index + 1} / {count} · source images</span>
+              <Button
+                size="sm"
+                onClick={() => step(1)}
+                aria-label="Next photo"
+              >
+                Next <span aria-hidden="true">&rarr;</span>
+              </Button>
             </div>
           ) : null}
           <Hint>
