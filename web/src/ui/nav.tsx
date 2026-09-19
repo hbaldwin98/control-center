@@ -48,10 +48,16 @@ export function useSearch(): string {
 /**
  * Navigate from code, for the cases a link cannot express: after deleting the record the
  * current screen is showing, say. Prefer `Link` everywhere a person is choosing to go.
+ *
+ * A number is a history step, which is how a surface that pushed an entry to open (a
+ * drawer) undoes exactly that entry when it closes.
  */
-export function useNavigate(): (to: string) => void {
+export function useNavigate(): (to: string | number) => void {
   const navigate = useRouterNavigate();
-  return (to: string) => navigate(to);
+  return (to: string | number) => {
+    if (typeof to === "number") navigate(to);
+    else navigate(to);
+  };
 }
 
 /** Path parameters for the matched route, so a screen never parses the URL itself. */
@@ -59,21 +65,30 @@ export function useRouteParams(): Record<string, string | undefined> {
   return useParams();
 }
 
+/** Whether a query write replaces the current history entry or pushes a new one. */
+export type QueryHistory = "replace" | "push";
+
 /**
  * One search parameter as state.
  *
  * Filters belong in the URL: it makes a filtered list shareable, and it means going into
  * a record and back returns the list the way it was left rather than reset. Writes
- * replace the current entry, so typing in a filter box does not bury the previous screen
- * under a stack of history.
+ * replace the current entry by default, so typing in a filter box does not bury the
+ * previous screen under a stack of history.
+ *
+ * A surface that opens *over* the current screen (a drawer) instead passes
+ * `{ history: "push" }` once, so the browser's back button closes it and returns to the
+ * list exactly as it was. Later writes within that surface pass `"replace"` again.
  */
 export function useQueryState(
   key: string,
   fallback = "",
-): [string, (next: string) => void] {
+  options?: { history?: QueryHistory },
+): [string, (next: string, setOptions?: { history?: QueryHistory }) => void] {
   const [params, setParams] = useSearchParams();
   const value = params.get(key) ?? fallback;
-  const set = (next: string) => {
+  const defaultHistory = options?.history ?? "replace";
+  const set = (next: string, setOptions?: { history?: QueryHistory }) => {
     setParams(
       (prev) => {
         const copy = new URLSearchParams(prev);
@@ -81,7 +96,7 @@ export function useQueryState(
         else copy.set(key, next);
         return copy;
       },
-      { replace: true },
+      { replace: (setOptions?.history ?? defaultHistory) === "replace" },
     );
   };
   return [value, set];

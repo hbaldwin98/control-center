@@ -6,7 +6,6 @@ import {
   Dash,
   EmptyState,
   Hint,
-  Link,
   useNow,
 } from "@cc/ui";
 import {
@@ -24,7 +23,7 @@ import {
   type SortState,
 } from "./model";
 import { useColumnSort, SortedHead } from "./sorting";
-import { FavoriteStar, LotThumbLink, bucketTone } from "./lotparts";
+import { FavoriteStar, LotLink, LotThumbLink, bucketTone } from "./lotparts";
 
 /** The one-word state the design prints in the table, derived only from real fields. */
 function lotStatus(lot: Lot): { label: string; tone: string } {
@@ -71,9 +70,7 @@ function LotTableRow({
           <LotThumbLink lot={lot} className="thumb" />
           <div className="lot-title">
             <strong>
-              <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
-                {lot.title || lot.id}
-              </Link>
+              <LotLink lot={lot} />
             </strong>
             <span>
               {[lot.lotCode ? `Lot ${lot.lotCode}` : "", lot.category]
@@ -114,12 +111,9 @@ function LotTableRow({
         <td className="bidrl-lot-table__why">{lot.matchReason || <Dash />}</td>
       ) : null}
       <td className="bidrl-lot-table__open">
-        <Link
-          className="table-action"
-          to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
-        >
+        <LotLink className="table-action" lot={lot}>
           Open
-        </Link>
+        </LotLink>
       </td>
     </tr>
   );
@@ -175,9 +169,7 @@ export const LotCard = memo(function LotCard({ lot }: { lot: Lot }) {
       </div>
       <div className="bidrl-lot-card__body">
         <h3 className="bidrl-lot-card__title">
-          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
-            {lot.title || lot.id}
-          </Link>
+          <LotLink lot={lot} />
         </h3>
         <div className="bidrl-lot-card__facts">
           <span className="bidrl-lot-card__where">
@@ -211,9 +203,9 @@ export function SimilarList({ lots }: { lots: Lot[] }) {
     <div className="bidrl-similar">
       {lots.map((lot) => (
         <div key={lot.id} className="bidrl-similar__row">
-          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
+          <LotLink lot={lot}>
             {lot.lotCode || lot.title || lot.id}
-          </Link>
+          </LotLink>
           <span>
             {cents(lot.currentBidCents)}
             {lot.endsAt ? (

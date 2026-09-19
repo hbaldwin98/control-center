@@ -1261,3 +1261,81 @@ describe("bidrl screens", () => {
     ).toContain("SITES · Turlock");
   });
 });
+
+describe("bidrl lot drawer", () => {
+  function panel(): HTMLElement | null {
+    return container.querySelector(".cc-drawer__panel");
+  }
+
+  async function openFirstLot() {
+    const link = container.querySelector<HTMLAnchorElement>(
+      'a[href="/bidrl/lot/1001"]',
+    );
+    expect(link).toBeTruthy();
+    await act(async () => {
+      link?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  // The whole point: a lot opens over the list, so the list keeps its filters, its pages,
+  // and its scroll. If the drawer replaced the screen, "All lots" would be gone.
+  it("opens a lot over the list without leaving it", async () => {
+    await renderAt("/bidrl/lots");
+    expect(container.textContent).toContain("All lots");
+
+    await openFirstLot();
+
+    expect(panel()).toBeTruthy();
+    expect(panel()?.getAttribute("role")).toBe("dialog");
+    expect(container.textContent).toContain("All lots");
+  });
+
+  it("closes the drawer with the close button", async () => {
+    await renderAt("/bidrl/lots");
+    await openFirstLot();
+
+    const close = container.querySelector<HTMLButtonElement>(
+      ".cc-drawer__close",
+    );
+    await act(async () => {
+      close?.click();
+    });
+
+    expect(panel()).toBeFalsy();
+  });
+
+  it("closes the drawer with Escape", async () => {
+    await renderAt("/bidrl/lots");
+    await openFirstLot();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+
+    expect(panel()).toBeFalsy();
+  });
+
+  it("closes the drawer when the backdrop is clicked", async () => {
+    await renderAt("/bidrl/lots");
+    await openFirstLot();
+
+    const scrim = container.querySelector<HTMLElement>(".cc-drawer__scrim");
+    await act(async () => {
+      scrim?.click();
+    });
+
+    expect(panel()).toBeFalsy();
+  });
+
+  // A bookmarked or shared lot URL is a real page, not an overlay.
+  it("keeps the full lot page for a direct load", async () => {
+    await renderAt("/bidrl/lot/1001");
+    expect(panel()).toBeFalsy();
+    expect(container.querySelector("h1")?.textContent).toContain(
+      "Keurig coffee maker",
+    );
+  });
+});

@@ -7,7 +7,7 @@ import type {
     SelectHTMLAttributes,
     TextareaHTMLAttributes,
 } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     formatDateTime,
     formatRelative,
@@ -787,5 +787,68 @@ export function Sparkline({
                 );
             })}
         </svg>
+    );
+}
+
+/* ---- overlays ---- */
+
+/**
+ * A panel that slides in over the screen it was opened from. It owns the scrim, the
+ * close button, Escape handling, and focus; the caller owns whether it is open. That
+ * split lets a surface keep the open state in the URL without the drawer knowing how.
+ */
+export function Drawer({
+    open,
+    onClose,
+    label,
+    closeLabel = "Close",
+    children,
+}: {
+    open: boolean;
+    onClose: () => void;
+    /** Accessible name for the dialog. */
+    label: string;
+    /** Accessible name for the dismiss button. */
+    closeLabel?: string | undefined;
+    children: ReactNode;
+}) {
+    const closeRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        if (open) closeRef.current?.focus();
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [open, onClose]);
+
+    if (!open) return null;
+
+    return (
+        <div className="cc-drawer">
+            <div className="cc-drawer__scrim" onClick={onClose} />
+            <aside
+                className="cc-drawer__panel"
+                role="dialog"
+                aria-modal="true"
+                aria-label={label}
+            >
+                <button
+                    ref={closeRef}
+                    type="button"
+                    className="cc-drawer__close"
+                    aria-label={closeLabel}
+                    onClick={onClose}
+                >
+                    ×
+                </button>
+                <div className="cc-drawer__body">{children}</div>
+            </aside>
+        </div>
     );
 }

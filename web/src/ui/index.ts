@@ -58,6 +58,7 @@ export {
   Checkbox,
   Dash,
   Disclosure,
+  Drawer,
   EmptyState,
   Field,
   Grid,

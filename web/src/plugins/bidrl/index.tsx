@@ -10,8 +10,10 @@
  * `data` (every read), `live` (the bid feed), `lots` (a lot, rendered), `chrome`
  * (navigation and layout), `actions` (queueing a job), `sorting`, `place`, and `api`.
  */
+import type { ReactNode } from "react";
 import type { PluginModule } from "@cc/ui";
 import { Detail, Tile } from "./dashboard";
+import { LotDrawerHost } from "./drawer";
 import { AuctionView } from "./screens/auction";
 import { Auctions } from "./screens/auctions";
 import { AutomationScreen } from "./screens/automation";
@@ -24,20 +26,25 @@ import { SavedLots } from "./screens/saved";
 import { Watchlists } from "./screens/watchlists";
 import "./index.css";
 
+// Every screen gets the drawer host, so any lot link anywhere in the workflow can open
+// the lot over the current screen instead of leaving it. The screen element is created
+// once, so changing `?lot=` never remounts the list underneath.
+const drawer = (screen: ReactNode) => <LotDrawerHost>{screen}</LotDrawerHost>;
+
 const bidrl: PluginModule = {
   id: "bidrl",
   nav: [{ path: "/bidrl", label: "Auctions", icon: "gavel", topLevel: true }],
   routes: [
-    { path: "/bidrl", element: <Overview /> },
-    { path: "/bidrl/auctions", element: <Auctions /> },
-    { path: "/bidrl/lots", element: <LotsCatalog /> },
-    { path: "/bidrl/findings", element: <Findings /> },
-    { path: "/bidrl/watchlists", element: <Watchlists /> },
-    { path: "/bidrl/saved", element: <SavedLots /> },
-    { path: "/bidrl/automation", element: <AutomationScreen /> },
-    { path: "/bidrl/intent", element: <IntentSearch /> },
-    { path: "/bidrl/auction/:id", element: <AuctionView /> },
-    { path: "/bidrl/lot/:id", element: <LotView /> },
+    { path: "/bidrl", element: drawer(<Overview />) },
+    { path: "/bidrl/auctions", element: drawer(<Auctions />) },
+    { path: "/bidrl/lots", element: drawer(<LotsCatalog />) },
+    { path: "/bidrl/findings", element: drawer(<Findings />) },
+    { path: "/bidrl/watchlists", element: drawer(<Watchlists />) },
+    { path: "/bidrl/saved", element: drawer(<SavedLots />) },
+    { path: "/bidrl/automation", element: drawer(<AutomationScreen />) },
+    { path: "/bidrl/intent", element: drawer(<IntentSearch />) },
+    { path: "/bidrl/auction/:id", element: drawer(<AuctionView />) },
+    { path: "/bidrl/lot/:id", element: drawer(<LotView />) },
   ],
   dashboard: {
     summary: "Scores lots from photographs. Collect a SITES auction, then scan.",

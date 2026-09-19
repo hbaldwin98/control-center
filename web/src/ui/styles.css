@@ -2503,3 +2503,110 @@ h3 {
   margin-top: 2px;
   font-size: 13px;
 }
+
+/* ---- overlays ---- */
+
+/* A panel that slides in over the screen: fixed to the right on wide screens, full
+   width on narrow ones. The scrim is a separate layer, so a click on it is a click
+   outside the panel and dismisses. */
+.cc-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cc-drawer__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 48%);
+  animation: cc-drawer-scrim-in 150ms ease;
+}
+
+.cc-drawer__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-width: 100%;
+  height: 100%;
+  min-width: 0;
+  border-left: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  box-shadow: -18px 0 40px rgb(0 0 0 / 35%);
+  animation: cc-drawer-panel-in 180ms ease;
+}
+
+.cc-drawer__close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cc-drawer__close:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.cc-drawer__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cc-drawer__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4);
+}
+
+@media (max-width: 700px) {
+  .cc-drawer__panel {
+    width: 100%;
+    border-left: 0;
+    box-shadow: none;
+  }
+}
+
+@keyframes cc-drawer-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes cc-drawer-scrim-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-drawer__panel,
+  .cc-drawer__scrim {
+    animation: none;
+  }
+}

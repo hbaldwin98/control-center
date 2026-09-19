@@ -1,6 +1,13 @@
 /** The pieces one lot is made of: its star, its thumb, its title, its note. */
-import { createContext, useContext, useEffect, useState } from "react";
-import { Badge, Card, Dash, Hint, Input, Link, Stack } from "@cc/ui";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { Badge, Card, Dash, Hint, Input, Link, Stack, usePath } from "@cc/ui";
 import { cents, comparableHint, locationLabelOrEmpty, type Lot } from "./model";
 import { api } from "./api";
 import { BidrlLink } from "./chrome";
@@ -11,6 +18,62 @@ import { BidrlLink } from "./chrome";
  * no longer belongs on sits there until a reload.
  */
 export const FavoriteChanged = createContext<() => void>(() => {});
+
+/**
+ * The lot drawer, when the screen is wrapped in its host. A lot link asks this to open the
+ * lot over the current list instead of navigating away, so the filters, the scroll, and
+ * the loaded pages behind it survive. It is `null` on screens without a host, where a lot
+ * link is an ordinary navigation.
+ */
+export type LotDrawer = {
+  id: string;
+  open: (id: string) => void;
+  close: () => void;
+};
+
+export const LotDrawerContext = createContext<LotDrawer | null>(null);
+
+export function useLotDrawer(): LotDrawer | null {
+  return useContext(LotDrawerContext);
+}
+
+/**
+ * A link to one lot. It stays a real anchor, so a middle click or "open in new tab" still
+ * lands on the lot's own page; a plain left click opens the drawer over the current screen
+ * instead. On a lot page already the drawer would hide the page it duplicates, so there
+ * it navigates as an ordinary link.
+ */
+export function LotLink({
+  lot,
+  className,
+  ariaLabel,
+  children,
+}: {
+  lot: Pick<Lot, "id" | "title">;
+  className?: string | undefined;
+  ariaLabel?: string | undefined;
+  children?: ReactNode;
+}) {
+  const drawer = useLotDrawer();
+  const onLotPage = usePath().startsWith("/bidrl/lot/");
+  const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!drawer || onLotPage) return;
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    drawer.open(lot.id);
+  };
+  return (
+    <Link
+      to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
+      className={className}
+      aria-label={ariaLabel}
+      onClick={onClick}
+    >
+      {children ?? lot.title ?? lot.id}
+    </Link>
+  );
+}
 
 export function bucketTone(
   bucket: string,
@@ -111,13 +174,13 @@ export function LotThumbLink({
   const thumb = <LotThumb lot={lot} className={className} />;
   if (!lot.thumbUrl) return thumb;
   return (
-    <Link
-      to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}
+    <LotLink
+      lot={lot}
       className={className ? `${className}-link` : undefined}
-      aria-label={`Open ${lot.title || lot.id}`}
+      ariaLabel={`Open ${lot.title || lot.id}`}
     >
       {thumb}
-    </Link>
+    </LotLink>
   );
 }
 
@@ -226,9 +289,7 @@ export function LotTitle({
   const hint = ident || (showLotCode ? lot.lotCode : "");
   return (
     <>
-      <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
-        {lot.title || lot.id}
-      </Link>
+      <LotLink lot={lot}>{lot.title || lot.id}</LotLink>
       {hint || lot.url ? (
         <Hint>
           {hint}
@@ -265,9 +326,7 @@ export function LotTableTitle({ lot }: { lot: Lot }) {
           </Badge>
         </div>
         <div className="bidrl-table-item__title">
-          <Link to={`/bidrl/lot/${encodeURIComponent(lot.id)}`}>
-            {lot.title || lot.id}
-          </Link>
+          <LotLink lot={lot}>{lot.title || lot.id}</LotLink>
           {lot.url ? (
             <BidrlLink
               href={lot.url}

@@ -65,7 +65,12 @@ export function usePlace(path: string, ready: boolean) {
   const search = useSearch();
 
   useEffect(() => {
-    writePlace(path, { search });
+    // The open lot is screen state, not list state: it is dropped from what a "back to
+    // this list" link carries, so tab clicks and crumbs land on the list, not the drawer.
+    const params = new URLSearchParams(search);
+    params.delete("lot");
+    const cleaned = params.toString();
+    writePlace(path, { search: cleaned ? `?${cleaned}` : "" });
   }, [path, search]);
 
   const restored = useRef(false);
