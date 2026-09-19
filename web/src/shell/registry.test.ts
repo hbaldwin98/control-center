@@ -14,6 +14,14 @@ describe("validateModules", () => {
     expect(validateModules([hello])).toEqual([]);
   });
 
+  it("accepts a plugin nav item promoted to the shell command surface", () => {
+    const topLevel: PluginModule = {
+      ...hello,
+      nav: [{ path: "/hello", label: "Hello", topLevel: true }],
+    };
+    expect(validateModules([topLevel])).toEqual([]);
+  });
+
   it("rejects a path outside /<id>", () => {
     const outsider: PluginModule = {
       id: "hello",

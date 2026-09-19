@@ -31,6 +31,8 @@ export type NavItem = {
   path: string;
   label: string;
   icon?: string;
+  /** Render this plugin entry in the shell's primary command navigation. */
+  topLevel?: boolean;
 };
 
 export type RouteDef = {

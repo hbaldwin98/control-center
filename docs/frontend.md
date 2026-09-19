@@ -86,6 +86,11 @@ import bidrl from "./plugins/bidrl";
 export const plugins = [hello, pagewatch, tid, bidrl];
 ```
 
+Set `topLevel: true` on a plugin navigation item when its workflow belongs in the shell's
+primary command section. Omit it for entries that should stay in the plugin section. The
+item remains frontend-owned and its path must still stay below `/<plugin-id>`; this does
+not add frontend routes or navigation to the backend manifest.
+
 The build rejects duplicate frontend IDs and route or navigation collisions. Plugin route
 and navigation paths must stay below `/<plugin-id>`.
 At startup, before rendering plugin UI, the shell compares every `PluginModule.id` with

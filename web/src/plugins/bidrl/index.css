@@ -747,7 +747,7 @@ tr.bidrl-similar-row td:first-child {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  color: #fff;
+  color: var(--text);
   cursor: default;
 }
 
@@ -1608,12 +1608,12 @@ tr.bidrl-similar-row td:first-child {
   bottom: 6px;
   right: 6px;
   font-size: 22px;
-  color: #fff;
+  color: var(--text);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
 .bidrl-lot-card__media .bidrl-star--on {
-  color: #ffd24a;
+  color: var(--accent-hover);
 }
 
 .bidrl-note {
@@ -1725,7 +1725,7 @@ tr.bidrl-similar-row td:first-child {
   gap: 0.4em;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: var(--cc-text-muted, #5b6472);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -1733,7 +1733,7 @@ tr.bidrl-similar-row td:first-child {
   width: 0.5em;
   height: 0.5em;
   border-radius: 50%;
-  background: var(--cc-success, #1f9d55);
+  background: var(--ok);
   animation: bidrl-live-pulse 2s ease-in-out infinite;
 }
 

@@ -26,7 +26,7 @@ import "./index.css";
 
 const bidrl: PluginModule = {
   id: "bidrl",
-  nav: [{ path: "/bidrl", label: "BIDRL" }],
+  nav: [{ path: "/bidrl", label: "Auctions", topLevel: true }],
   routes: [
     { path: "/bidrl", element: <Overview /> },
     { path: "/bidrl/auctions", element: <Auctions /> },
