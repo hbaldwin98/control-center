@@ -330,11 +330,6 @@ kbd {
     padding: var(--space-3);
   }
 
-  .cc-table-scroll {
-    margin: 0 calc(var(--space-3) * -1);
-    padding: 0 var(--space-3);
-  }
-
   /* iOS Safari zooms the whole viewport when a focused field is under 16px, and never
      zooms back out. Controls also grow to a comfortable touch target here. */
   .cc-input,
@@ -801,61 +796,18 @@ kbd {
   color: var(--text-muted);
 }
 
-/* ---- tables ---- */
-
-/* Wide tables scroll inside their card; the page itself never scrolls sideways. */
-.cc-table-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  margin: 0 calc(var(--space-4) * -1);
-  padding: 0 var(--space-4);
-}
-
-.cc-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-
-.cc-table th {
-  text-align: left;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  padding: 0 10px 6px 0;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.cc-table td {
-  padding: 7px 10px 7px 0;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-
-.cc-table th:last-child,
-.cc-table td:last-child {
-  padding-right: 0;
-}
+/* ---- tables ----------------------------------------------------------------
+   One table vocabulary for the whole app: a bordered `.data-table-wrap` around a
+   dense `.data-table`. `Table` emits these classes, and plugins compose them
+   directly, so a core table and a plugin table read as the same surface. */
 
 /* A numeric column heads right too, so the header sits over its own digits. */
-.cc-table th.cc-num {
+.data-table th.cc-num {
   text-align: right;
 }
 
-.cc-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.cc-table tbody tr:hover td {
-  background: var(--bg-hover);
-}
-
 /* An expanded detail row belongs to the row above it, so it does not restripe on hover. */
-.cc-table tbody tr.cc-table__detail:hover td {
+.data-table tbody tr.cc-table__detail:hover td {
   background: none;
 }
 
@@ -888,12 +840,12 @@ kbd {
   color: var(--text);
 }
 
-.cc-table th[aria-sort="ascending"] .cc-table__sort,
-.cc-table th[aria-sort="descending"] .cc-table__sort {
+.data-table th[aria-sort="ascending"] .cc-table__sort,
+.data-table th[aria-sort="descending"] .cc-table__sort {
   color: var(--text);
 }
 
-.cc-table th.cc-num .cc-table__sort {
+.data-table th.cc-num .cc-table__sort {
   justify-content: flex-end;
   width: 100%;
 }
@@ -907,8 +859,8 @@ kbd {
   opacity: 0;
 }
 
-.cc-table th[aria-sort="ascending"] .cc-table__sort-indicator,
-.cc-table th[aria-sort="descending"] .cc-table__sort-indicator {
+.data-table th[aria-sort="ascending"] .cc-table__sort-indicator,
+.data-table th[aria-sort="descending"] .cc-table__sort-indicator {
   opacity: 1;
 }
 
@@ -919,7 +871,7 @@ kbd {
 }
 
 /* A timestamp reads as one token. The table scrolls, so it never has to wrap. */
-.cc-table time {
+.data-table time {
   white-space: nowrap;
 }
 
@@ -1664,7 +1616,7 @@ a.cc-catalog {
     color: var(--text-faint);
   }
 
-  .cc-table {
+  .data-table {
     min-width: 620px;
   }
 }
@@ -2146,8 +2098,7 @@ h3 {
    A card that only holds a table or another card drops its own chrome so borders
    and fills stop stacking. The outer surface remains the single visual frame. */
 
-.cc-card > .data-table-wrap,
-.cc-card > .cc-table-scroll {
+.cc-card > .data-table-wrap {
   border: 0;
   background: transparent;
   border-radius: 0;
@@ -2159,8 +2110,7 @@ h3 {
   box-shadow: none;
 }
 
-.cc-card .cc-card > .data-table-wrap,
-.cc-card .cc-card > .cc-table-scroll {
+.cc-card .cc-card > .data-table-wrap {
   border: 0;
   background: transparent;
 }
@@ -2172,6 +2122,8 @@ h3 {
 
 .data-table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: rgb(255 255 255 / 1.8%);
@@ -2182,6 +2134,7 @@ h3 {
   min-width: 680px;
   border-collapse: collapse;
   text-align: left;
+  font-variant-numeric: tabular-nums;
 }
 
 .data-table th {
@@ -2640,4 +2593,116 @@ h3 {
   margin-left: 15px;
   min-height: 30px;
   font-size: 12.5px;
+}
+
+/* ---- Command surface ---------------------------------------------------------
+   The dashboard's own vocabulary: a heading with a subhead, a compact label/value
+   readout, a live status line, and a two-column layout with a right rail. */
+
+.cc-card__heading {
+  min-width: 0;
+}
+
+.cc-card__subhead {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.cc-signals {
+  display: grid;
+}
+
+.cc-signal {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 9px 0;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.cc-signal:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.cc-signal__label {
+  color: var(--text-body);
+  font-weight: 510;
+}
+
+.cc-signal__value {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.cc-status-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.cc-layout {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cc-layout__main,
+.cc-layout__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.cc-layout__main > .cc-card,
+.cc-layout__side > .cc-card {
+  flex: 1 1 auto;
+}
+
+@media (min-width: 1000px) {
+  .cc-layout {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
+}
+
+/* One plugin's brief: name and verdict on the first line, a one-line summary, the
+   handful of facts that fit, then the way in. */
+.cc-brief__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cc-brief__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 510;
+  color: var(--text);
+}
+
+.cc-brief__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.cc-brief__facts strong {
+  color: var(--text);
+  font-weight: 510;
+}
+
+.cc-brief__foot {
+  margin-top: 2px;
+  font-size: 13px;
 }

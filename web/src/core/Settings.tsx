@@ -84,6 +84,7 @@ export function Settings() {
   return (
     <Page>
       <PageHeader
+        eyebrow="System / Settings"
         title="Settings"
         lede="API keys and logins. After you save a key, connect it as a provider under Models — that is what plugins use."
       />

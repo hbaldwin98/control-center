@@ -4,10 +4,10 @@ import {
       Async,
       Badge,
       Button,
-      Card,
       Field,
       Page,
       PageHeader,
+      Panel,
       RelativeTime,
       Select,
       Stack,
@@ -55,8 +55,9 @@ export function Inbox() {
       return (
             <Page>
                   <PageHeader
-                        title="Inbox"
-                        lede="Committed events that matched a notification rule. Mark read; the row stays."
+                        eyebrow="Command / Inbox"
+                        title="Attention queue"
+                        lede="Signals that need a decision, not another dashboard."
                   />
                   <Stack>
                         <Toolbar>
@@ -86,7 +87,10 @@ export function Inbox() {
                               isEmpty={(d) => d.notifications.length === 0}
                         >
                               {(data) => (
-                                    <Card>
+                                    <Panel
+                                          title="Latest notifications"
+                                          subhead={`${data.notifications.length} ${data.notifications.length === 1 ? "signal" : "signals"} in the queue`}
+                                    >
                                           <Table
                                                 head={
                                                       <>
@@ -177,7 +181,7 @@ export function Inbox() {
                                                       </tr>
                                                 ))}
                                           </Table>
-                                    </Card>
+                                    </Panel>
                               )}
                         </Async>
                   </Stack>

@@ -393,9 +393,9 @@
 .bidrl-lot-card__img-empty {
   width: 100%;
   aspect-ratio: 1;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  background: var(--bg-sunken);
 }
 
 .bidrl-lot-card__img-empty {
@@ -1300,116 +1300,6 @@ tr.bidrl-similar-row td:first-child {
     display: none;
   }
 
-  /* On a phone the table becomes a scan list rather than a shrunken spreadsheet. The
-     same row keeps its identity, bid, and deadline in a short vertical rhythm; there is
-     no horizontal gesture required to answer the first question. */
-  .bidrl-lot-table,
-  .bidrl-lot-table tbody {
-    display: block;
-    width: 100%;
-  }
-
-  .bidrl-lot-table thead {
-    display: none;
-  }
-
-  .bidrl-lot-table tbody tr {
-    display: grid;
-    grid-template-columns: 32px 52px minmax(0, 1fr);
-    grid-template-areas:
-      "save item item"
-      "save item item"
-      "save bid bid"
-      "save ends ends";
-    gap: 3px var(--space-2);
-    padding: var(--space-3) 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .bidrl-lot-table tbody tr:last-child {
-    border-bottom: none;
-  }
-
-  .bidrl-lot-table tbody td {
-    display: block;
-    width: auto !important;
-    min-width: 0;
-    padding: 0;
-    border: 0;
-  }
-
-  .bidrl-lot-table tbody td:nth-child(1) {
-    grid-area: save;
-  }
-  .bidrl-lot-table tbody td:nth-child(2) {
-    grid-area: item;
-  }
-  .bidrl-lot-table tbody td:nth-child(3) {
-    grid-area: bid;
-  }
-  .bidrl-lot-table tbody td:nth-child(4),
-  .bidrl-lot-table tbody td:nth-child(5) {
-    display: none;
-  }
-  .bidrl-lot-table tbody td:nth-child(6) {
-    grid-area: ends;
-  }
-  .bidrl-lot-table tbody td:nth-child(n + 7) {
-    display: none;
-  }
-
-  .bidrl-lot-table .bidrl-table-item {
-    grid-template-columns: 52px minmax(0, 1fr);
-    height: 52px;
-  }
-
-  .bidrl-lot-table .bidrl-table-item__eyebrow {
-    display: none;
-  }
-
-  .bidrl-lot-table .bidrl-table-item__title > a:first-child {
-    display: -webkit-box;
-    white-space: normal;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
-
-  .bidrl-lot-table .bidrl-table-item__meta {
-    font-size: 11px;
-  }
-
-  .bidrl-lot-table .bidrl-table-item__meta > span:first-child {
-    display: none;
-  }
-
-  .bidrl-lot-table .bidrl-table-item__meta .bidrl-lot-location {
-    max-width: 100%;
-  }
-
-  .bidrl-lot-table .bidrl-table-cell--save .bidrl-star {
-    width: 32px;
-    min-width: 32px;
-    min-height: 40px;
-    margin: -4px 0 0 -4px;
-  }
-
-  .bidrl-lot-table .bidrl-table-cell--bid strong {
-    font-size: 16px;
-  }
-
-  .bidrl-lot-table .bidrl-table-cell__label {
-    display: block;
-  }
-
-  .bidrl-lot-table .bidrl-table-cell--bid .cc-hint {
-    display: inline;
-    margin-left: var(--space-2);
-  }
-
-  .bidrl-lot-table .bidrl-table-cell--ends {
-    text-align: right;
-  }
-
   .bidrl-lot-table .bidrl-table-gap {
     align-items: flex-end;
   }
@@ -2114,11 +2004,6 @@ tr.bidrl-similar-row td:first-child {
 
 /* ---- dense auction workspace surfaces ---- */
 
-.bidrl-auctions-surface .cc-table-scroll,
-.bidrl-sites-incoming .cc-table-scroll {
-  margin-top: var(--space-4);
-}
-
 .bidrl-auctions-table,
 .bidrl-sites-table {
   min-width: 760px;
@@ -2485,14 +2370,26 @@ tr.bidrl-similar-row td:first-child {
   .bidrl-lot-table--workspace.data-table tbody tr {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: none;
     gap: 3px 12px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--border-soft);
   }
 
+  .bidrl-lot-table--workspace.data-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .bidrl-lot-table--workspace.data-table tbody tr.bidrl-similar-row {
+    padding-left: 30px;
+    background: rgb(255 255 255 / 2%);
+  }
+
   .bidrl-lot-table--workspace.data-table tbody td {
+    height: auto;
     padding: 0;
     border: 0;
+    vertical-align: top;
     text-align: left;
   }
 
@@ -2547,11 +2444,6 @@ tr.bidrl-similar-row td:first-child {
   .bidrl-lot-card--workspace .bidrl-lot-card__comp,
   .bidrl-lot-card--workspace .bidrl-lot-card__media > .bidrl-gap {
     display: none;
-  }
-
-  .bidrl-sites-incoming .cc-table-scroll,
-  .bidrl-auctions-surface .cc-table-scroll {
-    margin-top: var(--space-3);
   }
 }
 
@@ -2703,7 +2595,7 @@ tr.bidrl-similar-row td:first-child {
   display: block;
   width: 100%;
   height: 148px;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .bidrl-selected-lot__img-empty {
@@ -3269,7 +3161,8 @@ tr.bidrl-similar-row td:first-child {
 
 .bidrl-lot-grid--workspace .bidrl-lot-card__media {
   position: relative;
-  height: 132px;
+  aspect-ratio: 4 / 3;
+  height: auto;
   margin: 0;
   border-radius: 0;
   overflow: hidden;
@@ -3280,8 +3173,9 @@ tr.bidrl-similar-row td:first-child {
 .bidrl-lot-grid--workspace .bidrl-lot-card__img-link img {
   display: block;
   width: 100%;
-  height: 132px;
-  object-fit: cover;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-sunken);
 }
 
 .bidrl-lot-grid--workspace .bidrl-lot-card__body {
@@ -3361,6 +3255,10 @@ tr.bidrl-similar-row td:first-child {
 @media (max-width: 700px) {
   .bidrl-source-search {
     width: 100%;
+    min-width: 0;
+  }
+
+  .bidrl-lot-table--workspace.data-table {
     min-width: 0;
   }
 

@@ -53,6 +53,7 @@ export function PageHeader({
 
 export function Card({
     title,
+    subhead,
     actions,
     muted,
     className,
@@ -60,6 +61,8 @@ export function Card({
 }: {
     /** A node rather than a string, so a card can make its own title a link. */
     title?: ReactNode | undefined;
+    /** One line under the title, for a card that needs to explain itself. */
+    subhead?: ReactNode | undefined;
     actions?: ReactNode | undefined;
     muted?: boolean | undefined;
     className?: string | undefined;
@@ -69,10 +72,17 @@ export function Card({
         <section
             className={cx("cc-card", muted && "cc-card--muted", className)}
         >
-            {title || actions ? (
+            {title || subhead || actions ? (
                 <div className="cc-card__head">
-                    {title ? (
-                        <h2 className="cc-card__title">{title}</h2>
+                    {title || subhead ? (
+                        <div className="cc-card__heading">
+                            {title ? (
+                                <h2 className="cc-card__title">{title}</h2>
+                            ) : null}
+                            {subhead ? (
+                                <p className="cc-card__subhead">{subhead}</p>
+                            ) : null}
+                        </div>
                     ) : (
                         <span />
                     )}
@@ -224,6 +234,30 @@ export function Tabs({
 /** Muted secondary text. Use this rather than borrowing a field's hint class. */
 export function Hint({ children }: { children: ReactNode }) {
     return <p className="cc-hint">{children}</p>;
+}
+
+/**
+ * One label/value line in a compact readout — the export's `.signal`. Use a list of
+ * these for a small set of figures that would be too thin to each earn a metric.
+ */
+export function Signal({
+    label,
+    children,
+}: {
+    label: ReactNode;
+    children: ReactNode;
+}) {
+    return (
+        <div className="cc-signal">
+            <span className="cc-signal__label">{label}</span>
+            <span className="cc-signal__value">{children}</span>
+        </div>
+    );
+}
+
+/** A list of `Signal` rows with hairline separators. */
+export function Signals({ children }: { children: ReactNode }) {
+    return <div className="cc-signals">{children}</div>;
 }
 
 /** A monospaced block for logs and error detail. Wraps rather than scrolling sideways. */
@@ -538,8 +572,8 @@ export function Table({
     children: ReactNode;
 }) {
     return (
-        <div className="cc-table-scroll">
-            <table className={cx("cc-table", className)}>
+        <div className="data-table-wrap">
+            <table className={cx("data-table", className)}>
                 <thead>
                     <tr>{head}</tr>
                 </thead>

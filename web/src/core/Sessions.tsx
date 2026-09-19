@@ -13,6 +13,7 @@ import {
   LogBlock,
   Page,
   PageHeader,
+  Panel,
   Row,
   Select,
   Stack,
@@ -73,6 +74,7 @@ export function Sessions() {
   return (
     <Page>
       <PageHeader
+        eyebrow="System / Sessions"
         title="Sessions"
         lede="Run configured coding-agent commands, inspect retained output, and stop active processes."
       />
@@ -211,7 +213,7 @@ function SessionTable({ sessions, onChanged }: { sessions: Session[]; onChanged:
   const [openId, setOpenId] = useState<number | null>(null);
   if (sessions.length === 0) return <Hint>No harness sessions yet.</Hint>;
   return (
-    <Card>
+    <Panel title="Recent sessions" subhead={`${sessions.length} retained`}>
       <Table head={<><th className="cc-num">ID</th><th>Session</th><th>Profile</th><th>State</th><th>Created</th><ActionsHeader /></>}>
         {sessions.map((session) => (
           <SessionRow
@@ -223,7 +225,7 @@ function SessionTable({ sessions, onChanged }: { sessions: Session[]; onChanged:
           />
         ))}
       </Table>
-    </Card>
+    </Panel>
   );
 }
 

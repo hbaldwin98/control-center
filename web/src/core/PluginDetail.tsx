@@ -13,6 +13,7 @@ import {
       Badge,
       Callout,
       Card,
+      Panel,
       Dash,
       EmptyState,
       Grid,
@@ -95,7 +96,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
       if (states.status === "loading") {
             return (
                   <Page>
-                        <PageHeader title={id} />
+                        <PageHeader eyebrow="System / Plugins" title={id} />
                         <Loading label="Loading plugin…" />
                   </Page>
             );
@@ -104,7 +105,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
       if (states.status === "error") {
             return (
                   <Page>
-                        <PageHeader title={id} />
+                        <PageHeader eyebrow="System / Plugins" title={id} />
                         <Callout tone="danger">{states.error.message}</Callout>
                   </Page>
             );
@@ -113,7 +114,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
       if (!state) {
             return (
                   <Page>
-                        <PageHeader title={id || "Plugin"} />
+                        <PageHeader eyebrow="System / Plugins" title={id || "Plugin"} />
                         <EmptyState>
                               No plugin is registered as <code>{id}</code>.{" "}
                               <Link to="/plugins">All plugins</Link>
@@ -133,6 +134,7 @@ export function PluginDetail({ plugins }: { plugins: PluginModule[] }) {
       return (
             <Page>
                   <PageHeader
+                        eyebrow="System / Plugins"
                         title={state.name || state.pluginId}
                         {...(lede ? { lede } : {})}
                         actions={
@@ -344,8 +346,9 @@ function OverviewPane({
                         />
                   </Card>
 
-                  <Card
+                  <Panel
                         title="Jobs"
+                        subhead={`${jobRows.length} recent`}
                         actions={
                               <Link
                                     to={`/jobs?plugin=${encodeURIComponent(state.pluginId)}`}
@@ -431,7 +434,7 @@ function OverviewPane({
                                     </Table>
                               )}
                         </Async>
-                  </Card>
+                  </Panel>
             </>
       );
 }

@@ -46,8 +46,9 @@ export function Plugins() {
   return (
     <Page>
       <PageHeader
-        title="Plugins"
-        lede="Every registered plugin. Open one to see what it is doing, or to change its budget, models, and kill switch."
+        eyebrow="System / Plugins"
+        title="Plugin registry"
+        lede="Capabilities are modular, but their health should read as one system."
       />
       <Async state={plugins} loading="Loading plugins…" empty="No plugins are registered yet.">
         {(list) => (

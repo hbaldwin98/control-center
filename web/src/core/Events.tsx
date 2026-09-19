@@ -4,7 +4,6 @@ import {
   Badge,
   Button,
   Callout,
-  Card,
   Dash,
   EmptyState,
   Field,
@@ -14,6 +13,7 @@ import {
   LogBlock,
   Page,
   PageHeader,
+  Panel,
   Row,
   Stack,
   Table,
@@ -116,8 +116,9 @@ export function Events() {
   return (
     <Page>
       <PageHeader
-        title="Events"
-        lede="The persisted log. REST loads the history; the shared stream applies everything after it."
+        eyebrow="System / Events"
+        title="Event stream"
+        lede="Recent signals across plugins, collections, and actions."
       />
 
       <Stack>
@@ -183,7 +184,10 @@ export function Events() {
             No events match <code>{pattern}</code> yet.
           </EmptyState>
         ) : (
-          <Card title={`${rows.length} event${rows.length === 1 ? "" : "s"}`}>
+          <Panel
+            title="Latest events"
+            subhead={`${rows.length} event${rows.length === 1 ? "" : "s"} match ${pattern}`}
+          >
             <Table
               head={
                 <>
@@ -239,7 +243,7 @@ export function Events() {
                 );
               })}
             </Table>
-          </Card>
+          </Panel>
         )}
       </Stack>
     </Page>
@@ -278,7 +282,7 @@ function Subscribers() {
   const unhealthy = subs.data.filter((s) => !s.healthy).length;
 
   return (
-    <Card
+    <Panel
       title="Durable subscribers"
       actions={
         unhealthy > 0 ? (
@@ -339,6 +343,6 @@ function Subscribers() {
           </tr>
         ))}
       </Table>
-    </Card>
+    </Panel>
   );
 }

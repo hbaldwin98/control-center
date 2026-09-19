@@ -129,6 +129,7 @@ export function Models() {
   return (
     <Page>
       <PageHeader
+        eyebrow="System / Models"
         title="Models"
         lede="Connect a provider, then pick a model for each thing a plugin needs. Fallbacks, prices, and extra routes live further down."
       />

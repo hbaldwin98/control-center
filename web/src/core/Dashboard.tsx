@@ -1,10 +1,10 @@
 /**
  * The control centre's front page.
  *
- * One tile per registered plugin, in a grid, each a live summary of what the host knows —
- * state, spend against budget, open work — plus whatever the plugin itself chooses to show. A plugin that declares live patterns gets a live indicator and
- * an activity history driven by the one shared stream; one that declares nothing still
- * gets a tile, just a static one. Clicking a tile opens that plugin.
+ * It answers one question — what needs attention? — with a strip of figures, a single
+ * queue of things worth opening, a short pulse of host activity, and a compact brief per
+ * plugin. A plugin that declares live patterns keeps a live indicator; one that declares
+ * nothing still gets a brief, just a static one. Clicking a brief opens that plugin.
  */
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
@@ -17,13 +17,14 @@ import {
   Grid,
   Hint,
   LiveDot,
-  Meter,
   Metric,
   Money,
   Page,
   PageHeader,
+  Panel,
   RelativeTime,
-  Sparkline,
+  Signal,
+  Signals,
   Stack,
   api,
   formatProgress,
@@ -101,11 +102,14 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   const queued = jobRows.filter(
     (j) => j.state === "pending" || j.state === "retry_wait",
   );
+  const failed = jobRows.filter(
+    (j) => j.state === "failed" || j.state === "dead",
+  );
+  const completed = jobRows.filter((j) => j.state === "succeeded");
   const spentToday = rows.reduce((sum, p) => sum + p.committedDay, 0);
   const heldToday = rows.reduce((sum, p) => sum + p.reservedDay, 0);
   const enabledCount = rows.filter((p) => p.enabled).length;
   const alerts = inbox.status === "ready" ? inbox.data.notifications : [];
-  const lastAlert = alerts[0];
   const attention = rows.filter((p) =>
     needsAttention(verdictOf(p, pulses.get(p.pluginId) ?? idlePulse)),
   ).length;
@@ -113,14 +117,15 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
   return (
     <Page>
       <PageHeader
+        eyebrow="Command / Today"
         title="Dashboard"
-        lede="Start with what needs attention, then open a plugin for the full view."
+        lede="A single surface for plugin health, running work, and the few things worth opening first."
         actions={<StreamIndicator />}
       />
       <Stack>
         <Grid density="metric">
           <Metric
-            label="Plugins"
+            label="Plugins online"
             value={
               states.status === "ready" ? (
                 `${enabledCount}/${rows.length}`
@@ -130,6 +135,13 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
             }
             hint={attention > 0 ? `${attention} need attention` : "all healthy"}
             tone={attention > 0 ? "warn" : "neutral"}
+          />
+          <Metric
+            label="Running now"
+            value={jobs.status === "ready" ? running.length : <Dash />}
+            hint={
+              queued.length > 0 ? `${queued.length} waiting` : "nothing waiting"
+            }
           />
           <Metric
             label="Spent today"
@@ -151,56 +163,65 @@ export function Dashboard({ plugins }: { plugins: PluginModule[] }) {
             }
           />
           <Metric
-            label="Running"
-            value={jobs.status === "ready" ? running.length : <Dash />}
-            hint={
-              queued.length > 0 ? `${queued.length} waiting` : "nothing waiting"
-            }
-          />
-          <Metric
-            label="Alerts"
+            label="Attention queue"
             value={alerts.length}
             hint={
-              lastAlert ? (
-                <RelativeTime at={lastAlert.createdAt} prefix="last" />
-              ) : (
-                "in the inbox"
-              )
+              attention > 0
+                ? `${attention} plugin${attention === 1 ? "" : "s"} flagged`
+                : "nothing flagged"
             }
             tone={alerts.length > 0 ? "warn" : "neutral"}
           />
         </Grid>
 
-        {states.status === "ready" &&
-        jobs.status === "ready" &&
-        inbox.status === "ready" ? (
-          <DashboardFocus
-            pluginStates={rows}
-            pulses={pulses}
-            running={running}
-            waiting={queued}
-            alerts={alerts}
-          />
-        ) : null}
+        <div className="cc-layout">
+          <div className="cc-layout__main">
+            <DashboardFocus
+              pluginStates={rows}
+              pulses={pulses}
+              running={running}
+              waiting={queued}
+              alerts={alerts}
+            />
+          </div>
+          <div className="cc-layout__side">
+            <SystemPulse
+              completed={completed.length}
+              running={running.length}
+              spentToday={spentToday}
+            />
+            <NextUp
+              alerts={alerts.length}
+              failed={failed.length}
+              plugins={rows.length}
+            />
+          </div>
+        </div>
 
-        <Async
-          state={states}
-          loading="Loading plugins…"
-          empty="No plugins are registered yet."
+        <Panel
+          title="Plugin pulse"
+          subhead="Each plugin gets a compact operational brief, not a separate dashboard."
+          actions={<Link to="/plugins">Manage plugins →</Link>}
         >
-          {(list) => (
-            <Grid density="tile">
-              {list.map((state) => (
-                <PluginTile
-                  key={state.pluginId}
-                  state={state}
-                  module={modules.get(state.pluginId)}
-                  pulse={pulses.get(state.pluginId) ?? idlePulse}
-                />
-              ))}
-            </Grid>
-          )}
-        </Async>
+          <Async
+            state={states}
+            loading="Loading plugins…"
+            empty="No plugins are registered yet."
+          >
+            {(list) => (
+              <Grid density="tile">
+                {list.map((state) => (
+                  <PluginBrief
+                    key={state.pluginId}
+                    state={state}
+                    module={modules.get(state.pluginId)}
+                    pulse={pulses.get(state.pluginId) ?? idlePulse}
+                  />
+                ))}
+              </Grid>
+            )}
+          </Async>
+        </Panel>
       </Stack>
     </Page>
   );
@@ -237,7 +258,11 @@ function DashboardFocus({
     alerts.length > 0;
 
   return (
-    <Card title="Needs attention" actions={<Link to="/inbox">Open inbox</Link>}>
+    <Card
+      title="Needs attention"
+      subhead="The few things worth opening first."
+      actions={<Link to="/inbox">Open inbox →</Link>}
+    >
       {!hasItems ? (
         <EmptyState>
           All clear. No alerts, failed plugins, or open work.
@@ -343,8 +368,67 @@ function DashboardFocus({
   );
 }
 
-/** One plugin's tile: host facts, the plugin's own summary, and a way in. */
-function PluginTile({
+/** A short readout of host activity, the way the export's "System pulse" reads. */
+function SystemPulse({
+  completed,
+  running,
+  spentToday,
+}: {
+  completed: number;
+  running: number;
+  spentToday: number;
+}) {
+  const status = useStreamStatus();
+  return (
+    <Card
+      title="System pulse"
+      subhead="Recent work the host has seen."
+      actions={
+        <Badge tone={status === "live" ? "ok" : "warn"}>
+          {status === "live" ? "stable" : "stale"}
+        </Badge>
+      }
+    >
+      <Signals>
+        <Signal label="Jobs completed">{completed}</Signal>
+        <Signal label="Running now">{running}</Signal>
+        <Signal label="Spend today">
+          <Money microUsd={spentToday} compact />
+        </Signal>
+      </Signals>
+    </Card>
+  );
+}
+
+/** The handful of links an operator reaches for after reading the queue. */
+function NextUp({
+  alerts,
+  failed,
+  plugins,
+}: {
+  alerts: number;
+  failed: number;
+  plugins: number;
+}) {
+  return (
+    <Card title="Next up" subhead="Shortcuts into the work.">
+      <Signals>
+        <Signal label="Open inbox">
+          <Link to="/inbox">{alerts} →</Link>
+        </Signal>
+        <Signal label="Review failed jobs">
+          <Link to="/jobs">{failed} →</Link>
+        </Signal>
+        <Signal label="Manage plugins">
+          <Link to="/plugins">{plugins} →</Link>
+        </Signal>
+      </Signals>
+    </Card>
+  );
+}
+
+/** One plugin's brief: name and verdict, a one-line summary, the facts, and a way in. */
+function PluginBrief({
   state,
   module,
   pulse,
@@ -360,90 +444,51 @@ function PluginTile({
 
   const badge = VERDICTS[verdictOf(state, pulse)];
   const detail = `/plugins/${encodeURIComponent(state.pluginId)}`;
+  const brief = dashboard?.summary || state.description;
   return (
-    <Card
-      muted={!state.enabled}
-      className="cc-tile"
-      title={
-        <Link className="cc-tile__link" to={detail}>
-          {state.name || state.pluginId}
-        </Link>
-      }
-      actions={
-        <LiveDot
-          state={liveState(live.length > 0, connected, activity.lastAt)}
-          label={liveLabel(live.length > 0, connected, activity.lastAt)}
-        />
-      }
-    >
+    <Card muted={!state.enabled} className="cc-brief">
       <Stack>
-        <div className="cc-row">
-          <Badge tone={badge.tone}>{badge.label}</Badge>
-          {state.automated ? <Badge>automated</Badge> : null}
-          <code className="cc-hint">{state.pluginId}</code>
+        <div className="cc-brief__top">
+          <Link className="cc-brief__name" to={detail}>
+            {state.name || state.pluginId}
+          </Link>
+          <div className="cc-row">
+            {live.length > 0 ? (
+              <LiveDot
+                state={liveState(true, connected, activity.lastAt)}
+                label={liveLabel(true, connected, activity.lastAt)}
+              />
+            ) : null}
+            <Badge tone={badge.tone}>{badge.label}</Badge>
+          </div>
         </div>
 
-        {dashboard?.summary || state.description ? (
-          <Hint>{dashboard?.summary || state.description}</Hint>
-        ) : null}
-
+        {brief ? <Hint>{brief}</Hint> : null}
         {!state.enabled && state.disabledReason ? (
           <Hint>{state.disabledReason}</Hint>
         ) : null}
 
-        <div className="cc-tile__stats">
-          <div>
-            <div className="cc-tile__stat-label">Today</div>
-            <div className="cc-tile__stat-value">
+        <div className="cc-brief__facts">
+          <span>
+            Today{" "}
+            <strong>
               <Money microUsd={state.committedDay} compact />
-              {state.budget.daily > 0 ? (
-                <span className="cc-hint">
-                  {" / "}
-                  <Money microUsd={state.budget.daily} compact />
-                </span>
-              ) : null}
-            </div>
+            </strong>
             {state.budget.daily > 0 ? (
-              <Meter
-                value={state.committedDay}
-                soft={state.reservedDay}
-                max={state.budget.daily}
-                label={`${state.pluginId} daily budget`}
-              />
-            ) : (
-              <Hint>no daily budget</Hint>
-            )}
-          </div>
-          <div>
-            <div className="cc-tile__stat-label">Work</div>
-            <div className="cc-tile__stat-value">{pulse.running}</div>
-            <Hint>
-              {pulse.waiting > 0
-                ? `${pulse.waiting} waiting`
-                : "nothing waiting"}
-              {pulse.failing && pulse.running === 0 ? " · last job failed" : ""}
-            </Hint>
-          </div>
+              <>
+                {" / "}
+                <Money microUsd={state.budget.daily} compact />
+              </>
+            ) : null}
+          </span>
+          <span>
+            Running <strong>{pulse.running}</strong>
+          </span>
+          <span>
+            {pulse.waiting > 0 ? `${pulse.waiting} waiting` : "nothing waiting"}
+          </span>
+          {state.automated ? <span>automated</span> : null}
         </div>
-
-        {live.length > 0 ? (
-          <div className="cc-tile__activity">
-            <Sparkline
-              values={activity.buckets}
-              label={`${state.pluginId} event activity over the last ten minutes`}
-            />
-            <Hint>
-              {activity.last ? (
-                <>
-                  <code>{activity.last.type}</code>{" "}
-                  <RelativeTime at={activity.lastAt} />
-                </>
-              ) : (
-                `watching ${live.join(", ")}`
-              )}
-            </Hint>
-          </div>
-        ) : null}
 
         <PluginSurface
           pluginId={state.pluginId}
@@ -451,8 +496,8 @@ function PluginTile({
           surface={dashboard?.tile}
         />
 
-        <div className="cc-tile__foot">
-          <Link to={detail}>Open plugin</Link>
+        <div className="cc-brief__foot">
+          <Link to={detail}>Open plugin →</Link>
         </div>
       </Stack>
     </Card>
@@ -481,12 +526,12 @@ function StreamIndicator() {
   const status = useStreamStatus();
   const { tone, label } = STREAM[status];
   return (
-    <Badge tone={tone}>
+    <span className="cc-status-live">
       <LiveDot
         state={status === "live" ? "live" : "off"}
         label={`event stream ${label}`}
       />
-      {label}
-    </Badge>
+      <Badge tone={tone}>{label}</Badge>
+    </span>
   );
 }

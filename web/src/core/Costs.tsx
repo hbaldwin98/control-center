@@ -4,12 +4,12 @@ import {
   Async,
   Badge,
   Button,
-  Card,
   Dash,
   Field,
   Money,
   Page,
   PageHeader,
+  Panel,
   Select,
   Stack,
   Table,
@@ -73,6 +73,7 @@ export function Costs() {
   return (
     <Page>
       <PageHeader
+        eyebrow="System / Costs"
         title="Costs"
         lede="Spend by plugin, then job, then logical model, over time."
       />
@@ -127,7 +128,7 @@ function Spend({
   return (
     <Stack>
       {groups.map((g) => (
-        <Card key={g.pluginId} title={pluginName(plugins, g.pluginId)}>
+        <Panel key={g.pluginId} title={pluginName(plugins, g.pluginId)}>
           <Stack>
             {g.jobs.map((job) => (
               <div key={job.jobId || "none"}>
@@ -168,10 +169,10 @@ function Spend({
               </div>
             ))}
           </Stack>
-        </Card>
+        </Panel>
       ))}
 
-      <Card title="Calls">
+      <Panel title="Calls">
         <Table
           head={
             <>
@@ -227,7 +228,7 @@ function Spend({
             </tr>
           ))}
         </Table>
-      </Card>
+      </Panel>
     </Stack>
   );
 }

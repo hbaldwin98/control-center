@@ -76,6 +76,8 @@ export {
   Countdown,
   Row,
   Select,
+  Signal,
+  Signals,
   Sparkline,
   Stack,
   SortHeader,

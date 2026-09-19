@@ -6,12 +6,12 @@ import {
       Async,
       Badge,
       Button,
-      Card,
       Field,
       Hint,
       LogBlock,
       Page,
       PageHeader,
+      Panel,
       Row,
       Select,
       Stack,
@@ -103,8 +103,9 @@ export function Jobs() {
       return (
             <Page>
                   <PageHeader
-                        title="Jobs"
-                        lede="The queue and its history. REST loads the snapshot; the shared stream refetches after every job event."
+                        eyebrow="System / Jobs"
+                        title="Job queue"
+                        lede="Recent work across every plugin, with failures surfaced before throughput."
                   />
                   <Stack>
                         <Toolbar>
@@ -153,7 +154,10 @@ export function Jobs() {
                               empty={emptyLabel(state, plugin)}
                         >
                               {(jobs) => (
-                                    <Card>
+                                    <Panel
+                                          title="Latest activity"
+                                          subhead={`${jobs.length} ${jobs.length === 1 ? "job" : "jobs"} shown`}
+                                    >
                                           <Table
                                                 head={
                                                       <>
@@ -194,7 +198,7 @@ export function Jobs() {
                                                       />
                                                 ))}
                                           </Table>
-                                    </Card>
+                                    </Panel>
                               )}
                         </Async>
                   </Stack>
