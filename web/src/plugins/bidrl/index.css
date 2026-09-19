@@ -1211,7 +1211,7 @@ tr.bidrl-similar-row td:first-child {
 /* The catalog's filters are one control per row on a phone: a half-width select next to a
    half-width text box is unusable at 360px, and the toolbar's 180px floor guarantees an
    awkward two-up otherwise. */
-@media (max-width: 720px) {
+@media (max-width: 700px) {
   /* BIDRL has its own tab strip; keep the page title, live state, and tabs in one
      compact header rather than spending a full row on the tiny live indicator. */
   .cc-page:has(.cc-tabs[aria-label="BIDRL sections"]) {
@@ -1567,6 +1567,14 @@ tr.bidrl-similar-row td:first-child {
   gap: var(--space-2);
 }
 
+/* The base disclosure rule follows the compact block, so restore its summary affordance
+   after the base declaration without duplicating the rest of the mobile styles. */
+@media (max-width: 700px) {
+  .bidrl-advanced-filters > summary {
+    display: flex;
+  }
+}
+
 /* The star sits on the photograph on a card and in its own column in the table, so
    saving works from wherever you are looking rather than only from the lot page. */
 .bidrl-star {
@@ -1685,7 +1693,7 @@ tr.bidrl-similar-row td:first-child {
   gap: 4px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 700px) {
   /* Stack rather than squeeze: the buttons must stay full-width targets. */
   .bidrl-finding,
   .bidrl-watchlist {

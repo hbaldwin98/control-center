@@ -279,7 +279,7 @@ kbd {
 }
 
 /* Below the nav breakpoint the sidebar becomes a scrolling strip across the top. */
-@media (max-width: 720px) {
+@media (max-width: 700px) {
   .cc-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);

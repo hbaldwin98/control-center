@@ -54,7 +54,7 @@ export function LotsCatalog() {
   const [draft, setDraft] = useState(q);
   const [view, setView] = useLotView();
   const [advancedOpen, setAdvancedOpen] = useState(
-    () => typeof window === "undefined" || window.innerWidth > 720,
+    () => typeof window === "undefined" || window.innerWidth > 700,
   );
   const sort = parseLotSort(sortParam, defaultLotSort(filter, bucket, ending));
   const sortQuery = lotSortParam(sort);

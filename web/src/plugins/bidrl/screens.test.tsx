@@ -398,6 +398,37 @@ describe("bidrl screens", () => {
     expect(container.textContent).toContain(expected);
   });
 
+  it.each([
+    ["/bidrl/lots", 700, false],
+    ["/bidrl/lots", 710, true],
+    ["/bidrl/lots", 721, true],
+    ["/bidrl/saved", 700, false],
+    ["/bidrl/saved", 710, true],
+    ["/bidrl/saved", 721, true],
+  ])(
+    "initializes advanced filters for %s at %dpx",
+    async (path, width, open) => {
+      const previousWidth = window.innerWidth;
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: width,
+      });
+      try {
+        await renderAt(path);
+        expect(
+          container.querySelector<HTMLDetailsElement>(
+            ".bidrl-advanced-filters",
+          )?.open,
+        ).toBe(open);
+      } finally {
+        Object.defineProperty(window, "innerWidth", {
+          configurable: true,
+          value: previousWidth,
+        });
+      }
+    },
+  );
+
   it("puts the current listing ahead of the decision report", async () => {
     await renderAt("/bidrl/lot/1001");
     const current = container.querySelector(".bidrl-lot-current");
