@@ -94,18 +94,20 @@ function LotTableRow({
         {lot.endsAt ? <Countdown iso={lot.endsAt} /> : <Dash />}
       </td>
       <td className="bidrl-lot-table__status">
-        <span className={`pill${status.tone ? ` ${status.tone}` : ""}`}>
-          {status.label}
-        </span>
-        {similarCount > 0 ? (
-          <button
-            type="button"
-            className="table-action bidrl-similar-toggle"
-            onClick={onToggleSimilar}
-          >
-            {similarOpen ? "Hide similar" : `${similarCount} similar`}
-          </button>
-        ) : null}
+        <div className="bidrl-lot-table__status-inner">
+          <span className={`pill${status.tone ? ` ${status.tone}` : ""}`}>
+            {status.label}
+          </span>
+          {similarCount > 0 ? (
+            <button
+              type="button"
+              className="table-action bidrl-similar-toggle"
+              onClick={onToggleSimilar}
+            >
+              {similarOpen ? "Hide similar" : `${similarCount} similar`}
+            </button>
+          ) : null}
+        </div>
       </td>
       {showWhy ? (
         <td className="bidrl-lot-table__why">{lot.matchReason || <Dash />}</td>

@@ -3225,7 +3225,9 @@ tr.bidrl-similar-row td:first-child {
   vertical-align: middle;
 }
 
-.bidrl-lot-table__status {
+/* The `<td>` stays a table cell so its hover highlight spans the full row height;
+   the flex layout lives in a child instead of on the cell itself. */
+.bidrl-lot-table__status-inner {
   display: flex;
   align-items: center;
   gap: 8px;
