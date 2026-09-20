@@ -838,15 +838,17 @@ export function Drawer({
                 aria-modal="true"
                 aria-label={label}
             >
-                <button
-                    ref={closeRef}
-                    type="button"
-                    className="cc-drawer__close"
-                    aria-label={closeLabel}
-                    onClick={onClose}
-                >
-                    ×
-                </button>
+                <div className="cc-drawer__head">
+                    <button
+                        ref={closeRef}
+                        type="button"
+                        className="cc-drawer__close"
+                        aria-label={closeLabel}
+                        onClick={onClose}
+                    >
+                        ×
+                    </button>
+                </div>
                 <div className="cc-drawer__body">{children}</div>
             </aside>
         </div>

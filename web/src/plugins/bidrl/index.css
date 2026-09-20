@@ -3384,3 +3384,11 @@ tr.bidrl-similar-row td:first-child {
 .cc-drawer__body .bidrl-lot-detail-grid__aside {
   position: static;
 }
+
+/* The prev/position/next strip is the drawer's header row; separate it from the
+   content the same way the full page separates its breadcrumb trail. */
+.cc-drawer__body > .bidrl-lot-nav__neighbors {
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
