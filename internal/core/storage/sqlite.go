@@ -198,14 +198,15 @@ func (s *Store) Tx(ctx context.Context, fn func(Tx) error) (err error) {
 	handle := &sqlTx{tx: tx}
 	committed := false
 	defer func() {
-		s.currentWriter = nil
 		if p := recover(); p != nil {
+			s.currentWriter = nil
 			_ = tx.Rollback()
 			_ = conn.Close()
 			s.release()
 			panic(p)
 		}
 		if !committed {
+			s.currentWriter = nil
 			_ = tx.Rollback()
 			_ = conn.Close()
 			s.release()
@@ -222,6 +223,7 @@ func (s *Store) Tx(ctx context.Context, fn func(Tx) error) (err error) {
 		return fmt.Errorf("storage: commit: %w", err)
 	}
 	committed = true
+	s.currentWriter = nil
 	_ = conn.Close()
 	s.release()
 	for _, fn := range handle.after {
