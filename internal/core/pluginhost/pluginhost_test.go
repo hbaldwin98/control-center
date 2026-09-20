@@ -389,19 +389,13 @@ func TestEnableThenDisableHTTPAndMutations(t *testing.T) {
 
 func TestDisableCancelsAdmittedRequestContext(t *testing.T) {
 	started := make(chan struct{})
-	release := make(chan struct{})
 	var sawCancel atomic.Bool
 	p := newProbe()
 	p.ping = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
-		select {
-		case <-r.Context().Done():
-			sawCancel.Store(true)
-			<-release
-			writePluginDisabled(w)
-		case <-release:
-			w.WriteHeader(http.StatusOK)
-		}
+		<-r.Context().Done()
+		sawCancel.Store(true)
+		writePluginDisabled(w)
 	})
 	f := newFixture(t, p)
 	if err := f.reg.Enable(f.ctx, "probe", "test", "go"); err != nil {
@@ -423,13 +417,16 @@ func TestDisableCancelsAdmittedRequestContext(t *testing.T) {
 	if err := f.reg.Disable(f.ctx, "probe", "test", "stop"); err != nil {
 		t.Fatal(err)
 	}
-	close(release)
-	code := <-done
-	if !sawCancel.Load() {
+	select {
+	case code := <-done:
+		if !sawCancel.Load() {
+			t.Fatal("handler returned without observing cancellation")
+		}
+		if code != http.StatusServiceUnavailable {
+			t.Fatalf("code %d", code)
+		}
+	case <-time.After(2 * time.Second):
 		t.Fatal("handler context was not cancelled")
-	}
-	if code != http.StatusServiceUnavailable && code != http.StatusOK {
-		t.Fatalf("code %d", code)
 	}
 }
 
