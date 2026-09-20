@@ -2580,9 +2580,9 @@ tr.bidrl-similar-row td:first-child {
   border-top-color: var(--border-soft);
 }
 
-.bidrl-finding > .cc-lot-thumb,
-.bidrl-finding > .cc-lot-thumb-link,
-.bidrl-finding > .cc-lot-thumb-empty {
+.bidrl-finding > .bidrl-lot-thumb,
+.bidrl-finding > .bidrl-lot-thumb-link,
+.bidrl-finding > .bidrl-lot-thumb-empty {
   width: 44px;
   height: 44px;
   object-fit: cover;
@@ -2595,14 +2595,14 @@ tr.bidrl-similar-row td:first-child {
   height: 44px;
 }
 
-.bidrl-finding > a .cc-lot-thumb {
+.bidrl-finding > a .bidrl-lot-thumb {
   width: 44px;
   height: 44px;
   object-fit: cover;
   border-radius: var(--radius-sm);
 }
 
-.bidrl-finding > .cc-lot-thumb-empty {
+.bidrl-finding > .bidrl-lot-thumb-empty {
   display: grid;
   place-items: center;
   background: var(--bg-sunken);
@@ -2845,15 +2845,15 @@ tr.bidrl-similar-row td:first-child {
     align-items: start;
   }
 
-  .bidrl-finding > .cc-lot-thumb,
-  .bidrl-finding > .cc-lot-thumb-link,
-  .bidrl-finding > .cc-lot-thumb-empty {
+  .bidrl-finding > .bidrl-lot-thumb,
+  .bidrl-finding > .bidrl-lot-thumb-link,
+  .bidrl-finding > .bidrl-lot-thumb-empty {
     width: 40px;
     height: 40px;
   }
 
   .bidrl-finding > a,
-  .bidrl-finding > a .cc-lot-thumb {
+  .bidrl-finding > a .bidrl-lot-thumb {
     width: 40px;
     height: 40px;
   }
@@ -2982,14 +2982,14 @@ tr.bidrl-similar-row td:first-child {
    BidRL workspace surfaces
    The shared design vocabulary — `.data-table`, `.table-action`, `.pill`,
    `.view-switch` — lives in `@cc/ui`. The BidRL-only vocabulary it once shared
-   a home with lives here, beside the markup that uses it: `.cc-lot-thumb`,
+   a home with lives here, beside the markup that uses it: `.bidrl-lot-thumb`,
    `.lots-toolbar`, `.lot-main`, `.lot-title`, and `.source-*`. This file
    carries only BidRL sizing and layout on top of the shared rules.
    ========================================================================== */
 
 /* --- BidRL-only vocabulary moved out of @cc/ui --------------------------- */
 
-.cc-lot-thumb {
+.bidrl-lot-thumb {
   display: block;
   width: 48px;
   height: 48px;

@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Hint,
+  mainScrollElement,
 } from "@cc/ui";
 
 
@@ -60,8 +61,8 @@ export function LotPhotos({ urls }: { urls: string[] }) {
 
   useEffect(() => {
     if (!expanded) return;
-    const scroller = document.querySelector(".cc-main");
-    if (!(scroller instanceof HTMLElement)) return;
+    const scroller = mainScrollElement();
+    if (!scroller) return;
     const prev = scroller.style.overflowY;
     scroller.style.overflowY = "hidden";
     return () => {

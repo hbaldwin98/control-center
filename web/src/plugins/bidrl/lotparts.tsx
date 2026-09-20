@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { Badge, Card, Dash, Hint, Input, Link, Stack, usePath } from "@cc/ui";
-import { cents, comparableHint, locationLabelOrEmpty, type Lot } from "./model";
+import { locationLabelOrEmpty, type Lot } from "./model";
 import { api } from "./api";
 import { BidrlLink } from "./chrome";
 
@@ -144,7 +144,7 @@ export function LotThumb({
     return (
       <div
         className={
-          className ? `${className}-empty` : "cc-lot-thumb bidrl-thumb-empty"
+          className ? `${className}-empty` : "bidrl-lot-thumb bidrl-thumb-empty"
         }
       >
         <Dash />
@@ -153,7 +153,7 @@ export function LotThumb({
   }
   return (
     <img
-      className={className ?? "cc-lot-thumb"}
+      className={className ?? "bidrl-lot-thumb"}
       src={lot.thumbUrl}
       alt=""
       width={className ? 220 : 48}
@@ -301,69 +301,6 @@ export function LotTitle({
           ) : null}
         </Hint>
       ) : null}
-    </>
-  );
-}
-
-/** The compact identity block used by the triage table. It avoids repeating a long
- * external-link label in every row while keeping lot code, model, and location visible. */
-export function LotTableTitle({ lot }: { lot: Lot }) {
-  const ident =
-    lot.identification && lot.identification !== lot.title
-      ? lot.identification
-      : "";
-  return (
-    <div className="bidrl-table-item">
-      <LotThumbLink lot={lot} className="bidrl-table-thumb" />
-      <div className="bidrl-table-item__body">
-        <div className="bidrl-table-item__eyebrow">
-          <span className="bidrl-table-item__lot-code">
-            {lot.lotCode ? `Lot ${lot.lotCode}` : "Lot"}
-          </span>
-          {lot.category ? <Badge>{lot.category}</Badge> : null}
-          <Badge tone={bucketTone(lot.bucket)}>
-            {lot.bucket.replace("_", " ")}
-          </Badge>
-        </div>
-        <div className="bidrl-table-item__title">
-          <LotLink lot={lot}>{lot.title || lot.id}</LotLink>
-          {lot.url ? (
-            <BidrlLink
-              href={lot.url}
-              ariaLabel={`Open ${lot.title || lot.id} on BidRL`}
-            >
-              BidRL ↗
-            </BidrlLink>
-          ) : null}
-        </div>
-        <div className="bidrl-table-item__meta">
-          {ident ? <span title={ident}>{ident}</span> : null}
-          <LotLocation lot={lot} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function LotComparable({ lot }: { lot: Lot }) {
-  if (lot.priceCents == null)
-    return (
-      <span className="bidrl-table-comp__value">
-        <Dash />
-      </span>
-    );
-  return (
-    <>
-      <span className="bidrl-table-comp__value">{cents(lot.priceCents)}</span>
-      <Hint>
-        {lot.sourceUrl ? (
-          <a href={lot.sourceUrl} target="_blank" rel="noreferrer">
-            {comparableHint(lot) || lot.sourceTitle || "source"}
-          </a>
-        ) : (
-          comparableHint(lot) || <Dash />
-        )}
-      </Hint>
     </>
   );
 }

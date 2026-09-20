@@ -2,7 +2,7 @@
  * The shared drawer. A surface owns the open state and what goes inside; the drawer
  * owns the scrim, the close button, Escape handling, and where focus starts.
  */
-import { act, type ReactNode } from "react";
+import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Drawer } from "./components";
@@ -75,5 +75,93 @@ describe("Drawer", () => {
     });
 
     expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns focus to the element that opened it", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" id="opener" onClick={() => setOpen(true)}>
+            Open
+          </button>
+          <Drawer open={open} onClose={() => setOpen(false)} label="Details">
+            <p>Body</p>
+          </Drawer>
+        </>
+      );
+    }
+
+    await render(<Harness />);
+    const opener = container.querySelector<HTMLButtonElement>("#opener");
+    opener?.focus();
+    expect(document.activeElement).toBe(opener);
+
+    await act(async () => {
+      opener?.click();
+    });
+    expect(document.activeElement).toBe(
+      container.querySelector(".cc-drawer__close"),
+    );
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(container.querySelector(".cc-drawer")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("locks document scroll while open and restores the prior value", async () => {
+    document.body.style.overflow = "scroll";
+    try {
+      await render(
+        <Drawer open onClose={() => {}} label="Details">
+          <p>Body</p>
+        </Drawer>,
+      );
+      expect(document.body.style.overflow).toBe("hidden");
+      expect(document.body.classList.contains("cc-drawer-lock")).toBe(true);
+
+      await render(
+        <Drawer open={false} onClose={() => {}} label="Details">
+          <p>Body</p>
+        </Drawer>,
+      );
+      expect(document.body.style.overflow).toBe("scroll");
+      expect(document.body.classList.contains("cc-drawer-lock")).toBe(false);
+    } finally {
+      document.body.style.overflow = "";
+    }
+  });
+
+  it("keeps Tab focus inside the panel", async () => {
+    await render(
+      <Drawer open onClose={() => {}} label="Details">
+        <button type="button" id="inner">
+          Inner
+        </button>
+      </Drawer>,
+    );
+    const close = container.querySelector<HTMLButtonElement>(".cc-drawer__close");
+    const inner = container.querySelector<HTMLButtonElement>("#inner");
+    expect(document.activeElement).toBe(close);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Tab",
+          shiftKey: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(document.activeElement).toBe(inner);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", cancelable: true }),
+      );
+    });
+    expect(document.activeElement).toBe(close);
   });
 });

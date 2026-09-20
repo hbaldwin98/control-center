@@ -198,7 +198,7 @@ export const LotCard = memo(function LotCard({ lot }: { lot: Lot }) {
   );
 });
 
-export function SimilarList({ lots }: { lots: Lot[] }) {
+function SimilarList({ lots }: { lots: Lot[] }) {
   return (
     <div className="bidrl-similar">
       {lots.map((lot) => (

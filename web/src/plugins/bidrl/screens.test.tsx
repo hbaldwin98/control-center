@@ -8,7 +8,7 @@
  */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bidrl from "./index";
 import { LotBrowser } from "./lots";
@@ -965,6 +965,43 @@ describe("bidrl screens", () => {
     expect(container.textContent).toContain("Lot 1002");
   });
 
+  it("expands similar lots in a grid group", async () => {
+    const lots = [
+      lot({
+        id: "1001",
+        lotCode: "1001",
+        title: "Matching item",
+        identification: "Shared model",
+        modelOrSku: "shared",
+      }),
+      lot({
+        id: "1002",
+        lotCode: "1002",
+        title: "Matching item",
+        identification: "Shared model",
+        modelOrSku: "shared",
+      }),
+    ];
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <LotBrowser lots={lots} empty="none" view="grid" />
+        </MemoryRouter>,
+      );
+    });
+    const expand = [
+      ...container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((button) => button.textContent === "1 similar");
+    expect(expand).toBeDefined();
+    await act(async () => {
+      expand?.click();
+      await Promise.resolve();
+    });
+    const similar = container.querySelector(".bidrl-similar");
+    expect(similar).not.toBeNull();
+    expect(similar?.textContent).toContain("1002");
+  });
+
   it("shares one countdown clock across a large lot grid", async () => {
     const timer = vi.spyOn(globalThis, "setInterval");
     const lots = Array.from({ length: 100 }, (_, index) =>
@@ -1328,6 +1365,87 @@ describe("bidrl lot drawer", () => {
     });
 
     expect(panel()).toBeFalsy();
+  });
+
+  it("closes on back after replacing within the drawer, keeping the list's filters", async () => {
+    const before = routes.get("/api/plugins/bidrl/auctions/42/index");
+    routes.set("/api/plugins/bidrl/auctions/42/index", {
+      title: "Test Warehouse",
+      lots: [
+        { id: "1001", lotCode: "A1", title: "Keurig coffee maker" },
+        { id: "2002", lotCode: "B2", title: "Coleman two-burner stove" },
+      ],
+      latestEventId: 1,
+    });
+    const searches: string[] = [];
+    function LocationProbe() {
+      searches.push(useLocation().search);
+      return null;
+    }
+    try {
+      await act(async () => {
+        root.render(
+          <MemoryRouter
+            initialEntries={["/bidrl/lots?filter=deals&bucket=priced"]}
+          >
+            <LocationProbe />
+            <Routes>
+              {bidrl.routes.map((r) => (
+                <Route key={r.path} path={r.path} element={r.element} />
+              ))}
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const link = container.querySelector<HTMLAnchorElement>(
+        'a[href="/bidrl/lot/1001"]',
+      );
+      expect(link).toBeTruthy();
+      await act(async () => {
+        link?.click();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(searches.at(-1)).toContain("lot=1001");
+
+      const next = [
+        ...container.querySelectorAll<HTMLAnchorElement>(".cc-drawer__panel a"),
+      ].find((a) => a.textContent === "Next lot →");
+      expect(next).toBeTruthy();
+      await act(async () => {
+        next?.click();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(searches.at(-1)).toContain("lot=2002");
+      expect(searches.at(-1)).not.toContain("lot=1001");
+
+      // Closing a pushed entry is a history back, not a query clear.
+      const close = container.querySelector<HTMLButtonElement>(
+        ".cc-drawer__close",
+      );
+      await act(async () => {
+        close?.click();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector(".cc-drawer__panel")).toBeNull();
+      expect(searches.at(-1)).toBe("?filter=deals&bucket=priced");
+      const preset = container.querySelector<HTMLSelectElement>(
+        'select[aria-label="Preset"]',
+      );
+      expect(preset?.value).toBe("deals");
+    } finally {
+      if (before) routes.set("/api/plugins/bidrl/auctions/42/index", before);
+    }
   });
 
   // A bookmarked or shared lot URL is a real page, not an overlay.

@@ -35,6 +35,8 @@ export { isValidPattern, matchesPattern } from "./pattern";
 
 export { Link, useNavigate, usePath, useQueryState, useRouteParams, useSearch } from "./nav";
 
+export { mainScrollElement } from "./scroll";
+
 export { useActivity, useEvents, useNow, useSnapshot, useStreamEpoch, useStreamStatus } from "./hooks";
 export type {
   Activity,

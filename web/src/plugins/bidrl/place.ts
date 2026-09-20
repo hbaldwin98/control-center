@@ -4,6 +4,7 @@ import {
   useRef,
 } from "react";
 import {
+  mainScrollElement,
   useSearch,
 } from "@cc/ui";
 
@@ -50,12 +51,6 @@ export function remembered(path: string): string {
   return `${path}${readPlaces()[path]?.search ?? ""}`;
 }
 
-/** The shell's scrolling element. Screens scroll inside it, not on the document. */
-function scroller(): HTMLElement | null {
-  const el = document.querySelector(".cc-main");
-  return el instanceof HTMLElement ? el : null;
-}
-
 /**
  * Records this screen's filters and scroll offset, and restores the offset once there is
  * something to scroll. `ready` is what says the rows are on the page: restoring before
@@ -80,12 +75,14 @@ export function usePlace(path: string, ready: boolean) {
     const top = readPlaces()[path]?.scroll ?? 0;
     if (top <= 0) return;
     // After paint, so the list has its full height and the offset is reachable.
-    const frame = requestAnimationFrame(() => scroller()?.scrollTo({ top }));
+    const frame = requestAnimationFrame(() =>
+      mainScrollElement()?.scrollTo({ top }),
+    );
     return () => cancelAnimationFrame(frame);
   }, [path, ready]);
 
   useEffect(() => {
-    const el = scroller();
+    const el = mainScrollElement();
     if (!el) return;
     // Coalesced to one write per frame: scrolling fires far faster than storage wants.
     let frame = 0;

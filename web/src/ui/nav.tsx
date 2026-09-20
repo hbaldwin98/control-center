@@ -15,6 +15,7 @@ import {
   useNavigate as useRouterNavigate,
   useParams,
   useSearchParams,
+  type To,
 } from "react-router-dom";
 
 type LinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & { to: string };
@@ -54,10 +55,8 @@ export function useSearch(): string {
  */
 export function useNavigate(): (to: string | number) => void {
   const navigate = useRouterNavigate();
-  return (to: string | number) => {
-    if (typeof to === "number") navigate(to);
-    else navigate(to);
-  };
+  // `navigate` is overloaded (path or delta); the union flattens that to one call.
+  return (to: string | number) => navigate(to as To);
 }
 
 /** Path parameters for the matched route, so a screen never parses the URL itself. */

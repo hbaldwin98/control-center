@@ -792,10 +792,15 @@ export function Sparkline({
 
 /* ---- overlays ---- */
 
+/** Everything the dialog will let a Tab reach, in document order. */
+const DRAWER_FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * A panel that slides in over the screen it was opened from. It owns the scrim, the
- * close button, Escape handling, and focus; the caller owns whether it is open. That
- * split lets a surface keep the open state in the URL without the drawer knowing how.
+ * close button, Escape handling, focus containment and restoration, and the background
+ * scroll lock; the caller owns whether it is open. That split lets a surface keep the
+ * open state in the URL without the drawer knowing how.
  */
 export function Drawer({
     open,
@@ -813,15 +818,77 @@ export function Drawer({
     children: ReactNode;
 }) {
     const closeRef = useRef<HTMLButtonElement>(null);
+    const panelRef = useRef<HTMLElement>(null);
+    const previouslyFocused = useRef<HTMLElement | null>(null);
 
+    // Where focus was before the drawer opened, put back when it closes. The drawer
+    // owns the open state, so an opener can unmount while it is open; only restore to
+    // an element still in the document.
     useEffect(() => {
-        if (open) closeRef.current?.focus();
+        if (!open) return;
+        const opener = document.activeElement;
+        previouslyFocused.current =
+            opener instanceof HTMLElement && opener !== document.body
+                ? opener
+                : null;
+        closeRef.current?.focus();
+        return () => {
+            const target = previouslyFocused.current;
+            previouslyFocused.current = null;
+            if (target && document.contains(target)) target.focus();
+        };
+    }, [open]);
+
+    // A drawer over a scrollable screen must not let the screen scroll behind it. The
+    // previous inline value is restored, not cleared, so an overflow set by something
+    // else survives a drawer opening and closing on top of it.
+    useEffect(() => {
+        if (!open) return;
+        const body = document.body;
+        const root = document.documentElement;
+        const previousBody = body.style.overflow;
+        const previousRoot = root.style.overflow;
+        const alreadyLocked = body.classList.contains("cc-drawer-lock");
+        body.style.overflow = "hidden";
+        root.style.overflow = "hidden";
+        body.classList.add("cc-drawer-lock");
+        return () => {
+            body.style.overflow = previousBody;
+            root.style.overflow = previousRoot;
+            if (!alreadyLocked) body.classList.remove("cc-drawer-lock");
+        };
     }, [open]);
 
     useEffect(() => {
         if (!open) return;
         const onKey = (event: KeyboardEvent) => {
-            if (event.key === "Escape") onClose();
+            if (event.key === "Escape") {
+                onClose();
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const panel = panelRef.current;
+            if (!panel) return;
+            const focusable = Array.from(
+                panel.querySelectorAll<HTMLElement>(DRAWER_FOCUSABLE),
+            );
+            const first = focusable[0];
+            const last = focusable.at(-1);
+            if (!first || !last) {
+                event.preventDefault();
+                return;
+            }
+            const active = document.activeElement;
+            if (!panel.contains(active)) {
+                event.preventDefault();
+                first.focus();
+            } else if (event.shiftKey && active === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
+            }
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
@@ -833,6 +900,7 @@ export function Drawer({
         <div className="cc-drawer">
             <div className="cc-drawer__scrim" onClick={onClose} />
             <aside
+                ref={panelRef}
                 className="cc-drawer__panel"
                 role="dialog"
                 aria-modal="true"

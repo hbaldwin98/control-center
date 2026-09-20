@@ -2517,6 +2517,12 @@ h3 {
   justify-content: flex-end;
 }
 
+/* The drawer is a fixed layer over the shell; freeze the shell's own scroller so the
+   list behind it cannot move. */
+body.cc-drawer-lock .cc-main {
+  overflow-y: hidden;
+}
+
 .cc-drawer__scrim {
   position: absolute;
   inset: 0;

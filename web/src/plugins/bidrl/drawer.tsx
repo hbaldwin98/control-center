@@ -7,7 +7,7 @@
 import { useRef, type ReactNode } from "react";
 import { Drawer, useNavigate, useQueryState } from "@cc/ui";
 import { LotDrawerContext } from "./lotparts";
-import { LotDetail, useLotDetail } from "./screens/lot";
+import { LotDetail, useLotDetail } from "./lotdetail";
 
 export function LotDrawerHost({ children }: { children: ReactNode }) {
   const [id, setLot] = useQueryState("lot");

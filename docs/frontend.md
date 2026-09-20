@@ -324,6 +324,12 @@ what "loading" looks like:
 It falls back to `Loading` and a danger `Callout` on its own. Use `Loading`, `EmptyState`,
 and `Callout` directly only when a screen merges several sources, as `Events` does.
 
+**Overlays** — `Drawer` is a panel that slides in over the screen it was opened from:
+fixed to the right on wide screens, full width on a phone. It owns the scrim, the close
+button, Escape handling, focus restoration, and the background scroll lock; the caller owns
+whether it is open, which lets a surface keep that in the URL. BIDRL uses it for its `?lot=`
+side drawer, opening a lot over the list without losing the list's filters or scroll.
+
 **Text** — `Hint` is muted secondary text and `LogBlock` is a monospaced log or error
 body. `cc-field__hint` belongs to `Field` and is not a general muted-text class.
 
