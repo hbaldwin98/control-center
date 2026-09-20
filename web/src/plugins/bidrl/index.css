@@ -2385,6 +2385,17 @@ tr.bidrl-similar-row td:first-child {
     background: rgb(255 255 255 / 2%);
   }
 
+  /* The row is one grid block here, so its hover highlight belongs on the row;
+     highlighting each `td` paints separate rectangles across the grid gaps. */
+  .bidrl-lot-table--workspace.data-table tbody tr:hover,
+  .bidrl-lot-table--workspace.data-table tbody tr.bidrl-similar-row:hover {
+    background: rgb(94 106 210 / 7%);
+  }
+
+  .bidrl-lot-table--workspace.data-table tbody tr:hover td {
+    background: transparent;
+  }
+
   .bidrl-lot-table--workspace.data-table tbody td {
     height: auto;
     padding: 0;
