@@ -224,7 +224,23 @@ func electricAgreements(body []byte) ([]map[string]any, error) {
 			}
 		}
 	}
-	return result, nil
+	return preferredAgreements(result), nil
+}
+
+// preferredAgreements keeps only the DG rate-schedule agreements when the
+// account lists one, because the DE agreement alongside it duplicates usage.
+func preferredAgreements(agreements []map[string]any) []map[string]any {
+	var dg []map[string]any
+	for _, agreement := range agreements {
+		schedule, _ := agreement["saRateSchedule"].(map[string]any)
+		if strings.EqualFold(strings.TrimSpace(stringValue(schedule, "rateSchedule")), "DG") {
+			dg = append(dg, agreement)
+		}
+	}
+	if len(dg) == 0 {
+		return agreements
+	}
+	return dg
 }
 
 func values(value any) []any {
